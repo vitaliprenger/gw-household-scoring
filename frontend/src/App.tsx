@@ -8,6 +8,21 @@ import {
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, uploadHouseholds, login, getRanking } from './api';
 import { Household, ScoringConfig, RankingGroup } from './types';
 
+const CONFIG_LABELS: Record<string, string> = {
+  weight_diversity:          'Gewicht: Durchmischung (§3 Abs. 1)',
+  weight_membership:         'Gewicht: Dauer der Mitgliedschaft (§3 Abs. 3)',
+  weight_engagement:         'Gewicht: Engagement für die Genossenschaft (§3 Abs. 5)',
+  weight_occupancy:          'Gewicht: Wohnraumausnutzung (§3 Abs. 2)',
+  target_age_child:          'Zielwert Altersgruppe: Kind (0–18)',
+  target_age_young_adult:    'Zielwert Altersgruppe: Junge Erwachsene (19–30)',
+  target_age_adult:          'Zielwert Altersgruppe: Erwachsene (31–60)',
+  target_age_senior:         'Zielwert Altersgruppe: Senioren (60+)',
+  target_gender_f:           'Zielwert Geschlecht: weiblich',
+  target_gender_m:           'Zielwert Geschlecht: männlich',
+  bonus_special_needs:       'Bonus: Besondere Lebenslagen / schwierige finanzielle Situation (§3 Abs. 1f)',
+  bonus_cultural_background: 'Bonus: Kulturelle Vielfalt (§3 Abs. 1c)',
+};
+
 function App() {
   const [tabValue, setTabValue] = useState(0);
   const [households, setHouseholds] = useState<Household[]>([]);
@@ -288,32 +303,47 @@ function App() {
           </TableContainer>
         )}
 
-        {tabValue === 2 && (
-          <Grid container spacing={2}>
-            {configs.map((conf) => (
-              <Grid item xs={12} sm={6} md={4} key={conf.key}>
-                <Card>
-                  <CardContent>
-                    <Typography color="textSecondary" gutterBottom>
-                      {conf.key}
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      type="number"
-                      value={conf.value}
-                      onChange={(e) => handleConfigChange(conf.key, e.target.value)}
-                    />
-                  </CardContent>
-                </Card>
+        {tabValue === 2 && (() => {
+          const weights = configs.filter(c => c.key.startsWith('weight_'));
+          const targets = configs.filter(c => c.key.startsWith('target_'));
+          const bonuses = configs.filter(c => !c.key.startsWith('weight_') && !c.key.startsWith('target_'));
+
+          const renderConfigGroup = (title: string, items: ScoringConfig[]) => (
+            <Box sx={{ mb: 4 }}>
+              <Typography variant="h6" sx={{ mb: 2 }}>{title}</Typography>
+              <Grid container spacing={2}>
+                {items.map((conf) => (
+                  <Grid item xs={12} sm={6} md={4} key={conf.key}>
+                    <Card>
+                      <CardContent>
+                        <Typography color="textSecondary" gutterBottom>
+                          {CONFIG_LABELS[conf.key] || conf.description || conf.key}
+                        </Typography>
+                        <TextField
+                          fullWidth
+                          type="number"
+                          value={conf.value}
+                          onChange={(e) => handleConfigChange(conf.key, e.target.value)}
+                        />
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))}
               </Grid>
-            ))}
-            <Grid item xs={12}>
+            </Box>
+          );
+
+          return (
+            <Box>
+              {renderConfigGroup('Gewichte', weights)}
+              {renderConfigGroup('Zielwerte', targets)}
+              {bonuses.length > 0 && renderConfigGroup('Bonuspunkte', bonuses)}
               <Button variant="contained" color="primary" onClick={handleSaveConfig}>
                 Konfiguration speichern
               </Button>
-            </Grid>
-          </Grid>
-        )}
+            </Box>
+          );
+        })()}
 
         {tabValue === 3 && (
           <Box>
