@@ -9,18 +9,36 @@ import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, 
 import { Household, ScoringConfig, RankingGroup } from './types';
 
 const CONFIG_LABELS: Record<string, string> = {
-  weight_diversity:          'Gewicht: Durchmischung (§3 Abs. 1)',
-  weight_membership:         'Gewicht: Dauer der Mitgliedschaft (§3 Abs. 3)',
-  weight_engagement:         'Gewicht: Engagement für die Genossenschaft (§3 Abs. 5)',
-  weight_occupancy:          'Gewicht: Wohnraumausnutzung (§3 Abs. 2)',
-  target_age_child:          'Zielwert Altersgruppe: Kind (0–18)',
-  target_age_young_adult:    'Zielwert Altersgruppe: Junge Erwachsene (19–30)',
-  target_age_adult:          'Zielwert Altersgruppe: Erwachsene (31–60)',
-  target_age_senior:         'Zielwert Altersgruppe: Senioren (60+)',
-  target_gender_f:           'Zielwert Geschlecht: weiblich',
-  target_gender_m:           'Zielwert Geschlecht: männlich',
-  bonus_special_needs:       'Bonus: Besondere Lebenslagen / schwierige finanzielle Situation (§3 Abs. 1f)',
-  bonus_cultural_background: 'Bonus: Kulturelle Vielfalt (§3 Abs. 1c)',
+  weight_diversity_age:            'Altersstruktur',
+  weight_diversity_gender:         'Geschlechterverhältnis',
+  weight_diversity_cultural:       'Kulturelle Vielfalt',
+  weight_diversity_occupation:     'Berufliche Tätigkeiten',
+  weight_diversity_education:      'Bildungsabschlüsse',
+  weight_diversity_special_needs:  'Besondere Lebenslagen',
+  weight_membership:               'Mitgliedsdauer',
+  weight_engagement:               'Engagement',
+  weight_occupancy:                'Wohnraumausnutzung',
+  target_occupation_1:             '1 – Organisation, Verwaltung, Recht',
+  target_occupation_2:             '2 – Pädagogik, Psychologie, Soziales',
+  target_occupation_3:             '3 – Geistes-/Gesellschafts-/Wirtschaftswiss.',
+  target_occupation_4:             '4 – Handwerk',
+  target_occupation_5:             '5 – Dienstleistung',
+  target_occupation_6:             '6 – Kunst und Kultur, Unterhaltung',
+  target_occupation_7:             '7 – Landwirtschaft, Gartenbau, Tierpflege',
+  target_occupation_8:             '8 – Architektur, Bauplanung',
+  target_occupation_9:             '9 – Naturwissenschaft, Geographie',
+  target_occupation_10:            '10 – Verkehr, Logistik, Schutz, Sicherheit',
+  target_age_20_29:                '20 bis 29',
+  target_age_30_39:                '30 bis 39',
+  target_age_40_49:                '40 bis 49',
+  target_age_50_59:                '50 bis 59',
+  target_age_60_69:                '60 bis 69',
+  target_age_70_79:                '70 bis 79',
+  target_age_80_89:                '80 bis 89',
+  target_age_over_89:              'über 89',
+  target_gender_f:                 'Geschlecht: weiblich',
+  target_gender_m:                 'Geschlecht: männlich',
+  target_gender_d:                 'Geschlecht: divers',
 };
 
 function App() {
@@ -304,8 +322,21 @@ function App() {
         )}
 
         {tabValue === 2 && (() => {
-          const weights = configs.filter(c => c.key.startsWith('weight_'));
-          const targets = configs.filter(c => c.key.startsWith('target_'));
+          const diversityWeights = configs.filter(c => c.key.startsWith('weight_diversity_'));
+          const otherWeights = configs.filter(c => c.key.startsWith('weight_') && !c.key.startsWith('weight_diversity_'));
+          const naturalSort = (a: ScoringConfig, b: ScoringConfig) =>
+            a.key.localeCompare(b.key, undefined, { numeric: true });
+          const targetAge = configs.filter(c => c.key.startsWith('target_age_')).sort(naturalSort);
+          const targetGender = configs.filter(c => c.key.startsWith('target_gender_')).sort(naturalSort);
+          const targetOccupation = configs.filter(c => c.key.startsWith('target_occupation_')).sort(naturalSort);
+          const targetEducation = configs.filter(c => c.key.startsWith('target_education_')).sort(naturalSort);
+          const targetOther = configs.filter(c =>
+            c.key.startsWith('target_') &&
+            !c.key.startsWith('target_age_') &&
+            !c.key.startsWith('target_gender_') &&
+            !c.key.startsWith('target_occupation_') &&
+            !c.key.startsWith('target_education_')
+          );
           const bonuses = configs.filter(c => !c.key.startsWith('weight_') && !c.key.startsWith('target_'));
 
           const renderConfigGroup = (title: string, items: ScoringConfig[]) => (
@@ -335,8 +366,15 @@ function App() {
 
           return (
             <Box>
-              {renderConfigGroup('Gewichte', weights)}
-              {renderConfigGroup('Zielwerte', targets)}
+              <Typography variant="h5" sx={{ mb: 2 }}>Gewichte</Typography>
+              {renderConfigGroup('Durchmischung', diversityWeights)}
+              {renderConfigGroup('Weitere Gewichte', otherWeights)}
+              <Typography variant="h5" sx={{ mb: 2, mt: 4 }}>Zielwerte</Typography>
+              {targetAge.length > 0 && renderConfigGroup('Altersgruppen', targetAge)}
+              {targetGender.length > 0 && renderConfigGroup('Geschlecht', targetGender)}
+              {targetOccupation.length > 0 && renderConfigGroup('Haupttätigkeit', targetOccupation)}
+              {targetEducation.length > 0 && renderConfigGroup('Bildungsabschlüsse', targetEducation)}
+              {targetOther.length > 0 && renderConfigGroup('Sonstige Zielwerte', targetOther)}
               {bonuses.length > 0 && renderConfigGroup('Bonuspunkte', bonuses)}
               <Button variant="contained" color="primary" onClick={handleSaveConfig}>
                 Konfiguration speichern

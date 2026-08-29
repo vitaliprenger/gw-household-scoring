@@ -3,33 +3,67 @@ from . import models
 import pandas as pd
 import numpy as np
 
+AGE_GROUPS = ["20_29", "30_39", "40_49", "50_59", "60_69", "70_79", "80_89", "over_89"]
+
+OCCUPATION_GROUPS = [str(i) for i in range(1, 11)]
+
+OCCUPATION_LABELS = {
+    "1": "Organisation, Verwaltung, Recht",
+    "2": "Pädagogik, Psychologie, Soziales",
+    "3": "Geistes-, Gesellschafts-, Wirtschaftswissenschaften",
+    "4": "Handwerk",
+    "5": "Dienstleistung",
+    "6": "Kunst und Kultur, Unterhaltung",
+    "7": "Landwirtschaft, Gartenbau, Tierpflege",
+    "8": "Architektur, Bauplanung",
+    "9": "Naturwissenschaft, Geographie",
+    "10": "Verkehr, Logistik, Schutz, Sicherheit",
+}
+
 DEFAULT_CONFIG = {
-    "weight_diversity":        {"value": 40.0, "description": "Gewicht: Durchmischung (§3 Abs. 1)"},
-    "weight_membership":       {"value": 20.0, "description": "Gewicht: Dauer der Mitgliedschaft (§3 Abs. 3)"},
-    "weight_engagement":       {"value": 20.0, "description": "Gewicht: Engagement für die Genossenschaft (§3 Abs. 5)"},
-    "weight_occupancy":        {"value": 20.0, "description": "Gewicht: Wohnraumausnutzung (§3 Abs. 2)"},
+    "weight_diversity_age":            {"value": 2.0, "description": "Gewicht: Durchmischung – Altersstruktur (§3 Abs. 1a)"},
+    "weight_diversity_gender":         {"value": 2.0, "description": "Gewicht: Durchmischung – Geschlechterverhältnis (§3 Abs. 1b)"},
+    "weight_diversity_cultural":       {"value": 1.0, "description": "Gewicht: Durchmischung – Kulturelle Vielfalt (§3 Abs. 1c)"},
+    "weight_diversity_occupation":     {"value": 1.0, "description": "Gewicht: Durchmischung – Berufliche Tätigkeiten (§3 Abs. 1d)"},
+    "weight_diversity_education":      {"value": 1.0, "description": "Gewicht: Durchmischung – Bildungsabschlüsse (§3 Abs. 1e)"},
+    "weight_diversity_special_needs":  {"value": 1.0, "description": "Gewicht: Durchmischung – Besondere Lebenslagen (§3 Abs. 1f)"},
+    "weight_membership":       {"value": 2.0, "description": "Gewicht: Dauer der Mitgliedschaft (§3 Abs. 3)"},
+    "weight_engagement":       {"value": 5.0, "description": "Gewicht: Engagement für die Genossenschaft (§3 Abs. 5)"},
+    "weight_occupancy":        {"value": 2.0, "description": "Gewicht: Wohnraumausnutzung (§3 Abs. 2)"},
 
-    "target_age_child":        {"value": 0.20, "description": "Zielwert Altersgruppe: Kind (0–18)"},
-    "target_age_young_adult":  {"value": 0.10, "description": "Zielwert Altersgruppe: Junge Erwachsene (19–30)"},
-    "target_age_adult":        {"value": 0.40, "description": "Zielwert Altersgruppe: Erwachsene (31–60)"},
-    "target_age_senior":       {"value": 0.30, "description": "Zielwert Altersgruppe: Senioren (60+)"},
+    **{f"target_occupation_{k}": {"value": 0.10, "description": f"Zielwert Beruf: {v}"} for k, v in OCCUPATION_LABELS.items()},
 
-    "target_gender_f":         {"value": 0.50, "description": "Zielwert Geschlecht: weiblich"},
-    "target_gender_m":         {"value": 0.50, "description": "Zielwert Geschlecht: männlich"},
+    "target_age_20_29":   {"value": 0.24350445, "description": "Zielwert Altersgruppe: 20 bis 29"},
+    "target_age_30_39":   {"value": 0.17529197, "description": "Zielwert Altersgruppe: 30 bis 39"},
+    "target_age_40_49":   {"value": 0.14465144, "description": "Zielwert Altersgruppe: 40 bis 49"},
+    "target_age_50_59":   {"value": 0.16662092, "description": "Zielwert Altersgruppe: 50 bis 59"},
+    "target_age_60_69":   {"value": 0.11703398, "description": "Zielwert Altersgruppe: 60 bis 69"},
+    "target_age_70_79":   {"value": 0.08753001, "description": "Zielwert Altersgruppe: 70 bis 79"},
+    "target_age_80_89":   {"value": 0.05380455, "description": "Zielwert Altersgruppe: 80 bis 89"},
+    "target_age_over_89": {"value": 0.01156268, "description": "Zielwert Altersgruppe: über 89"},
 
-    "bonus_special_needs":     {"value": 10.0, "description": "Bonus: Besondere Lebenslagen / schwierige finanzielle Situation (§3 Abs. 1f)"},
-    "bonus_cultural_background": {"value": 5.0, "description": "Bonus: Kulturelle Vielfalt (§3 Abs. 1c)"},
+    "target_gender_f":         {"value": 0.5199, "description": "Zielwert Geschlecht: weiblich"},
+    "target_gender_m":         {"value": 0.4799, "description": "Zielwert Geschlecht: männlich"},
+    "target_gender_d":         {"value": 0.0002, "description": "Zielwert Geschlecht: divers"},
 }
 
 def initialize_config(db: Session):
-    """Seeds the database with default scoring configuration if empty."""
-    if db.query(models.ScoringConfig).first() is None:
-        for key, entry in DEFAULT_CONFIG.items():
-            db.add(models.ScoringConfig(
-                key=key,
-                value=entry["value"],
-                description=entry["description"],
-            ))
+    """Seeds missing config keys and removes obsolete ones."""
+    existing_keys = {c.key for c in db.query(models.ScoringConfig).all()}
+    default_keys = set(DEFAULT_CONFIG.keys())
+
+    for key in default_keys - existing_keys:
+        entry = DEFAULT_CONFIG[key]
+        db.add(models.ScoringConfig(
+            key=key,
+            value=entry["value"],
+            description=entry["description"],
+        ))
+
+    for key in existing_keys - default_keys:
+        db.query(models.ScoringConfig).filter(models.ScoringConfig.key == key).delete()
+
+    if default_keys - existing_keys or existing_keys - default_keys:
         db.commit()
 
 def get_config_dict(db: Session):
@@ -38,76 +72,83 @@ def get_config_dict(db: Session):
     return {c.key: c.value for c in configs}
 
 def calculate_age_group(age):
-    if age < 18: return "child"
-    if age < 30: return "young_adult"
-    if age < 60: return "adult"
-    return "senior"
+    if age < 20: return "under_20"
+    if age < 30: return "20_29"
+    if age < 40: return "30_39"
+    if age < 50: return "40_49"
+    if age < 60: return "50_59"
+    if age < 70: return "60_69"
+    if age < 80: return "70_79"
+    if age < 90: return "80_89"
+    return "over_89"
 
-def calculate_diversity_score(household: models.Household, current_stats: dict, config: dict) -> float:
-    """
-    Calculates diversity score based on how much the household helps achieve targets.
-    Simplified logic: If a group is underrepresented (Current < Target), give points.
-    """
-    score = 0.0
+def calculate_diversity_subscores(household: models.Household, current_stats: dict, config: dict) -> dict:
+    """Returns individual sub-scores per diversity dimension (§3 Abs. 1a–f)."""
+    subscores = {
+        "diversity_age": 0.0,
+        "diversity_gender": 0.0,
+        "diversity_cultural": 0.0,
+        "diversity_occupation": 0.0,
+        "diversity_education": 0.0,
+        "diversity_special_needs": 0.0,
+    }
+
     people = household.people
     if not people:
-        return 0.0
+        return subscores
 
-    # Analyze household composition
-    hh_stats = {
-        "age_child": 0, "age_young_adult": 0, "age_adult": 0, "age_senior": 0,
-        "gender_f": 0, "gender_m": 0,
-        "special_needs": 0, "cultural_background": 0
-    }
-    
+    hh_stats = {f"age_{g}": 0 for g in ["under_20"] + AGE_GROUPS}
+    hh_stats.update({f"occupation_{g}": 0 for g in OCCUPATION_GROUPS})
+    hh_stats.update({"gender_f": 0, "gender_m": 0, "gender_d": 0, "special_needs": 0, "cultural_background": 0})
+
     for p in people:
-        # Age
         age = (pd.Timestamp.now() - pd.to_datetime(p.birth_date)).days / 365.25
-        age_group = calculate_age_group(age)
-        hh_stats[f"age_{age_group}"] += 1
-        
-        # Gender
+        hh_stats[f"age_{calculate_age_group(age)}"] += 1
+
         if p.gender.lower() in ['f', 'w', 'female', 'weiblich']:
             hh_stats["gender_f"] += 1
         elif p.gender.lower() in ['m', 'male', 'männlich']:
             hh_stats["gender_m"] += 1
-            
-        # Special Needs
+        elif p.gender.lower() in ['d', 'divers', 'diverse', 'non-binary']:
+            hh_stats["gender_d"] += 1
+
+        occ = (p.occupation_type or "").strip()
+        if occ in OCCUPATION_GROUPS:
+            hh_stats[f"occupation_{occ}"] += 1
+
         if p.special_needs:
             hh_stats["special_needs"] += 1
-            
-        # Cultural Background (check if not empty)
         if p.cultural_background:
             hh_stats["cultural_background"] += 1
 
-    # Calculate Score based on Gaps
-    # 1. Age Targets
-    for group in ["child", "young_adult", "adult", "senior"]:
-        target = config.get(f"target_age_{group}", 0.25)
+    for group in AGE_GROUPS:
+        target = config.get(f"target_age_{group}", 0.0)
         current = current_stats.get(f"ratio_age_{group}", 0.0)
-        
-        # If current is below target, we award points for bringing people of this group
         if current < target and hh_stats[f"age_{group}"] > 0:
             gap = target - current
-            # Points = Gap * Count * Factor
-            score += gap * hh_stats[f"age_{group}"] * 10 # Arbitrary multiplier
-            
-    # 2. Gender Targets
-    for g in ["f", "m"]:
-        target = config.get(f"target_gender_{g}", 0.5)
+            subscores["diversity_age"] += gap * hh_stats[f"age_{group}"] * 10
+
+    for group in OCCUPATION_GROUPS:
+        target = config.get(f"target_occupation_{group}", 0.0)
+        current = current_stats.get(f"ratio_occupation_{group}", 0.0)
+        if current < target and hh_stats[f"occupation_{group}"] > 0:
+            gap = target - current
+            subscores["diversity_occupation"] += gap * hh_stats[f"occupation_{group}"] * 10
+
+    for g in ["f", "m", "d"]:
+        target = config.get(f"target_gender_{g}", 0.0)
         current = current_stats.get(f"ratio_gender_{g}", 0.0)
         if current < target and hh_stats[f"gender_{g}"] > 0:
             gap = target - current
-            score += gap * hh_stats[f"gender_{g}"] * 10
+            subscores["diversity_gender"] += gap * hh_stats[f"gender_{g}"] * 10
 
-    # 3. Special Needs & Cultural (Fixed Bonuses)
-    if hh_stats["special_needs"] > 0:
-        score += config.get("bonus_special_needs", 0.0)
-    
     if hh_stats["cultural_background"] > 0:
-        score += config.get("bonus_cultural_background", 0.0)
+        subscores["diversity_cultural"] = 1.0
 
-    return score
+    if hh_stats["special_needs"] > 0:
+        subscores["diversity_special_needs"] = 1.0
+
+    return subscores
 
 def calculate_membership_score(household: models.Household) -> float:
     if not household.member_since:
@@ -128,16 +169,14 @@ def calculate_resident_stats(db: Session) -> dict:
     total = len(people)
 
     if total == 0:
-        return {
-            "ratio_age_child": 0.0, "ratio_age_young_adult": 0.0,
-            "ratio_age_adult": 0.0, "ratio_age_senior": 0.0,
-            "ratio_gender_f": 0.0, "ratio_gender_m": 0.0,
-        }
+        result = {f"ratio_age_{g}": 0.0 for g in AGE_GROUPS}
+        result.update({f"ratio_occupation_{g}": 0.0 for g in OCCUPATION_GROUPS})
+        result.update({"ratio_gender_f": 0.0, "ratio_gender_m": 0.0, "ratio_gender_d": 0.0})
+        return result
 
-    counts = {
-        "age_child": 0, "age_young_adult": 0, "age_adult": 0, "age_senior": 0,
-        "gender_f": 0, "gender_m": 0,
-    }
+    counts = {f"age_{g}": 0 for g in ["under_20"] + AGE_GROUPS}
+    counts.update({f"occupation_{g}": 0 for g in OCCUPATION_GROUPS})
+    counts.update({"gender_f": 0, "gender_m": 0, "gender_d": 0})
 
     for p in people:
         age = (pd.Timestamp.now() - pd.to_datetime(p.birth_date)).days / 365.25
@@ -147,6 +186,12 @@ def calculate_resident_stats(db: Session) -> dict:
             counts["gender_f"] += 1
         elif p.gender.lower() in ['m', 'male', 'männlich']:
             counts["gender_m"] += 1
+        elif p.gender.lower() in ['d', 'divers', 'diverse', 'non-binary']:
+            counts["gender_d"] += 1
+
+        occ = (p.occupation_type or "").strip()
+        if occ in OCCUPATION_GROUPS:
+            counts[f"occupation_{occ}"] += 1
 
     return {f"ratio_{k}": v / total for k, v in counts.items()}
 
@@ -159,26 +204,20 @@ def run_scoring(db: Session):
 
     current_stats = calculate_resident_stats(db)
 
-    # 2. Calculate Score per Household
     for h in households:
-        # Diversity
-        div_score = calculate_diversity_score(h, current_stats, config)
-        
-        # Membership
+        subscores = calculate_diversity_subscores(h, current_stats, config)
+        div_total = sum(
+            subscores[dim] * config.get(f"weight_{dim}", 1.0)
+            for dim in subscores
+        )
+
         mem_score = calculate_membership_score(h)
-        
-        # Engagement
         eng_score = calculate_engagement_score(h)
-        
-        # Weighted Sum
-        w_div = config.get("weight_diversity", 1.0)
+
         w_mem = config.get("weight_membership", 1.0)
         w_eng = config.get("weight_engagement", 1.0)
-        
-        # Normalize weights if needed, or just sum up
-        total = (div_score * w_div) + (mem_score * w_mem) + (eng_score * w_eng)
-        
-        h.total_score = total
+
+        h.total_score = div_total + (mem_score * w_mem) + (eng_score * w_eng)
     
     db.commit()
     return {"message": "Bewertung für alle Haushalte aktualisiert."}
