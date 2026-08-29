@@ -3,33 +3,33 @@ from . import models
 import pandas as pd
 import numpy as np
 
-# Default Configuration
 DEFAULT_CONFIG = {
-    # Weights (0-100 range for example)
-    "weight_diversity": 40.0,
-    "weight_membership": 20.0,
-    "weight_engagement": 20.0,
-    "weight_occupancy": 20.0,
-    
-    # Targets (Percentages 0.0 - 1.0)
-    "target_age_child": 0.20, # 0-18
-    "target_age_young_adult": 0.10, # 19-30
-    "target_age_adult": 0.40, # 31-60
-    "target_age_senior": 0.30, # 60+
-    
-    "target_gender_f": 0.50,
-    "target_gender_m": 0.50,
-    
-    # Simple bonus points for binary criteria
-    "bonus_special_needs": 10.0,
-    "bonus_cultural_background": 5.0
+    "weight_diversity":        {"value": 40.0, "description": "Gewicht: Durchmischung (§3 Abs. 1)"},
+    "weight_membership":       {"value": 20.0, "description": "Gewicht: Dauer der Mitgliedschaft (§3 Abs. 3)"},
+    "weight_engagement":       {"value": 20.0, "description": "Gewicht: Engagement für die Genossenschaft (§3 Abs. 5)"},
+    "weight_occupancy":        {"value": 20.0, "description": "Gewicht: Wohnraumausnutzung (§3 Abs. 2)"},
+
+    "target_age_child":        {"value": 0.20, "description": "Zielwert Altersgruppe: Kind (0–18)"},
+    "target_age_young_adult":  {"value": 0.10, "description": "Zielwert Altersgruppe: Junge Erwachsene (19–30)"},
+    "target_age_adult":        {"value": 0.40, "description": "Zielwert Altersgruppe: Erwachsene (31–60)"},
+    "target_age_senior":       {"value": 0.30, "description": "Zielwert Altersgruppe: Senioren (60+)"},
+
+    "target_gender_f":         {"value": 0.50, "description": "Zielwert Geschlecht: weiblich"},
+    "target_gender_m":         {"value": 0.50, "description": "Zielwert Geschlecht: männlich"},
+
+    "bonus_special_needs":     {"value": 10.0, "description": "Bonus: Besondere Lebenslagen / schwierige finanzielle Situation (§3 Abs. 1f)"},
+    "bonus_cultural_background": {"value": 5.0, "description": "Bonus: Kulturelle Vielfalt (§3 Abs. 1c)"},
 }
 
 def initialize_config(db: Session):
     """Seeds the database with default scoring configuration if empty."""
     if db.query(models.ScoringConfig).first() is None:
-        for key, value in DEFAULT_CONFIG.items():
-            db.add(models.ScoringConfig(key=key, value=value))
+        for key, entry in DEFAULT_CONFIG.items():
+            db.add(models.ScoringConfig(
+                key=key,
+                value=entry["value"],
+                description=entry["description"],
+            ))
         db.commit()
 
 def get_config_dict(db: Session):
