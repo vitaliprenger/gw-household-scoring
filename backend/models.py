@@ -7,17 +7,31 @@ class Household(Base):
     __tablename__ = "households"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)  # e.g., "Family Smith"
+    name = Column(String, index=True)
     application_date = Column(DateTime, default=datetime.utcnow)
-    
+
     # Scoring specific fields
-    member_since = Column(DateTime, nullable=True) # For membership duration
-    engagement_score = Column(Float, default=0.0) # 0-1 score for engagement
+    member_since = Column(DateTime, nullable=True)
+    engagement_score = Column(Float, default=0.0)
+    cultural_diversity_score = Column(Float, default=0.0)
+    special_needs_score = Column(Float, default=0.0)
     is_resident = Column(Boolean, default=False)
 
     # Calculated Score (cached)
     total_score = Column(Float, default=0.0)
-    
+
+    # Import fields
+    wbs_status = Column(String, nullable=True)
+    pets_count = Column(Integer, default=0)
+    pets_info = Column(String, nullable=True)
+    desired_apartment_size = Column(String, nullable=True)
+    desired_apartment_type = Column(String, nullable=True)
+    wheelchair_accessible = Column(Boolean, default=False)
+    financial_status = Column(String, nullable=True)
+    import_source = Column(String, nullable=True)
+    import_timestamp = Column(DateTime, nullable=True)
+    household_member_count = Column(Integer, nullable=True)
+
     # Relationships
     people = relationship("Person", back_populates="household")
     applications = relationship("Application", back_populates="household")
@@ -26,17 +40,18 @@ class Person(Base):
     __tablename__ = "people"
 
     id = Column(Integer, primary_key=True, index=True)
-    household_id = Column(Integer, ForeignKey("households.id"))
-    
+    household_id = Column(Integer, ForeignKey("households.id"), nullable=True)
+
     first_name = Column(String)
     last_name = Column(String)
-    birth_date = Column(DateTime)
-    gender = Column(String) # m, f, d, etc.
-    occupation_type = Column(String) # e.g., "employed", "student", "retired"
-    education_level = Column(String) # e.g., "university", "vocational", "none"
+    birth_date = Column(DateTime, nullable=True)
+    gender = Column(String, nullable=True)
+    occupation_type = Column(String, nullable=True)
+    education_level = Column(String, nullable=True)
     cultural_background = Column(String, nullable=True)
-    special_needs = Column(Boolean, default=False) # For "besondere Lebenslagen"
-    
+    special_needs = Column(String, nullable=True)
+    member_number = Column(String, nullable=True)
+
     household = relationship("Household", back_populates="people")
 
 class Apartment(Base):

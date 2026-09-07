@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import {
   AppBar, Toolbar, Typography, Container, Box, Tabs, Tab,
   Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Button, TextField, Grid, Card, CardContent, Alert, Snackbar, Dialog, DialogTitle, DialogContent, DialogActions,
+  Button, TextField, Grid, Card, CardContent, Alert, Snackbar, Chip,
   FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, uploadHouseholds, login, getRanking } from './api';
 import { Household, ScoringConfig, RankingGroup } from './types';
+import HouseholdDetailDialog from './components/household/HouseholdDetailDialog';
+import ImportTab from './components/import/ImportTab';
+import PersonsTab from './components/persons/PersonsTab';
 
 const CONFIG_LABELS: Record<string, string> = {
   weight_diversity_age:            'Altersstruktur',
@@ -28,6 +31,14 @@ const CONFIG_LABELS: Record<string, string> = {
   target_occupation_8:             '8 – Architektur, Bauplanung',
   target_occupation_9:             '9 – Naturwissenschaft, Geographie',
   target_occupation_10:            '10 – Verkehr, Logistik, Schutz, Sicherheit',
+  target_education_1:              '1 – Berufsausbildungsvorbereitung',
+  target_education_2:              '2 – Hauptschulabschluss',
+  target_education_3:              '3 – Zweij. Berufsausbildung, Mittlerer Schulabschluss',
+  target_education_4:              '4 – Dreij. Berufsausbildung, Hochschulreife',
+  target_education_5:              '5 – Erste berufl. Fortbildungsqualifikation',
+  target_education_6:              '6 – Bachelor, FH-Diplom, Meister u.a.',
+  target_education_7:              '7 – Master, Uni-Diplom, Magister u.a.',
+  target_education_8:              '8 – Promotion',
   target_age_20_29:                '20 bis 29',
   target_age_30_39:                '30 bis 39',
   target_age_40_49:                '40 bis 49',
@@ -52,6 +63,8 @@ function App() {
 
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'));
   const [password, setPassword] = useState("");
+
+  const [detailHouseholdId, setDetailHouseholdId] = useState<number | null>(null);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -208,7 +221,9 @@ function App() {
           <Tabs value={tabValue} onChange={handleTabChange}>
             <Tab label="Rangliste" />
             <Tab label="Alle Haushalte" />
+            <Tab label="Personen" />
             <Tab label="Bewertungskonfiguration" />
+            <Tab label="Datenimport" />
             <Tab label="Aktionen" />
           </Tabs>
         </Box>
@@ -294,6 +309,7 @@ function App() {
                 <TableRow>
                   <TableCell>Haushaltsname</TableCell>
                   <TableCell align="right">Mitglieder</TableCell>
+                  <TableCell>WBS</TableCell>
                   <TableCell>Mitglied seit</TableCell>
                   <TableCell align="right">Engagement</TableCell>
                   <TableCell>Bewohner</TableCell>
@@ -302,9 +318,17 @@ function App() {
               </TableHead>
               <TableBody>
                 {households.map((hh) => (
-                  <TableRow key={hh.id}>
+                  <TableRow
+                    key={hh.id}
+                    hover
+                    sx={{ cursor: 'pointer' }}
+                    onClick={() => setDetailHouseholdId(hh.id)}
+                  >
                     <TableCell>{hh.name}</TableCell>
                     <TableCell align="right">{hh.people.length}</TableCell>
+                    <TableCell>
+                      {hh.wbs_status ? <Chip label={hh.wbs_status} size="small" /> : '–'}
+                    </TableCell>
                     <TableCell>{hh.member_since ? new Date(hh.member_since).toLocaleDateString('de-DE') : '–'}</TableCell>
                     <TableCell align="right">{hh.engagement_score}</TableCell>
                     <TableCell>{hh.is_resident ? 'Ja' : 'Nein'}</TableCell>
@@ -313,7 +337,7 @@ function App() {
                 ))}
                 {households.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} align="center">Keine Haushalte vorhanden.</TableCell>
+                    <TableCell colSpan={7} align="center">Keine Haushalte vorhanden.</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -321,7 +345,11 @@ function App() {
           </TableContainer>
         )}
 
-        {tabValue === 2 && (() => {
+        {tabValue === 2 && (
+          <PersonsTab onShowHousehold={(id) => setDetailHouseholdId(id)} />
+        )}
+
+        {tabValue === 3 && (() => {
           const diversityWeights = configs.filter(c => c.key.startsWith('weight_diversity_'));
           const otherWeights = configs.filter(c => c.key.startsWith('weight_') && !c.key.startsWith('weight_diversity_'));
           const naturalSort = (a: ScoringConfig, b: ScoringConfig) =>
@@ -344,7 +372,7 @@ function App() {
               <Typography variant="h6" sx={{ mb: 2 }}>{title}</Typography>
               <Grid container spacing={2}>
                 {items.map((conf) => (
-                  <Grid item xs={12} sm={6} md={4} key={conf.key}>
+                  <Grid size={{ xs: 12, sm: 6, md: 4 }} key={conf.key}>
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom>
@@ -383,17 +411,21 @@ function App() {
           );
         })()}
 
-        {tabValue === 3 && (
+        {tabValue === 4 && (
+          <ImportTab onImportComplete={loadData} />
+        )}
+
+        {tabValue === 5 && (
           <Box>
             <Grid container spacing={2}>
-              <Grid item>
+              <Grid>
                 <Button variant="contained" color="secondary" onClick={handleCalculate}>
                   Punkte neu berechnen
                 </Button>
               </Grid>
-              <Grid item>
+              <Grid>
                 <Button variant="contained" component="label">
-                  Excel-Daten hochladen
+                  Excel-Daten hochladen (alt)
                   <input type="file" hidden onChange={handleFileUpload} accept=".xlsx" />
                 </Button>
               </Grid>
@@ -401,6 +433,13 @@ function App() {
           </Box>
         )}
       </Container>
+
+      <HouseholdDetailDialog
+        open={detailHouseholdId !== null}
+        householdId={detailHouseholdId}
+        onClose={() => setDetailHouseholdId(null)}
+        onSaved={loadData}
+      />
 
       <Snackbar open={!!message} autoHideDuration={6000} onClose={() => setMessage(null)}>
         <Alert onClose={() => setMessage(null)} severity={message?.type} sx={{ width: '100%' }}>

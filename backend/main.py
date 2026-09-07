@@ -4,15 +4,43 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from typing import List
 
-from . import models, schemas, database, services, scoring, auth
+from . import models, schemas, database, services, scoring, auth, import_service
 
 models.Base.metadata.create_all(bind=database.engine)
 
 with database.engine.connect() as conn:
-    columns = [c["name"] for c in inspect(database.engine).get_columns("households")]
-    if "is_resident" not in columns:
-        conn.execute(text("ALTER TABLE households ADD COLUMN is_resident BOOLEAN DEFAULT 0"))
-        conn.commit()
+    hh_columns = {c["name"] for c in inspect(database.engine).get_columns("households")}
+    hh_migrations = {
+        "is_resident": "ALTER TABLE households ADD COLUMN is_resident BOOLEAN DEFAULT 0",
+        "wbs_status": "ALTER TABLE households ADD COLUMN wbs_status TEXT",
+        "pets_count": "ALTER TABLE households ADD COLUMN pets_count INTEGER DEFAULT 0",
+        "pets_info": "ALTER TABLE households ADD COLUMN pets_info TEXT",
+        "desired_apartment_size": "ALTER TABLE households ADD COLUMN desired_apartment_size TEXT",
+        "desired_apartment_type": "ALTER TABLE households ADD COLUMN desired_apartment_type TEXT",
+        "wheelchair_accessible": "ALTER TABLE households ADD COLUMN wheelchair_accessible BOOLEAN DEFAULT 0",
+        "financial_status": "ALTER TABLE households ADD COLUMN financial_status TEXT",
+        "import_source": "ALTER TABLE households ADD COLUMN import_source TEXT",
+        "import_timestamp": "ALTER TABLE households ADD COLUMN import_timestamp DATETIME",
+        "household_member_count": "ALTER TABLE households ADD COLUMN household_member_count INTEGER",
+        "cultural_diversity_score": "ALTER TABLE households ADD COLUMN cultural_diversity_score REAL DEFAULT 0.0",
+        "special_needs_score": "ALTER TABLE households ADD COLUMN special_needs_score REAL DEFAULT 0.0",
+    }
+    for col, sql in hh_migrations.items():
+        if col not in hh_columns:
+            conn.execute(text(sql))
+
+    person_columns = {c["name"] for c in inspect(database.engine).get_columns("people")}
+    if "member_number" not in person_columns:
+        conn.execute(text("ALTER TABLE people ADD COLUMN member_number TEXT"))
+
+    # Migrate special_needs from BOOLEAN to TEXT
+    result = conn.execute(text("SELECT typeof(special_needs) FROM people WHERE special_needs IS NOT NULL LIMIT 1"))
+    row = result.fetchone()
+    if row and row[0] == "integer":
+        conn.execute(text("UPDATE people SET special_needs = NULL WHERE special_needs = 0"))
+        conn.execute(text("UPDATE people SET special_needs = 'Ja' WHERE special_needs = 1"))
+
+    conn.commit()
 
 app = FastAPI(title="Wohnungsvergabe API")
 
@@ -73,12 +101,95 @@ def create_household(
 @app.get("/households/", response_model=List[schemas.Household])
 def read_households(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 1000,
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
     households = db.query(models.Household).offset(skip).limit(limit).all()
     return households
+
+@app.get("/households/{household_id}", response_model=schemas.Household)
+def read_household(
+    household_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    hh = db.query(models.Household).filter(models.Household.id == household_id).first()
+    if not hh:
+        raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
+    return hh
+
+@app.put("/households/{household_id}", response_model=schemas.Household)
+def update_household(
+    household_id: int,
+    data: schemas.HouseholdUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    hh = db.query(models.Household).filter(models.Household.id == household_id).first()
+    if not hh:
+        raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(hh, field, value)
+    db.commit()
+    db.refresh(hh)
+    return hh
+
+# --- People ---
+@app.put("/people/{person_id}", response_model=schemas.Person)
+def update_person(
+    person_id: int,
+    data: schemas.PersonUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    person = db.query(models.Person).filter(models.Person.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person nicht gefunden")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(person, field, value)
+    db.commit()
+    db.refresh(person)
+    return person
+
+@app.post("/people/{person_id}/assign/{household_id}", response_model=schemas.Person)
+def assign_person(
+    person_id: int,
+    household_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    person = db.query(models.Person).filter(models.Person.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person nicht gefunden")
+    hh = db.query(models.Household).filter(models.Household.id == household_id).first()
+    if not hh:
+        raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
+    person.household_id = household_id
+    db.commit()
+    db.refresh(person)
+    return person
+
+@app.get("/people/", response_model=List[schemas.PersonWithHousehold])
+def read_all_persons(
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    persons = db.query(models.Person).all()
+    result = []
+    for p in persons:
+        data = schemas.PersonWithHousehold.model_validate(p)
+        if p.household:
+            data.household_name = p.household.name
+        result.append(data)
+    return result
+
+@app.get("/people/unassigned", response_model=List[schemas.Person])
+def read_unassigned_persons(
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    return db.query(models.Person).filter(models.Person.household_id.is_(None)).all()
 
 # --- Apartments ---
 @app.post("/apartments/", response_model=schemas.Apartment)
@@ -205,6 +316,81 @@ def get_scoring_config(
     _=Depends(auth.require_auth),
 ):
     return db.query(models.ScoringConfig).all()
+
+# --- Import (Fragebogen) ---
+@app.post("/import/household-bogen/analyze", response_model=schemas.HHAnalysisResponse)
+async def analyze_hh_bogen(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="Bitte eine .xlsx-Datei hochladen.")
+    contents = await file.read()
+    try:
+        return import_service.analyze_household_bogen(contents, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/import/household-bogen/commit", response_model=schemas.HHCommitResponse)
+def commit_hh_bogen(
+    request: schemas.HHCommitRequest,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    try:
+        return import_service.commit_household_bogen(request, db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/import/individual-bogen/analyze", response_model=schemas.IndividualAnalysisResponse)
+async def analyze_individual_bogen(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="Bitte eine .xlsx-Datei hochladen.")
+    contents = await file.read()
+    try:
+        return import_service.analyze_individual_bogen(contents, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/import/individual-bogen/commit", response_model=schemas.IndividualCommitResponse)
+def commit_individual_bogen(
+    request: schemas.IndividualCommitRequest,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    try:
+        return import_service.commit_individual_bogen(request, db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/import/session/{session_id}")
+def get_import_session(
+    session_id: str,
+    _=Depends(auth.require_auth),
+):
+    session = import_service.import_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden")
+    return {"session_id": session.id, "type": session.session_type, "created_at": session.created_at.isoformat()}
+
+@app.delete("/import/session/{session_id}")
+def delete_import_session(
+    session_id: str,
+    _=Depends(auth.require_auth),
+):
+    if session_id in import_service.import_sessions:
+        del import_service.import_sessions[session_id]
+        return {"message": "Session gelöscht"}
+    raise HTTPException(status_code=404, detail="Session nicht gefunden")
 
 @app.put("/scoring/config")
 def update_scoring_config(
