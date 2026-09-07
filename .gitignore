@@ -27,3 +27,6 @@ Thumbs.db
 
 # Test artifacts
 tests/test_data.xlsx
+
+# Imported data
+imported_data/

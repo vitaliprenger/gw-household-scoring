@@ -53,7 +53,7 @@ def process_excel_upload(file_contents: bytes, db: Session):
                 occupation_type=str(row.get("Occupation", "")),
                 education_level=str(row.get("Education", "")),
                 cultural_background=str(row.get("Cultural Background", "")),
-                special_needs=bool(row.get("Special Needs", False))
+                special_needs=str(row.get("Special Needs", "")).strip() or None
             )
             db.add(db_person)
         
@@ -79,9 +79,9 @@ def seed_example_data(db: Session):
             "engagement_score": 0.7,
             "is_resident": True,
             "people": [
-                ("Thomas", "Müller", _d(1982, 5, 14), "m", "angestellt", "Ausbildung", None, False),
-                ("Sabine", "Müller", _d(1985, 9, 22), "f", "angestellt", "Universität", None, False),
-                ("Lena", "Müller", _d(2015, 1, 10), "f", "Schüler", "keiner", None, False),
+                ("Thomas", "Müller", _d(1982, 5, 14), "m", "angestellt", "3", None, None),
+                ("Sabine", "Müller", _d(1985, 9, 22), "f", "angestellt", "7", None, None),
+                ("Lena", "Müller", _d(2015, 1, 10), "f", "Schüler", "0", None, None),
             ],
         },
         {
@@ -90,8 +90,8 @@ def seed_example_data(db: Session):
             "engagement_score": 0.4,
             "is_resident": True,
             "people": [
-                ("Jan", "Schmidt", _d(1995, 11, 3), "m", "Student", "Universität", None, False),
-                ("Ayumi", "Tanaka", _d(1997, 4, 18), "f", "Student", "Universität", "japanisch", False),
+                ("Jan", "Schmidt", _d(1995, 11, 3), "m", "Student", "7", None, None),
+                ("Ayumi", "Tanaka", _d(1997, 4, 18), "f", "Student", "7", "japanisch", None),
             ],
         },
         {
@@ -100,7 +100,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.9,
             "is_resident": True,
             "people": [
-                ("Helmut", "Becker", _d(1958, 8, 30), "m", "Rentner", "Ausbildung", None, False),
+                ("Helmut", "Becker", _d(1958, 8, 30), "m", "Rentner", "3", None, None),
             ],
         },
         {
@@ -109,10 +109,10 @@ def seed_example_data(db: Session):
             "engagement_score": 0.6,
             "is_resident": True,
             "people": [
-                ("Kemal", "Özdemir", _d(1978, 2, 12), "m", "selbstständig", "Universität", "türkisch", False),
-                ("Fatma", "Özdemir", _d(1980, 12, 5), "f", "angestellt", "Ausbildung", "türkisch", False),
-                ("Elif", "Özdemir", _d(2010, 7, 20), "f", "Schüler", "keiner", "türkisch", False),
-                ("Emre", "Özdemir", _d(2013, 3, 8), "m", "Schüler", "keiner", "türkisch", False),
+                ("Kemal", "Özdemir", _d(1978, 2, 12), "m", "selbstständig", "7", "türkisch", None),
+                ("Fatma", "Özdemir", _d(1980, 12, 5), "f", "angestellt", "3", "türkisch", None),
+                ("Elif", "Özdemir", _d(2010, 7, 20), "f", "Schüler", "0", "türkisch", None),
+                ("Emre", "Özdemir", _d(2013, 3, 8), "m", "Schüler", "0", "türkisch", None),
             ],
         },
         {
@@ -121,7 +121,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.3,
             "is_resident": True,
             "people": [
-                ("Ingrid", "Lehmann", _d(1955, 6, 17), "f", "Rentner", "Universität", None, True),
+                ("Ingrid", "Lehmann", _d(1955, 6, 17), "f", "Rentner", "7", None, "Pflegebedürftig (Pflegegrad 2)"),
             ],
         },
     ]
@@ -134,9 +134,9 @@ def seed_example_data(db: Session):
             "engagement_score": 0.5,
             "is_resident": False,
             "people": [
-                ("Markus", "Weber", _d(1990, 3, 25), "m", "angestellt", "Universität", None, False),
-                ("Lisa", "Weber", _d(1992, 7, 11), "f", "selbstständig", "Universität", None, False),
-                ("Noah", "Weber", _d(2020, 10, 2), "m", "keiner", "keiner", None, False),
+                ("Markus", "Weber", _d(1990, 3, 25), "m", "angestellt", "7", None, None),
+                ("Lisa", "Weber", _d(1992, 7, 11), "f", "selbstständig", "7", None, None),
+                ("Noah", "Weber", _d(2020, 10, 2), "m", "0", "0", None, None),
             ],
         },
         {
@@ -145,7 +145,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.8,
             "is_resident": False,
             "people": [
-                ("Minh", "Nguyen", _d(1988, 12, 1), "m", "angestellt", "Universität", "vietnamesisch", False),
+                ("Minh", "Nguyen", _d(1988, 12, 1), "m", "angestellt", "7", "vietnamesisch", None),
             ],
         },
         {
@@ -154,7 +154,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.2,
             "is_resident": False,
             "people": [
-                ("Clara", "Fischer", _d(2000, 5, 30), "f", "Student", "Ausbildung", None, False),
+                ("Clara", "Fischer", _d(2000, 5, 30), "f", "Student", "3", None, None),
             ],
         },
         {
@@ -163,10 +163,10 @@ def seed_example_data(db: Session):
             "engagement_score": 0.6,
             "is_resident": False,
             "people": [
-                ("Omar", "Al-Rashid", _d(1975, 8, 14), "m", "angestellt", "Universität", "syrisch", True),
-                ("Amira", "Al-Rashid", _d(1979, 1, 22), "f", "angestellt", "Ausbildung", "syrisch", False),
-                ("Layla", "Al-Rashid", _d(2008, 4, 5), "f", "Schüler", "keiner", "syrisch", False),
-                ("Sami", "Al-Rashid", _d(2012, 11, 18), "m", "Schüler", "keiner", "syrisch", False),
+                ("Omar", "Al-Rashid", _d(1975, 8, 14), "m", "angestellt", "7", "syrisch", "Geflüchteter, schwierige finanzielle Situation"),
+                ("Amira", "Al-Rashid", _d(1979, 1, 22), "f", "angestellt", "3", "syrisch", None),
+                ("Layla", "Al-Rashid", _d(2008, 4, 5), "f", "Schüler", "0", "syrisch", None),
+                ("Sami", "Al-Rashid", _d(2012, 11, 18), "m", "Schüler", "0", "syrisch", None),
             ],
         },
         {
@@ -175,8 +175,8 @@ def seed_example_data(db: Session):
             "engagement_score": 0.9,
             "is_resident": False,
             "people": [
-                ("Werner", "Klein", _d(1960, 3, 7), "m", "Rentner", "Ausbildung", None, False),
-                ("Gisela", "Klein", _d(1962, 10, 19), "f", "Rentner", "keiner", None, True),
+                ("Werner", "Klein", _d(1960, 3, 7), "m", "Rentner", "3", None, None),
+                ("Gisela", "Klein", _d(1962, 10, 19), "f", "Rentner", "0", None, "Schwerbehindert (GdB 60)"),
             ],
         },
     ]

@@ -20,6 +20,19 @@ OCCUPATION_LABELS = {
     "10": "Verkehr, Logistik, Schutz, Sicherheit",
 }
 
+EDUCATION_GROUPS = [str(i) for i in range(1, 9)]
+
+EDUCATION_LABELS = {
+    "1": "Berufsausbildungsvorbereitung",
+    "2": "Hauptschulabschluss",
+    "3": "Zweijährige Berufsausbildung, Mittlerer Schulabschluss",
+    "4": "Dreijährige Berufsausbildung, Hochschulreife (inkl. Fachabitur)",
+    "5": "Erste berufliche Fortbildungsqualifikation",
+    "6": "Bachelor, FH-Diplom, Staatsexamen, Fachwirt, Operativer Professional, Meister, Fachschule, Berufsakademie",
+    "7": "Master, Uni-Diplom, Magister, Staatsexamen, Betriebswirt, Strategischer Professional",
+    "8": "Promotion",
+}
+
 DEFAULT_CONFIG = {
     "weight_diversity_age":            {"value": 2.0, "description": "Gewicht: Durchmischung – Altersstruktur (§3 Abs. 1a)"},
     "weight_diversity_gender":         {"value": 2.0, "description": "Gewicht: Durchmischung – Geschlechterverhältnis (§3 Abs. 1b)"},
@@ -32,6 +45,7 @@ DEFAULT_CONFIG = {
     "weight_occupancy":        {"value": 2.0, "description": "Gewicht: Wohnraumausnutzung (§3 Abs. 2)"},
 
     **{f"target_occupation_{k}": {"value": 0.10, "description": f"Zielwert Beruf: {v}"} for k, v in OCCUPATION_LABELS.items()},
+    **{f"target_education_{k}": {"value": 0.125, "description": f"Zielwert Bildung: {v}"} for k, v in EDUCATION_LABELS.items()},
 
     "target_age_20_29":   {"value": 0.24350445, "description": "Zielwert Altersgruppe: 20 bis 29"},
     "target_age_30_39":   {"value": 0.17529197, "description": "Zielwert Altersgruppe: 30 bis 39"},
@@ -93,13 +107,17 @@ def calculate_diversity_subscores(household: models.Household, current_stats: di
         "diversity_special_needs": 0.0,
     }
 
+    subscores["diversity_cultural"] = max(0.0, min(1.0, household.cultural_diversity_score or 0.0))
+    subscores["diversity_special_needs"] = max(0.0, min(1.0, household.special_needs_score or 0.0))
+
     people = household.people
     if not people:
         return subscores
 
     hh_stats = {f"age_{g}": 0 for g in ["under_20"] + AGE_GROUPS}
     hh_stats.update({f"occupation_{g}": 0 for g in OCCUPATION_GROUPS})
-    hh_stats.update({"gender_f": 0, "gender_m": 0, "gender_d": 0, "special_needs": 0, "cultural_background": 0})
+    hh_stats.update({f"education_{g}": 0 for g in EDUCATION_GROUPS})
+    hh_stats.update({"gender_f": 0, "gender_m": 0, "gender_d": 0})
 
     for p in people:
         age = (pd.Timestamp.now() - pd.to_datetime(p.birth_date)).days / 365.25
@@ -116,10 +134,9 @@ def calculate_diversity_subscores(household: models.Household, current_stats: di
         if occ in OCCUPATION_GROUPS:
             hh_stats[f"occupation_{occ}"] += 1
 
-        if p.special_needs:
-            hh_stats["special_needs"] += 1
-        if p.cultural_background:
-            hh_stats["cultural_background"] += 1
+        edu = (p.education_level or "").strip()
+        if edu in EDUCATION_GROUPS:
+            hh_stats[f"education_{edu}"] += 1
 
     for group in AGE_GROUPS:
         target = config.get(f"target_age_{group}", 0.0)
@@ -135,18 +152,19 @@ def calculate_diversity_subscores(household: models.Household, current_stats: di
             gap = target - current
             subscores["diversity_occupation"] += gap * hh_stats[f"occupation_{group}"] * 10
 
+    for group in EDUCATION_GROUPS:
+        target = config.get(f"target_education_{group}", 0.0)
+        current = current_stats.get(f"ratio_education_{group}", 0.0)
+        if current < target and hh_stats[f"education_{group}"] > 0:
+            gap = target - current
+            subscores["diversity_education"] += gap * hh_stats[f"education_{group}"] * 10
+
     for g in ["f", "m", "d"]:
         target = config.get(f"target_gender_{g}", 0.0)
         current = current_stats.get(f"ratio_gender_{g}", 0.0)
         if current < target and hh_stats[f"gender_{g}"] > 0:
             gap = target - current
             subscores["diversity_gender"] += gap * hh_stats[f"gender_{g}"] * 10
-
-    if hh_stats["cultural_background"] > 0:
-        subscores["diversity_cultural"] = 1.0
-
-    if hh_stats["special_needs"] > 0:
-        subscores["diversity_special_needs"] = 1.0
 
     return subscores
 
@@ -160,8 +178,7 @@ def calculate_membership_score(household: models.Household) -> float:
     return min(years, 10.0) * 2.0 
 
 def calculate_engagement_score(household: models.Household) -> float:
-    # Engagement score is 0-1 in DB, scale it to e.g. 0-20 points
-    return household.engagement_score * 20.0
+    return max(0.0, min(1.0, household.engagement_score or 0.0))
 
 def calculate_resident_stats(db: Session) -> dict:
     residents = db.query(models.Household).filter(models.Household.is_resident == True).all()
@@ -171,11 +188,13 @@ def calculate_resident_stats(db: Session) -> dict:
     if total == 0:
         result = {f"ratio_age_{g}": 0.0 for g in AGE_GROUPS}
         result.update({f"ratio_occupation_{g}": 0.0 for g in OCCUPATION_GROUPS})
+        result.update({f"ratio_education_{g}": 0.0 for g in EDUCATION_GROUPS})
         result.update({"ratio_gender_f": 0.0, "ratio_gender_m": 0.0, "ratio_gender_d": 0.0})
         return result
 
     counts = {f"age_{g}": 0 for g in ["under_20"] + AGE_GROUPS}
     counts.update({f"occupation_{g}": 0 for g in OCCUPATION_GROUPS})
+    counts.update({f"education_{g}": 0 for g in EDUCATION_GROUPS})
     counts.update({"gender_f": 0, "gender_m": 0, "gender_d": 0})
 
     for p in people:
@@ -192,6 +211,10 @@ def calculate_resident_stats(db: Session) -> dict:
         occ = (p.occupation_type or "").strip()
         if occ in OCCUPATION_GROUPS:
             counts[f"occupation_{occ}"] += 1
+
+        edu = (p.education_level or "").strip()
+        if edu in EDUCATION_GROUPS:
+            counts[f"education_{edu}"] += 1
 
     return {f"ratio_{k}": v / total for k, v in counts.items()}
 
