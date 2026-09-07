@@ -40,6 +40,23 @@ with database.engine.connect() as conn:
         conn.execute(text("UPDATE people SET special_needs = NULL WHERE special_needs = 0"))
         conn.execute(text("UPDATE people SET special_needs = 'Ja' WHERE special_needs = 1"))
 
+    # Migrate desired_apartment_type from plain string to JSON array
+    rows = conn.execute(text(
+        "SELECT id, desired_apartment_type FROM households "
+        "WHERE desired_apartment_type IS NOT NULL AND desired_apartment_type != ''"
+    )).fetchall()
+    import json as _json
+    for r in rows:
+        val = r[1]
+        try:
+            parsed = _json.loads(val)
+            if isinstance(parsed, list):
+                continue
+        except (ValueError, TypeError):
+            pass
+        arr = _json.dumps([val])
+        conn.execute(text("UPDATE households SET desired_apartment_type = :v WHERE id = :id"), {"v": arr, "id": r[0]})
+
     conn.commit()
 
 app = FastAPI(title="Wohnungsvergabe API")

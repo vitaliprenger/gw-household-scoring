@@ -3,7 +3,8 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, Typography, Grid, TextField, Select, MenuItem,
     FormControl, InputLabel, Switch, FormControlLabel, Divider,
-    Box, Alert, CircularProgress,
+    Box, Alert, CircularProgress, Checkbox, ListItemText, Chip,
+    OutlinedInput,
 } from '@mui/material';
 import { Household, Person } from '../../types';
 import { getHousehold, updateHousehold, updatePerson } from '../../api';
@@ -17,6 +18,14 @@ interface HouseholdDetailDialogProps {
 }
 
 const WBS_OPTIONS = ['', 'kein WBS', 'WBS Einkommensgruppe A', 'WBS Einkommensgruppe B'];
+
+const APARTMENT_TYPE_OPTIONS = [
+    'Standard Wohnungstypen',
+    'Clusterwohnung',
+    'Ausbauwohnung',
+    'Atelierwohnung',
+    'Gartencluster',
+];
 
 export default function HouseholdDetailDialog({
     open, householdId, onClose, onSaved,
@@ -51,7 +60,7 @@ export default function HouseholdDetailDialog({
         ? { ...household, ...editHH }
         : null;
 
-    function handleHHChange(field: string, value: string | number | boolean) {
+    function handleHHChange(field: string, value: string | number | boolean | string[]) {
         setEditHH((prev) => ({ ...prev, [field]: value }));
     }
 
@@ -148,8 +157,39 @@ export default function HouseholdDetailDialog({
                             </Grid>
                             <GridField label="Gewünschte Wohnungsgröße" value={currentHH.desired_apartment_size ?? ''} editing={editing}
                                 onChange={(v) => handleHHChange('desired_apartment_size', v)} />
-                            <GridField label="Wohnungsart" value={currentHH.desired_apartment_type ?? ''} editing={editing}
-                                onChange={(v) => handleHHChange('desired_apartment_type', v)} />
+                            <Grid size={{ xs: 6, sm: 4 }}>
+                                {editing ? (
+                                    <FormControl size="small" fullWidth>
+                                        <InputLabel>Wohnungsart</InputLabel>
+                                        <Select
+                                            multiple
+                                            value={currentHH.desired_apartment_type ?? []}
+                                            label="Wohnungsart"
+                                            input={<OutlinedInput label="Wohnungsart" />}
+                                            onChange={(e) => handleHHChange('desired_apartment_type', e.target.value as string[])}
+                                            renderValue={(selected) => (
+                                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                                    {(selected as string[]).map((v) => (
+                                                        <Chip key={v} label={v} size="small" />
+                                                    ))}
+                                                </Box>
+                                            )}
+                                        >
+                                            {APARTMENT_TYPE_OPTIONS.map((opt) => (
+                                                <MenuItem key={opt} value={opt}>
+                                                    <Checkbox checked={(currentHH.desired_apartment_type ?? []).includes(opt)} />
+                                                    <ListItemText primary={opt} />
+                                                </MenuItem>
+                                            ))}
+                                        </Select>
+                                    </FormControl>
+                                ) : (
+                                    <FieldDisplay
+                                        label="Wohnungsart"
+                                        value={(currentHH.desired_apartment_type ?? []).join(', ') || undefined}
+                                    />
+                                )}
+                            </Grid>
                             <GridField label="Haustiere (Anzahl)" value={String(currentHH.pets_count)} editing={editing}
                                 onChange={(v) => handleHHChange('pets_count', parseInt(v) || 0)} />
                             <GridField label="Haustiere (Info)" value={currentHH.pets_info ?? ''} editing={editing}

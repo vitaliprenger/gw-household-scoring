@@ -51,7 +51,7 @@ class HouseholdBase(BaseModel):
     pets_count: int = 0
     pets_info: Optional[str] = None
     desired_apartment_size: Optional[str] = None
-    desired_apartment_type: Optional[str] = None
+    desired_apartment_type: Optional[List[str]] = None
     wheelchair_accessible: bool = False
     financial_status: Optional[str] = None
     import_source: Optional[str] = None
@@ -72,7 +72,7 @@ class HouseholdUpdate(BaseModel):
     pets_count: Optional[int] = None
     pets_info: Optional[str] = None
     desired_apartment_size: Optional[str] = None
-    desired_apartment_type: Optional[str] = None
+    desired_apartment_type: Optional[List[str]] = None
     wheelchair_accessible: Optional[bool] = None
     financial_status: Optional[str] = None
     household_member_count: Optional[int] = None
@@ -181,7 +181,7 @@ class HouseholdImportPreview(BaseModel):
     financial_status: Optional[str] = None
     declared_member_count: int = 0
     wheelchair_accessible: bool = False
-    desired_apartment_type: Optional[str] = None
+    desired_apartment_type: Optional[List[str]] = None
     desired_apartment_size: Optional[str] = None
     pets_count: int = 0
     pets_info: Optional[str] = None
