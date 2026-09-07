@@ -25,7 +25,7 @@ class Household(Base):
     pets_count = Column(Integer, default=0)
     pets_info = Column(String, nullable=True)
     desired_apartment_size = Column(String, nullable=True)
-    desired_apartment_type = Column(String, nullable=True)
+    desired_apartment_type = Column(JSON, nullable=True)
     wheelchair_accessible = Column(Boolean, default=False)
     financial_status = Column(String, nullable=True)
     import_source = Column(String, nullable=True)

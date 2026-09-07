@@ -173,6 +173,23 @@ def _normalize_financial(val) -> Optional[str]:
         return "kann Anteile nicht übernehmen"
     return "kann Anteile übernehmen"
 
+APARTMENT_TYPE_OPTIONS = [
+    "Standard Wohnungstypen",
+    "Clusterwohnung",
+    "Ausbauwohnung",
+    "Atelierwohnung",
+    "Gartencluster",
+]
+
+def _parse_apartment_types(val) -> list[str] | None:
+    if val is None:
+        return None
+    raw = str(val).strip()
+    if not raw:
+        return None
+    parts = [p.strip() for p in re.split(r"[,;]+", raw) if p.strip()]
+    return parts if parts else None
+
 def _parse_wheelchair(val) -> bool:
     if val is None:
         return False
@@ -257,7 +274,7 @@ def parse_household_bogen(file_contents: bytes) -> dict:
             "financial_status": _normalize_financial(row.get("Finanzielle Rahmenbedingungen", "")),
             "declared_member_count": declared_count,
             "wheelchair_accessible": _parse_wheelchair(row.get("Rollstuhlgerecht?", "")),
-            "desired_apartment_type": str(row.get("Wohnungsart", "")).strip() or None,
+            "desired_apartment_type": _parse_apartment_types(row.get("Wohnungsart", "")),
             "desired_apartment_size": str(row.get("Wohnungsgröße", "")).strip() or None,
             "pets_count": _parse_int(row.get("Haustiere 1", "0")),
             "pets_info": str(row.get("Haustiere 2", "")).strip() or None,
@@ -429,19 +446,24 @@ def compute_data_changes(new_data: dict, existing: models.Household) -> Optional
         "household_member_count": new_data.get("declared_member_count"),
     }
 
+    def _display(val):
+        if isinstance(val, list):
+            return ", ".join(str(v) for v in val)
+        return str(val)
+
     for field, new_val in mapping.items():
         old_val = getattr(existing, field, None)
         label = FIELD_LABELS.get(field, field)
 
-        if old_val is not None and new_val is not None and str(old_val) != str(new_val):
+        if old_val is not None and new_val is not None and _display(old_val) != _display(new_val):
             overwrites.append(schemas.DataChange(
-                field=label, old_value=str(old_val), new_value=str(new_val)
+                field=label, old_value=_display(old_val), new_value=_display(new_val)
             ))
-        elif old_val is not None and (new_val is None or new_val == "" or new_val == 0):
+        elif old_val is not None and (new_val is None or new_val == "" or new_val == 0 or new_val == []):
             if field in ("pets_count",) and old_val == 0:
                 continue
             removals.append(schemas.DataChange(
-                field=label, old_value=str(old_val)
+                field=label, old_value=_display(old_val)
             ))
 
     if not overwrites and not removals:

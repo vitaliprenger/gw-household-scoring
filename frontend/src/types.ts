@@ -30,7 +30,7 @@ export interface Household {
     pets_count: number;
     pets_info?: string;
     desired_apartment_size?: string;
-    desired_apartment_type?: string;
+    desired_apartment_type?: string[];
     wheelchair_accessible: boolean;
     financial_status?: string;
     import_source?: string;
@@ -103,7 +103,7 @@ export interface HouseholdImportPreview {
     financial_status?: string;
     declared_member_count: number;
     wheelchair_accessible: boolean;
-    desired_apartment_type?: string;
+    desired_apartment_type?: string[];
     desired_apartment_size?: string;
     pets_count: number;
     pets_info?: string;
