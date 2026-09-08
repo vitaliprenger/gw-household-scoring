@@ -1,6 +1,6 @@
 import pandas as pd
 from sqlalchemy.orm import Session
-from . import models
+from . import models, apartment_seed_data
 from datetime import datetime, date
 import io
 
@@ -62,6 +62,59 @@ def process_excel_upload(file_contents: bytes, db: Session):
     return {"message": f"Erfolgreich {created_count} Haushalte und {len(df)} Personen importiert."}
 
 
+def seed_apartments(db: Session) -> int:
+    """Legt die Wohnungsstammdaten an (siehe ``apartment_seed_data``).
+
+    Idempotent: Wohnungen, deren ``unit_number`` bereits existiert, bleiben
+    unverändert — im Frontend vorgenommene Änderungen werden nicht überschrieben.
+    """
+    existing = {row[0] for row in db.query(models.Apartment.unit_number).all()}
+    created = 0
+    for row in apartment_seed_data.APARTMENTS:
+        data = dict(zip(apartment_seed_data.FIELDS, row))
+        if data["unit_number"] in existing:
+            continue
+        db.add(models.Apartment(**data))
+        created += 1
+    if created:
+        db.commit()
+    return created
+
+
+def assign_household(db: Session, apartment: models.Apartment, household_id: int | None) -> bool:
+    """Ordnet der Wohnung den Haushalt zu, der darin wohnt (oder löst die Zuordnung).
+
+    Ein Haushalt wohnt in genau einer Wohnung: eine bestehende Zuordnung des
+    Haushalts zu einer anderen Wohnung wird dabei gelöst. Der Haushalt gilt
+    danach als Bewohner (``is_resident``).
+    """
+    if household_id is None:
+        if apartment.household_id is None:
+            return False
+        apartment.household_id = None
+        return True
+
+    household = db.query(models.Household).filter(models.Household.id == household_id).first()
+    if not household:
+        raise ValueError(f"Haushalt {household_id} nicht gefunden")
+
+    if apartment.household_id == household_id:
+        return False
+
+    for other in db.query(models.Apartment).filter(
+        models.Apartment.household_id == household_id,
+        models.Apartment.id != apartment.id,
+    ).all():
+        other.household_id = None
+
+    apartment.household_id = household_id
+    household.is_resident = True
+    if not household.apartment_unit:
+        household.apartment_unit = apartment.unit_number
+    household.updated_at = datetime.utcnow()
+    return True
+
+
 def _d(y: int, m: int, d: int) -> datetime:
     return datetime(y, m, d)
 
@@ -78,6 +131,7 @@ def seed_example_data(db: Session):
             "name": "Manuela Liebold",
             "engagement_score": 0.8,
             "is_resident": True,
+            "apartment_unit": "W.209",
             "people": [
                 ("Manuela", "Liebold", _d(1975, 4, 12), "f", "2", "6", None, None, "1", _d(2017, 1, 1)),
                 ("Thorsten", "Liebold", _d(1972, 9, 8), "m", "4", "3", None, None, "2", _d(2017, 1, 1)),
@@ -87,6 +141,7 @@ def seed_example_data(db: Session):
             "name": "Gudrun Gehrke",
             "engagement_score": 0.6,
             "is_resident": True,
+            "apartment_unit": "W.210",
             "people": [
                 ("Gudrun", "Gehrke", _d(1962, 3, 22), "f", "1", "7", None, None, "14", _d(2017, 6, 1)),
                 ("Mathias", "Uhl", _d(1960, 11, 15), "m", "9", "8", None, None, "13", _d(2017, 6, 1)),
@@ -96,6 +151,7 @@ def seed_example_data(db: Session):
             "name": "Elke Stücke",
             "engagement_score": 0.9,
             "is_resident": True,
+            "apartment_unit": "R.103",
             "people": [
                 ("Elke", "Stücke", _d(1958, 1, 25), "f", "5", "4", None, None, "30", _d(2015, 1, 1)),
             ],
@@ -104,6 +160,7 @@ def seed_example_data(db: Session):
             "name": "Sebastian Danek",
             "engagement_score": 0.5,
             "is_resident": True,
+            "apartment_unit": "W.213",
             "people": [
                 ("Sebastian", "Danek", _d(1988, 7, 3), "m", "9", "7", None, None, "65", _d(2018, 1, 1)),
                 ("Tanja", "Danek", _d(1990, 2, 14), "f", "2", "6", None, None, "66", _d(2018, 1, 1)),
@@ -114,6 +171,7 @@ def seed_example_data(db: Session):
             "name": "Christa Köller",
             "engagement_score": 0.3,
             "is_resident": True,
+            "apartment_unit": "W.104",
             "people": [
                 ("Christa", "Köller", _d(1950, 8, 30), "f", "6", "4", None, None, "34", _d(2016, 6, 1)),
             ],
@@ -199,21 +257,6 @@ def seed_example_data(db: Session):
         },
     ]
 
-    # -- Wohnungen ---------------------------------------------------------
-    apartments_data = [
-        ("W-101", 1.5, "freifinanziert"),
-        ("W-102", 1.5, "WBS A"),
-        ("W-201", 2.5, "freifinanziert"),
-        ("W-202", 2.5, "WBS A"),
-        ("W-203", 2.5, "WBS B"),
-        ("W-301", 3.5, "freifinanziert"),
-        ("W-302", 3.5, "WBS A"),
-        ("W-401", 4.5, "WBS B"),
-        ("W-501", 5.5, "freifinanziert"),
-        ("W-502", 5.5, "WBS A"),
-        ("W-503", 5.5, "WBS B"),
-    ]
-
     # Haushalte + Personen anlegen
     all_households: list[models.Household] = []
     for hh_data in residents + applicants:
@@ -227,6 +270,7 @@ def seed_example_data(db: Session):
             financial_status=hh_data.get("financial_status"),
             pets_count=hh_data.get("pets_count", 0),
             pets_info=hh_data.get("pets_info"),
+            apartment_unit=hh_data.get("apartment_unit"),
         )
         db.add(hh)
         db.flush()
@@ -246,28 +290,40 @@ def seed_example_data(db: Session):
             ))
         all_households.append(hh)
 
-    # Wohnungen anlegen
-    db_apartments: list[models.Apartment] = []
-    for unit, size, funding in apartments_data:
-        apt = models.Apartment(unit_number=unit, size_rooms=size, funding_type=funding)
-        db.add(apt)
-        db_apartments.append(apt)
-    db.flush()
+    # Wohnungsstammdaten sicherstellen und Bewohner ihren Wohnungen zuordnen
+    seed_apartments(db)
+    for hh in all_households:
+        if not hh.apartment_unit:
+            continue
+        apt = (
+            db.query(models.Apartment)
+            .filter(models.Apartment.unit_number == hh.apartment_unit)
+            .first()
+        )
+        if apt is not None:
+            assign_household(db, apt, hh.id)
 
-    # Bewerbungen: Bewerber auf passende Wohnungen
+    # Beispiel-Bewerbungen auf echte Wohnungen (siehe seed_apartments)
     applicant_hhs = [h for h in all_households if not h.is_resident]
-    assignment = [
-        (0, [0, 1]),    # Kruse (1 Pers.) → 1.5er
-        (1, [5, 6]),    # Venjakob/Höbing (2 Pers.) → 3.5er
-        (2, [5, 6]),    # Tenk (2 Pers.) → 3.5er
-        (3, [7, 8]),    # Nolte (3 Pers.) → 4.5 + 5.5
-        (4, [5, 6]),    # Rocha (2 Pers.) → 3.5er
+    example_applications = [
+        (0, ["P.104", "P.204"]),          # Kruse (1 Pers.)   → 1,5 Zimmer
+        (1, ["P.106", "P.206"]),          # Venjakob/Höbing   → 3,5 Zimmer
+        (2, ["P.106", "P.206"]),          # R. Tenk           → 3,5 Zimmer
+        (3, ["P.211", "W.212"]),          # Nolte (3 Pers.)   → 4,5 / 5,5 Zimmer
+        (4, ["P.208", "P.106"]),          # Rocha (2 Pers.)   → 3,5 Zimmer
     ]
-    for hh_idx, apt_indices in assignment:
-        for apt_idx in apt_indices:
+    apartments_by_unit = {
+        apt.unit_number: apt
+        for apt in db.query(models.Apartment).all()
+    }
+    for hh_idx, units in example_applications:
+        for unit in units:
+            apt = apartments_by_unit.get(unit)
+            if apt is None:
+                continue
             db.add(models.Application(
                 household_id=applicant_hhs[hh_idx].id,
-                apartment_id=db_apartments[apt_idx].id,
+                apartment_id=apt.id,
             ))
 
     db.commit()

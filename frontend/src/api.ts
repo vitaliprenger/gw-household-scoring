@@ -1,5 +1,6 @@
 import axios from 'axios';
 import {
+    Apartment,
     Household,
     ScoringConfig,
     RankingGroup,
@@ -86,6 +87,38 @@ export const toggleArchivePerson = async (id: number) => {
 
 export const getUnassignedPersons = async () => {
     const response = await api.get<Person[]>('/people/unassigned');
+    return response.data;
+};
+
+// --- Wohnungen ---
+
+export const getApartments = async () => {
+    const response = await api.get<Apartment[]>('/apartments/');
+    return response.data;
+};
+
+export const createApartment = async (data: Partial<Apartment>) => {
+    const response = await api.post<Apartment>('/apartments/', data);
+    return response.data;
+};
+
+export const updateApartment = async (id: number, data: Partial<Apartment>) => {
+    const response = await api.put<Apartment>(`/apartments/${id}`, data);
+    return response.data;
+};
+
+export const deleteApartment = async (id: number) => {
+    const response = await api.delete(`/apartments/${id}`);
+    return response.data;
+};
+
+export const assignApartment = async (apartmentId: number, householdId: number) => {
+    const response = await api.post<Apartment>(`/apartments/${apartmentId}/assign/${householdId}`);
+    return response.data;
+};
+
+export const unassignApartment = async (apartmentId: number) => {
+    const response = await api.delete<Apartment>(`/apartments/${apartmentId}/assign`);
     return response.data;
 };
 

@@ -47,6 +47,22 @@ with database.engine.connect() as conn:
         if col not in person_columns:
             conn.execute(text(sql))
 
+    apartment_columns = {c["name"] for c in inspect(database.engine).get_columns("apartments")}
+    apartment_migrations = {
+        "floor": "ALTER TABLE apartments ADD COLUMN floor TEXT",
+        "area_shares": "ALTER TABLE apartments ADD COLUMN area_shares REAL",
+        "area_rent": "ALTER TABLE apartments ADD COLUMN area_rent REAL",
+        "area_utilities": "ALTER TABLE apartments ADD COLUMN area_utilities REAL",
+        "apartment_type": "ALTER TABLE apartments ADD COLUMN apartment_type TEXT",
+        "apartment_category": "ALTER TABLE apartments ADD COLUMN apartment_category TEXT",
+        "wbs_raw": "ALTER TABLE apartments ADD COLUMN wbs_raw TEXT",
+        "min_occupants": "ALTER TABLE apartments ADD COLUMN min_occupants INTEGER",
+        "household_id": "ALTER TABLE apartments ADD COLUMN household_id INTEGER REFERENCES households(id)",
+    }
+    for col, sql in apartment_migrations.items():
+        if col not in apartment_columns:
+            conn.execute(text(sql))
+
     # Migrate member_since from households to people
     if "member_since" in hh_columns:
         conn.execute(text(
@@ -104,6 +120,7 @@ def get_db():
 def startup_event():
     db = database.SessionLocal()
     scoring.initialize_config(db)
+    services.seed_apartments(db)
     services.seed_example_data(db)
     db.close()
 
@@ -305,12 +322,92 @@ def create_apartment(
 @app.get("/apartments/", response_model=List[schemas.Apartment])
 def read_apartments(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 1000,
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    apartments = db.query(models.Apartment).offset(skip).limit(limit).all()
-    return apartments
+    apartments = (
+        db.query(models.Apartment)
+        .order_by(models.Apartment.unit_number)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for apt in apartments:
+        data = schemas.Apartment.model_validate(apt)
+        if apt.household:
+            data.household_name = apt.household.name
+        result.append(data)
+    return result
+
+@app.put("/apartments/{apartment_id}", response_model=schemas.Apartment)
+def update_apartment(
+    apartment_id: int,
+    data: schemas.ApartmentUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    apt = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Wohnung nicht gefunden")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(apt, field, value)
+    db.commit()
+    db.refresh(apt)
+    return apt
+
+@app.post("/apartments/{apartment_id}/assign/{household_id}", response_model=schemas.Apartment)
+def assign_apartment(
+    apartment_id: int,
+    household_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Ordnet der Wohnung den Haushalt zu, der darin wohnt."""
+    apt = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Wohnung nicht gefunden")
+    try:
+        services.assign_household(db, apt, household_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    db.commit()
+    db.refresh(apt)
+    result = schemas.Apartment.model_validate(apt)
+    if apt.household:
+        result.household_name = apt.household.name
+    return result
+
+@app.delete("/apartments/{apartment_id}/assign", response_model=schemas.Apartment)
+def unassign_apartment(
+    apartment_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Löst die Zuordnung Wohnung -> Haushalt (Wohnung bleibt bestehen)."""
+    apt = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Wohnung nicht gefunden")
+    services.assign_household(db, apt, None)
+    db.commit()
+    db.refresh(apt)
+    return apt
+
+@app.delete("/apartments/{apartment_id}")
+def delete_apartment(
+    apartment_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Löscht eine Wohnung samt der Bewerbungen auf diese Wohnung."""
+    apt = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Wohnung nicht gefunden")
+    db.query(models.Application).filter(models.Application.apartment_id == apartment_id).delete()
+    db.delete(apt)
+    db.commit()
+    return {"deleted": apartment_id}
 
 # --- Applications ---
 @app.post("/applications/", response_model=schemas.Application)

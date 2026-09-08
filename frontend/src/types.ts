@@ -46,6 +46,23 @@ export interface Household {
     archived: boolean;
 }
 
+export interface Apartment {
+    id: number;
+    unit_number: string;
+    floor?: string;
+    area_shares?: number;
+    area_rent?: number;
+    area_utilities?: number;
+    apartment_type?: string;
+    apartment_category?: string;
+    size_rooms?: number | null;
+    wbs_raw?: string;
+    funding_type: string;
+    min_occupants?: number;
+    household_id?: number | null;
+    household_name?: string | null;
+}
+
 export interface ScoringConfig {
     key: string;
     value: number;
@@ -63,7 +80,7 @@ export interface RankedHousehold {
 }
 
 export interface RankingGroup {
-    size_rooms: number;
+    size_rooms: number | null;
     funding_type: string;
     households: RankedHousehold[];
 }

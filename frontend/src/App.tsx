@@ -10,6 +10,7 @@ import { Household, ScoringConfig, RankingGroup } from './types';
 import HouseholdDetailDialog from './components/household/HouseholdDetailDialog';
 import ImportTab from './components/import/ImportTab';
 import PersonsTab from './components/persons/PersonsTab';
+import ApartmentsTab from './components/apartments/ApartmentsTab';
 
 const CONFIG_LABELS: Record<string, string> = {
   weight_diversity_age:            'Altersstruktur',
@@ -52,6 +53,14 @@ const CONFIG_LABELS: Record<string, string> = {
   target_gender_d:                 'Geschlecht: divers',
 };
 
+const SIZE_NONE = '__none__';
+
+const sizeKey = (value: number | null): string =>
+  value === null || value === undefined ? SIZE_NONE : String(value);
+
+const sizeLabel = (value: number | null): string =>
+  value === null || value === undefined ? 'ohne Zimmerangabe' : `${value} Zimmer`;
+
 function App() {
   const [tabValue, setTabValue] = useState(0);
   const [households, setHouseholds] = useState<Household[]>([]);
@@ -82,7 +91,7 @@ function App() {
         const groups = await getRanking();
         setRankingGroups(groups);
         if (groups.length > 0 && !selectedSize && !selectedFunding) {
-          setSelectedSize(String(groups[0].size_rooms));
+          setSelectedSize(sizeKey(groups[0].size_rooms));
           setSelectedFunding(groups[0].funding_type);
         }
       } catch (e) {
@@ -233,6 +242,7 @@ function App() {
             <Tab label="Rangliste" />
             <Tab label="Alle Haushalte" />
             <Tab label="Personen" />
+            <Tab label="Wohnungen" />
             <Tab label="Bewertungskonfiguration" />
             <Tab label="Datenimport" />
             <Tab label="Aktionen" />
@@ -240,10 +250,11 @@ function App() {
         </Box>
 
         {tabValue === 0 && (() => {
-          const sizes = [...new Set(rankingGroups.map(g => g.size_rooms))].sort((a, b) => a - b);
+          const sizes = [...new Set(rankingGroups.map(g => g.size_rooms))]
+            .sort((a, b) => (a ?? Infinity) - (b ?? Infinity));
           const fundingTypes = [...new Set(rankingGroups.map(g => g.funding_type))].sort();
           const activeGroup = rankingGroups.find(
-            g => String(g.size_rooms) === selectedSize && g.funding_type === selectedFunding
+            g => sizeKey(g.size_rooms) === selectedSize && g.funding_type === selectedFunding
           );
 
           return (
@@ -257,15 +268,15 @@ function App() {
                     onChange={(e) => setSelectedSize(e.target.value)}
                   >
                     {sizes.map(s => (
-                      <MenuItem key={s} value={String(s)}>{s} Zimmer</MenuItem>
+                      <MenuItem key={sizeKey(s)} value={sizeKey(s)}>{sizeLabel(s)}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
                 <FormControl sx={{ minWidth: 200 }}>
-                  <InputLabel>Wohnungsart</InputLabel>
+                  <InputLabel>Förderungsart</InputLabel>
                   <Select
                     value={selectedFunding}
-                    label="Wohnungsart"
+                    label="Förderungsart"
                     onChange={(e) => setSelectedFunding(e.target.value)}
                   >
                     {fundingTypes.map(f => (
@@ -385,7 +396,14 @@ function App() {
           <PersonsTab onShowHousehold={(id) => setDetailHouseholdId(id)} />
         )}
 
-        {tabValue === 3 && (() => {
+        {tabValue === 3 && (
+          <ApartmentsTab
+            onShowHousehold={(id) => setDetailHouseholdId(id)}
+            onChanged={loadData}
+          />
+        )}
+
+        {tabValue === 4 && (() => {
           const diversityWeights = configs.filter(c => c.key.startsWith('weight_diversity_'));
           const otherWeights = configs.filter(c => c.key.startsWith('weight_') && !c.key.startsWith('weight_diversity_'));
           const naturalSort = (a: ScoringConfig, b: ScoringConfig) =>
@@ -447,11 +465,11 @@ function App() {
           );
         })()}
 
-        {tabValue === 4 && (
+        {tabValue === 5 && (
           <ImportTab onImportComplete={loadData} />
         )}
 
-        {tabValue === 5 && (
+        {tabValue === 6 && (
           <Box>
             <Grid container spacing={2}>
               <Grid>
