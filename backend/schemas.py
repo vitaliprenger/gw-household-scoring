@@ -13,6 +13,7 @@ class PersonBase(BaseModel):
     cultural_background: Optional[str] = None
     special_needs: Optional[str] = None
     member_number: Optional[str] = None
+    member_since: Optional[datetime] = None
 
 class PersonCreate(PersonBase):
     pass
@@ -27,11 +28,17 @@ class PersonUpdate(BaseModel):
     cultural_background: Optional[str] = None
     special_needs: Optional[str] = None
     member_number: Optional[str] = None
+    member_since: Optional[datetime] = None
     household_id: Optional[int] = None
+    archived: Optional[bool] = None
 
 class Person(PersonBase):
     id: int
     household_id: Optional[int] = None
+    individual_import_timestamp: Optional[datetime] = None
+    vcf_import_timestamp: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    archived: bool = False
 
     class Config:
         from_attributes = True
@@ -42,7 +49,6 @@ class PersonWithHousehold(Person):
 # --- Household Schemas ---
 class HouseholdBase(BaseModel):
     name: str
-    member_since: Optional[datetime] = None
     engagement_score: float = 0.0
     cultural_diversity_score: float = 0.0
     special_needs_score: float = 0.0
@@ -57,13 +63,14 @@ class HouseholdBase(BaseModel):
     import_source: Optional[str] = None
     import_timestamp: Optional[datetime] = None
     household_member_count: Optional[int] = None
+    apartment_unit: Optional[str] = None
+    vcf_import_timestamp: Optional[datetime] = None
 
 class HouseholdCreate(HouseholdBase):
     people: List[PersonCreate] = []
 
 class HouseholdUpdate(BaseModel):
     name: Optional[str] = None
-    member_since: Optional[datetime] = None
     engagement_score: Optional[float] = None
     cultural_diversity_score: Optional[float] = None
     special_needs_score: Optional[float] = None
@@ -76,11 +83,15 @@ class HouseholdUpdate(BaseModel):
     wheelchair_accessible: Optional[bool] = None
     financial_status: Optional[str] = None
     household_member_count: Optional[int] = None
+    apartment_unit: Optional[str] = None
+    archived: Optional[bool] = None
 
 class Household(HouseholdBase):
     id: int
     application_date: datetime
     total_score: float
+    updated_at: Optional[datetime] = None
+    archived: bool = False
     people: List[Person] = []
 
     class Config:
@@ -261,3 +272,58 @@ class IndividualCommitResponse(BaseModel):
     updated: int
     created: int
     skipped: int
+
+# --- VCF-Import Schemas ---
+class VcfPersonPreview(BaseModel):
+    temp_id: str
+    name: str
+    first_name: str
+    last_name: str
+    birth_date: Optional[str] = None
+    gender: Optional[str] = None
+    member_number: Optional[str] = None
+    member_since: Optional[str] = None
+    apartment_unit: Optional[str] = None
+    role: str
+    source: str
+    mentioned_by: Optional[str] = None
+
+class VcfHouseholdPreview(BaseModel):
+    temp_id: str
+    name: str
+    apartment_unit: Optional[str] = None
+    address: Optional[str] = None
+    is_resident: bool = False
+    timestamp: Optional[str] = None
+    persons: List[VcfPersonPreview] = []
+    match_result: MatchResult
+    already_imported: bool = False
+    warnings: List[str] = []
+    existing_data_changes: Optional[ExistingDataChanges] = None
+
+class VcfAnalysisResponse(BaseModel):
+    session_id: str
+    total_cards: int
+    skipped_no_name: int = 0
+    total_persons: int = 0
+    resident_households: int = 0
+    households: List[VcfHouseholdPreview] = []
+
+class VcfDecision(BaseModel):
+    temp_id: str
+    action: str
+    target_household_id: Optional[int] = None
+    excluded_person_temp_ids: List[str] = []
+
+class VcfCommitRequest(BaseModel):
+    session_id: str
+    decisions: List[VcfDecision]
+
+class VcfCommitResponse(BaseModel):
+    households_created: int
+    households_updated: int
+    households_skipped: int
+    persons_created: int
+    persons_updated: int
+    persons_assigned: int
+    created_household_ids: List[int] = []

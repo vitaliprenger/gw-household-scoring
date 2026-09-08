@@ -169,19 +169,22 @@ def calculate_diversity_subscores(household: models.Household, current_stats: di
     return subscores
 
 def calculate_membership_score(household: models.Household) -> float:
-    if not household.member_since:
+    dates = [p.member_since for p in household.people if p.member_since]
+    if not dates:
         return 0.0
-    
-    # Years of membership
-    years = (pd.Timestamp.now() - pd.to_datetime(household.member_since)).days / 365.25
-    # Example: 1 point per year, max 10
-    return min(years, 10.0) * 2.0 
+
+    earliest = min(dates)
+    years = (pd.Timestamp.now() - pd.to_datetime(earliest)).days / 365.25
+    return min(years, 10.0) * 2.0
 
 def calculate_engagement_score(household: models.Household) -> float:
     return max(0.0, min(1.0, household.engagement_score or 0.0))
 
 def calculate_resident_stats(db: Session) -> dict:
-    residents = db.query(models.Household).filter(models.Household.is_resident == True).all()
+    residents = db.query(models.Household).filter(
+        models.Household.is_resident == True,
+        models.Household.archived == False,
+    ).all()
     people = [p for h in residents for p in h.people]
     total = len(people)
 
@@ -223,7 +226,10 @@ def run_scoring(db: Session):
     initialize_config(db)
     config = get_config_dict(db)
 
-    households = db.query(models.Household).filter(models.Household.is_resident == False).all()
+    households = db.query(models.Household).filter(
+        models.Household.is_resident == False,
+        models.Household.archived == False,
+    ).all()
 
     current_stats = calculate_resident_stats(db)
 

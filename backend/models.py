@@ -11,7 +11,6 @@ class Household(Base):
     application_date = Column(DateTime, default=datetime.utcnow)
 
     # Scoring specific fields
-    member_since = Column(DateTime, nullable=True)
     engagement_score = Column(Float, default=0.0)
     cultural_diversity_score = Column(Float, default=0.0)
     special_needs_score = Column(Float, default=0.0)
@@ -31,6 +30,11 @@ class Household(Base):
     import_source = Column(String, nullable=True)
     import_timestamp = Column(DateTime, nullable=True)
     household_member_count = Column(Integer, nullable=True)
+    apartment_unit = Column(String, nullable=True)
+    vcf_import_timestamp = Column(DateTime, nullable=True)
+
+    updated_at = Column(DateTime, nullable=True)
+    archived = Column(Boolean, default=False)
 
     # Relationships
     people = relationship("Person", back_populates="household")
@@ -51,7 +55,11 @@ class Person(Base):
     cultural_background = Column(String, nullable=True)
     special_needs = Column(String, nullable=True)
     member_number = Column(String, nullable=True)
+    member_since = Column(DateTime, nullable=True)
     individual_import_timestamp = Column(DateTime, nullable=True)
+    vcf_import_timestamp = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+    archived = Column(Boolean, default=False)
 
     household = relationship("Household", back_populates="people")
 

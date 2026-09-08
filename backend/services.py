@@ -26,24 +26,22 @@ def process_excel_upload(file_contents: bytes, db: Session):
         member_since = pd.to_datetime(first_row.get("Member Since"), errors='coerce')
         if pd.isna(member_since):
             member_since = None
-            
+
         engagement_score = float(first_row.get("Engagement Score", 0.0))
-        
-        # Check if household exists or create new
-        # For simplicity in this iteration, we create new ones. 
-        # In production, we might want to update existing ones.
+
         db_household = models.Household(
             name=str(household_name),
-            member_since=member_since,
             engagement_score=engagement_score
         )
         db.add(db_household)
-        db.flush() # Flush to get the ID
-        
-        # Create people for this household
+        db.flush()
+
         for index, row in group.iterrows():
             birth_date = pd.to_datetime(row.get("Birth Date"), errors='coerce')
-            
+            row_member_since = pd.to_datetime(row.get("Member Since"), errors='coerce')
+            if pd.isna(row_member_since):
+                row_member_since = member_since
+
             db_person = models.Person(
                 household_id=db_household.id,
                 first_name=str(row.get("First Name", "")),
@@ -53,7 +51,8 @@ def process_excel_upload(file_contents: bytes, db: Session):
                 occupation_type=str(row.get("Occupation", "")),
                 education_level=str(row.get("Education", "")),
                 cultural_background=str(row.get("Cultural Background", "")),
-                special_needs=str(row.get("Special Needs", "")).strip() or None
+                special_needs=str(row.get("Special Needs", "")).strip() or None,
+                member_since=row_member_since,
             )
             db.add(db_person)
         
@@ -77,51 +76,46 @@ def seed_example_data(db: Session):
     residents = [
         {
             "name": "Manuela Liebold",
-            "member_since": _d(2017, 1, 1),
             "engagement_score": 0.8,
             "is_resident": True,
             "people": [
-                ("Manuela", "Liebold", _d(1975, 4, 12), "f", "2", "6", None, None, "1"),
-                ("Thorsten", "Liebold", _d(1972, 9, 8), "m", "4", "3", None, None, "2"),
+                ("Manuela", "Liebold", _d(1975, 4, 12), "f", "2", "6", None, None, "1", _d(2017, 1, 1)),
+                ("Thorsten", "Liebold", _d(1972, 9, 8), "m", "4", "3", None, None, "2", _d(2017, 1, 1)),
             ],
         },
         {
             "name": "Gudrun Gehrke",
-            "member_since": _d(2017, 6, 1),
             "engagement_score": 0.6,
             "is_resident": True,
             "people": [
-                ("Gudrun", "Gehrke", _d(1962, 3, 22), "f", "1", "7", None, None, "14"),
-                ("Mathias", "Uhl", _d(1960, 11, 15), "m", "9", "8", None, None, "13"),
+                ("Gudrun", "Gehrke", _d(1962, 3, 22), "f", "1", "7", None, None, "14", _d(2017, 6, 1)),
+                ("Mathias", "Uhl", _d(1960, 11, 15), "m", "9", "8", None, None, "13", _d(2017, 6, 1)),
             ],
         },
         {
             "name": "Elke Stücke",
-            "member_since": _d(2015, 1, 1),
             "engagement_score": 0.9,
             "is_resident": True,
             "people": [
-                ("Elke", "Stücke", _d(1958, 1, 25), "f", "5", "4", None, None, "30"),
+                ("Elke", "Stücke", _d(1958, 1, 25), "f", "5", "4", None, None, "30", _d(2015, 1, 1)),
             ],
         },
         {
             "name": "Sebastian Danek",
-            "member_since": _d(2018, 1, 1),
             "engagement_score": 0.5,
             "is_resident": True,
             "people": [
-                ("Sebastian", "Danek", _d(1988, 7, 3), "m", "9", "7", None, None, "65"),
-                ("Tanja", "Danek", _d(1990, 2, 14), "f", "2", "6", None, None, "66"),
-                ("Ewa", "Danek", _d(2019, 3, 28), "f", "0", "0", None, None, None),
+                ("Sebastian", "Danek", _d(1988, 7, 3), "m", "9", "7", None, None, "65", _d(2018, 1, 1)),
+                ("Tanja", "Danek", _d(1990, 2, 14), "f", "2", "6", None, None, "66", _d(2018, 1, 1)),
+                ("Ewa", "Danek", _d(2019, 3, 28), "f", "0", "0", None, None, None, None),
             ],
         },
         {
             "name": "Christa Köller",
-            "member_since": _d(2016, 6, 1),
             "engagement_score": 0.3,
             "is_resident": True,
             "people": [
-                ("Christa", "Köller", _d(1950, 8, 30), "f", "6", "4", None, None, "34"),
+                ("Christa", "Köller", _d(1950, 8, 30), "f", "6", "4", None, None, "34", _d(2016, 6, 1)),
             ],
         },
     ]
@@ -130,7 +124,6 @@ def seed_example_data(db: Session):
     applicants = [
         {
             "name": "Simon Kruse",
-            "member_since": _d(2024, 5, 1),
             "engagement_score": 0.2,
             "is_resident": False,
             "wbs_status": "WBS Einkommensgruppe A",
@@ -138,52 +131,58 @@ def seed_example_data(db: Session):
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
                 ("Simon", "Kruse", _d(1988, 11, 29), "m", "1", "7", None,
-                 "Behinderung (GdB 40 mit Gleichstellung)", "637"),
+                 "Behinderung (GdB 40 mit Gleichstellung)", "637", _d(2024, 5, 1)),
             ],
         },
         {
             "name": "Anja Venjakob",
-            "member_since": _d(2023, 1, 1),
             "engagement_score": 0.5,
             "is_resident": False,
             "wbs_status": "kein WBS",
             "desired_apartment_size": "3,5",
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
-                ("Anja", "Venjakob", _d(1977, 6, 23), "f", "2", "7", None, None, "628"),
-                ("Jörg", "Höbing", _d(1974, 6, 17), "m", "2", "7", None, None, "627"),
+                ("Anja", "Venjakob", _d(1977, 6, 23), "f", "2", "7", None, None, "628", _d(2023, 1, 1)),
+                ("Jörg", "Höbing", _d(1974, 6, 17), "m", "2", "7", None, None, "627", _d(2023, 1, 1)),
             ],
         },
         {
             "name": "Reinhilde Tenk",
-            "member_since": _d(2017, 6, 1),
             "engagement_score": 0.7,
             "is_resident": False,
             "wbs_status": "kein WBS",
             "desired_apartment_size": "3,5",
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
-                ("Reinhilde", "Tenk", _d(1954, 11, 10), "f", "5", "6", None, "Osteoporose", "26"),
-                ("Thomas", "Tenk", _d(1958, 8, 17), "m", "4", "4", None, None, "27"),
+                ("Reinhilde", "Tenk", _d(1954, 11, 10), "f", "5", "6", None, "Osteoporose", "26", _d(2017, 6, 1)),
+            ],
+        },
+        {
+            "name": "Thomas Tenk",
+            "engagement_score": 0.5,
+            "is_resident": False,
+            "wbs_status": "kein WBS",
+            "desired_apartment_size": "2,5",
+            "desired_apartment_type": ["Standard Wohnungstypen"],
+            "people": [
+                ("Thomas", "Tenk", _d(1958, 8, 17), "m", "4", "4", None, None, "27", _d(2017, 6, 1)),
             ],
         },
         {
             "name": "Kerstin Nolte",
-            "member_since": _d(2019, 6, 1),
             "engagement_score": 0.4,
             "is_resident": False,
             "wbs_status": "WBS Einkommensgruppe A",
             "financial_status": "kann Anteile nicht übernehmen",
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
-                ("Kerstin", "Nolte", _d(1986, 5, 20), "f", "2", "6", None, None, "135"),
-                ("Emmi", "Nolte", _d(2018, 1, 8), "f", "0", "0", None, None, None),
-                ("Clara", "Nolte", _d(2018, 1, 8), "f", "0", "0", None, None, None),
+                ("Kerstin", "Nolte", _d(1986, 5, 20), "f", "2", "6", None, None, "135", _d(2019, 6, 1)),
+                ("Emmi", "Nolte", _d(2018, 1, 8), "f", "0", "0", None, None, None, None),
+                ("Clara", "Nolte", _d(2018, 1, 8), "f", "0", "0", None, None, None, None),
             ],
         },
         {
             "name": "Sandra Rocha",
-            "member_since": _d(2017, 1, 1),
             "engagement_score": 0.6,
             "is_resident": False,
             "wbs_status": "WBS Einkommensgruppe A",
@@ -193,9 +192,9 @@ def seed_example_data(db: Session):
             "pets_info": "Hund",
             "people": [
                 ("Sandra A.", "Rocha", _d(1980, 12, 15), "f", "2", "6",
-                 "lateinamerikanisch", None, "12"),
+                 "lateinamerikanisch", None, "12", _d(2017, 1, 1)),
                 ("Silas K. M.", "Rocha Hegmanns", _d(2004, 9, 22), "m", "0", "4",
-                 None, None, None),
+                 None, None, None, None),
             ],
         },
     ]
@@ -220,7 +219,6 @@ def seed_example_data(db: Session):
     for hh_data in residents + applicants:
         hh = models.Household(
             name=hh_data["name"],
-            member_since=hh_data["member_since"],
             engagement_score=hh_data["engagement_score"],
             is_resident=hh_data["is_resident"],
             wbs_status=hh_data.get("wbs_status"),
@@ -232,7 +230,7 @@ def seed_example_data(db: Session):
         )
         db.add(hh)
         db.flush()
-        for first, last, birth, gender, occ, edu, culture, special, member_nr in hh_data["people"]:
+        for first, last, birth, gender, occ, edu, culture, special, member_nr, member_since in hh_data["people"]:
             db.add(models.Person(
                 household_id=hh.id,
                 first_name=first,
@@ -244,6 +242,7 @@ def seed_example_data(db: Session):
                 cultural_background=culture,
                 special_needs=special,
                 member_number=member_nr,
+                member_since=member_since,
             ))
         all_households.append(hh)
 

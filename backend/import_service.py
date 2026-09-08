@@ -281,7 +281,7 @@ def parse_household_bogen(file_contents: bytes) -> dict:
             "persons": persons,
         })
 
-    # Deduplicate: group by Person 1 name (normalized), keep newest
+    # Deduplicate: group by all person names/member numbers (order-independent), keep newest
     deduped = _deduplicate_hh(parsed)
 
     return {
@@ -326,6 +326,9 @@ def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
     persons = hh_data.get("persons", [])
     all_households = db.query(models.Household).all()
 
+    # Always compute fuzzy candidates so users can re-assign even exact matches
+    candidates = _fuzzy_match(persons, all_households)
+
     # Step 1: Exact match on member number
     for p in persons:
         if not p.get("member_number"):
@@ -338,11 +341,13 @@ def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
         if matched_person and matched_person.household_id:
             hh = db.query(models.Household).get(matched_person.household_id)
             if hh:
+                _ensure_hh_candidate(candidates, hh)
                 return schemas.MatchResult(
                     type="exact_member_nr",
                     matched_household_id=hh.id,
                     matched_household_name=hh.name,
                     confidence=1.0,
+                    fuzzy_candidates=candidates[:10],
                 )
 
     # Step 2: Exact match on normalized name + birth date
@@ -364,24 +369,27 @@ def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
                     try:
                         import_dob = date.fromisoformat(dob_str)
                         if import_dob == db_dob:
+                            _ensure_hh_candidate(candidates, hh)
                             return schemas.MatchResult(
                                 type="exact_name_dob",
                                 matched_household_id=hh.id,
                                 matched_household_name=hh.name,
                                 confidence=1.0,
+                                fuzzy_candidates=candidates[:10],
                             )
                     except Exception:
                         pass
                 elif name_match and not dob_str:
+                    _ensure_hh_candidate(candidates, hh)
                     return schemas.MatchResult(
                         type="exact_name_dob",
                         matched_household_id=hh.id,
                         matched_household_name=hh.name,
                         confidence=0.9,
+                        fuzzy_candidates=candidates[:10],
                     )
 
-    # Step 3: Fuzzy matching
-    candidates = _fuzzy_match(persons, all_households)
+    # Step 3: Fuzzy matching (already computed above)
     top = candidates[0] if candidates else None
     return schemas.MatchResult(
         type="fuzzy" if top else "none",
@@ -422,6 +430,35 @@ def _fuzzy_match(persons: list[dict], all_households: list[models.Household]) ->
     candidates = [c for c in candidates if c.score >= 0.7]
     candidates.sort(key=lambda c: c.score, reverse=True)
     return candidates
+
+
+def _ensure_hh_candidate(candidates: list[schemas.FuzzyCandidate], hh: models.Household):
+    for c in candidates:
+        if c.household_id == hh.id:
+            c.score = max(c.score, 1.0)
+            candidates.sort(key=lambda x: x.score, reverse=True)
+            return
+    member_nrs = [p.member_number for p in hh.people if p.member_number]
+    candidates.insert(0, schemas.FuzzyCandidate(
+        household_id=hh.id,
+        name=hh.name,
+        score=1.0,
+        member_numbers=member_nrs,
+    ))
+
+
+def _ensure_person_candidate(candidates: list[schemas.FuzzyCandidate], person: models.Person, hh):
+    for c in candidates:
+        if c.household_id == person.id:
+            c.score = max(c.score, 1.0)
+            candidates.sort(key=lambda x: x.score, reverse=True)
+            return
+    candidates.insert(0, schemas.FuzzyCandidate(
+        household_id=person.id,
+        name=f"{person.first_name} {person.last_name}" + (f" ({hh.name})" if hh else ""),
+        score=1.0,
+        member_numbers=[person.member_number] if person.member_number else [],
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +506,8 @@ def compute_data_changes(new_data: dict, existing: models.Household) -> Optional
             ))
         elif old_val is not None and (new_val is None or new_val == "" or new_val == 0 or new_val == []):
             if field in ("pets_count",) and old_val == 0:
+                continue
+            if field == "wheelchair_accessible" and old_val is False:
                 continue
             removals.append(schemas.DataChange(
                 field=label, old_value=_display(old_val)
@@ -821,54 +860,9 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
     ln = (ind_data.get("last_name") or "").strip().lower()
     dob_str = ind_data.get("birth_date")
 
-    # Step 1: exact member number
-    if member_nr:
-        matched = (
-            db.query(models.Person)
-            .filter(models.Person.member_number == member_nr)
-            .first()
-        )
-        if matched and matched.household_id:
-            hh = db.query(models.Household).get(matched.household_id)
-            return schemas.MatchResult(
-                type="exact_member_nr",
-                matched_household_id=matched.id,
-                matched_household_name=hh.name if hh else None,
-                confidence=1.0,
-            )
-
-    # Step 2: exact name + DOB
     all_persons = db.query(models.Person).filter(models.Person.household_id.isnot(None)).all()
-    for p in all_persons:
-        p_fn = (p.first_name or "").strip().lower()
-        p_ln = (p.last_name or "").strip().lower()
-        name_match = (fn == p_fn and ln == p_ln) or (fn == p_ln and ln == p_fn)
-        if not name_match:
-            continue
-        if dob_str and p.birth_date:
-            p_dob = p.birth_date.date() if isinstance(p.birth_date, datetime) else p.birth_date
-            try:
-                import_dob = date.fromisoformat(dob_str)
-                if import_dob == p_dob:
-                    hh = db.query(models.Household).get(p.household_id) if p.household_id else None
-                    return schemas.MatchResult(
-                        type="exact_name_dob",
-                        matched_household_id=p.id,
-                        matched_household_name=hh.name if hh else None,
-                        confidence=1.0,
-                    )
-            except Exception:
-                pass
-        elif name_match and not dob_str:
-            hh = db.query(models.Household).get(p.household_id) if p.household_id else None
-            return schemas.MatchResult(
-                type="exact_name_dob",
-                matched_household_id=p.id,
-                matched_household_name=hh.name if hh else None,
-                confidence=0.9,
-            )
 
-    # Step 3: fuzzy
+    # Always compute fuzzy candidates so users can re-assign even exact matches
     import_name = f"{fn} {ln}".strip()
     candidates = []
     for p in all_persons:
@@ -884,6 +878,59 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
     candidates = [c for c in candidates if c.score >= 0.7]
     candidates.sort(key=lambda c: c.score, reverse=True)
 
+    # Step 1: exact member number
+    if member_nr:
+        matched = (
+            db.query(models.Person)
+            .filter(models.Person.member_number == member_nr)
+            .first()
+        )
+        if matched and matched.household_id:
+            hh = db.query(models.Household).get(matched.household_id)
+            _ensure_person_candidate(candidates, matched, hh)
+            return schemas.MatchResult(
+                type="exact_member_nr",
+                matched_household_id=matched.id,
+                matched_household_name=hh.name if hh else None,
+                confidence=1.0,
+                fuzzy_candidates=candidates[:10],
+            )
+
+    # Step 2: exact name + DOB
+    for p in all_persons:
+        p_fn = (p.first_name or "").strip().lower()
+        p_ln = (p.last_name or "").strip().lower()
+        name_match = (fn == p_fn and ln == p_ln) or (fn == p_ln and ln == p_fn)
+        if not name_match:
+            continue
+        if dob_str and p.birth_date:
+            p_dob = p.birth_date.date() if isinstance(p.birth_date, datetime) else p.birth_date
+            try:
+                import_dob = date.fromisoformat(dob_str)
+                if import_dob == p_dob:
+                    hh = db.query(models.Household).get(p.household_id) if p.household_id else None
+                    _ensure_person_candidate(candidates, p, hh)
+                    return schemas.MatchResult(
+                        type="exact_name_dob",
+                        matched_household_id=p.id,
+                        matched_household_name=hh.name if hh else None,
+                        confidence=1.0,
+                        fuzzy_candidates=candidates[:10],
+                    )
+            except Exception:
+                pass
+        elif name_match and not dob_str:
+            hh = db.query(models.Household).get(p.household_id) if p.household_id else None
+            _ensure_person_candidate(candidates, p, hh)
+            return schemas.MatchResult(
+                type="exact_name_dob",
+                matched_household_id=p.id,
+                matched_household_name=hh.name if hh else None,
+                confidence=0.9,
+                fuzzy_candidates=candidates[:10],
+            )
+
+    # Step 3: fuzzy (already computed above)
     top = candidates[0] if candidates else None
     return schemas.MatchResult(
         type="fuzzy" if top else "none",

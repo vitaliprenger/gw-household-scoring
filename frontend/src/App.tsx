@@ -3,7 +3,7 @@ import {
   AppBar, Toolbar, Typography, Container, Box, Tabs, Tab,
   Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Button, TextField, Grid, Card, CardContent, Alert, Snackbar, Chip,
-  FormControl, InputLabel, Select, MenuItem
+  FormControl, InputLabel, Select, MenuItem, FormControlLabel, Switch
 } from '@mui/material';
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, uploadHouseholds, login, getRanking } from './api';
 import { Household, ScoringConfig, RankingGroup } from './types';
@@ -65,16 +65,17 @@ function App() {
   const [password, setPassword] = useState("");
 
   const [detailHouseholdId, setDetailHouseholdId] = useState<number | null>(null);
+  const [showArchivedHH, setShowArchivedHH] = useState(false);
 
   useEffect(() => {
     if (isLoggedIn) {
       loadData();
     }
-  }, [isLoggedIn]);
+  }, [isLoggedIn, showArchivedHH]);
 
   const loadData = async () => {
     try {
-      const hh = await getHouseholds();
+      const hh = await getHouseholds(showArchivedHH);
       setHouseholds(hh.sort((a, b) => b.total_score - a.total_score));
 
       try {
@@ -158,6 +159,16 @@ function App() {
       } catch (error) {
         setMessage({ text: "Upload fehlgeschlagen.", type: 'error' });
       }
+    }
+  };
+
+  const formatDateTime = (val?: string): string => {
+    if (!val) return '—';
+    try {
+      const d = new Date(val);
+      return d.toLocaleDateString('de-DE') + ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return val;
     }
   };
 
@@ -303,6 +314,18 @@ function App() {
         })()}
 
         {tabValue === 1 && (
+          <Box>
+          <Box sx={{ display: 'flex', mb: 2, alignItems: 'center' }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={showArchivedHH}
+                  onChange={(_, checked) => setShowArchivedHH(checked)}
+                />
+              }
+              label="Archivierte anzeigen"
+            />
+          </Box>
           <TableContainer component={Paper}>
             <Table>
               <TableHead>
@@ -313,6 +336,8 @@ function App() {
                   <TableCell>Mitglied seit</TableCell>
                   <TableCell align="right">Engagement</TableCell>
                   <TableCell>Bewohner</TableCell>
+                  <TableCell>Letzter Import</TableCell>
+                  <TableCell>Letzte Bearbeitung</TableCell>
                   <TableCell align="right">Gesamtpunktzahl</TableCell>
                 </TableRow>
               </TableHead>
@@ -321,28 +346,39 @@ function App() {
                   <TableRow
                     key={hh.id}
                     hover
-                    sx={{ cursor: 'pointer' }}
+                    sx={{ cursor: 'pointer', opacity: hh.archived ? 0.5 : 1 }}
                     onClick={() => setDetailHouseholdId(hh.id)}
                   >
-                    <TableCell>{hh.name}</TableCell>
+                    <TableCell>
+                      {hh.name}
+                      {hh.archived && <Chip label="Archiviert" size="small" sx={{ ml: 1 }} color="default" />}
+                    </TableCell>
                     <TableCell align="right">{hh.people.length}</TableCell>
                     <TableCell>
                       {hh.wbs_status ? <Chip label={hh.wbs_status} size="small" /> : '–'}
                     </TableCell>
-                    <TableCell>{hh.member_since ? new Date(hh.member_since).toLocaleDateString('de-DE') : '–'}</TableCell>
+                    <TableCell>{(() => {
+                      const dates = hh.people.map(p => p.member_since).filter(Boolean) as string[];
+                      if (dates.length === 0) return '–';
+                      const earliest = dates.reduce((a, b) => a < b ? a : b);
+                      return new Date(earliest).toLocaleDateString('de-DE');
+                    })()}</TableCell>
                     <TableCell align="right">{hh.engagement_score}</TableCell>
                     <TableCell>{hh.is_resident ? 'Ja' : 'Nein'}</TableCell>
+                    <TableCell>{formatDateTime(hh.import_timestamp)}</TableCell>
+                    <TableCell>{formatDateTime(hh.updated_at)}</TableCell>
                     <TableCell align="right"><strong>{hh.total_score.toFixed(2)}</strong></TableCell>
                   </TableRow>
                 ))}
                 {households.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">Keine Haushalte vorhanden.</TableCell>
+                    <TableCell colSpan={9} align="center">Keine Haushalte vorhanden.</TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
           </TableContainer>
+          </Box>
         )}
 
         {tabValue === 2 && (

@@ -68,6 +68,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
         return init;
     });
     const [matchingFor, setMatchingFor] = useState<HouseholdImportPreview | null>(null);
+    const [matchOverrides, setMatchOverrides] = useState<Record<string, string>>({});
     const [dataChangeFor, setDataChangeFor] = useState<HouseholdImportPreview | null>(null);
     const [committing, setCommitting] = useState(false);
     const [commitResult, setCommitResult] = useState<{ imported: number; updated: number; skipped: number } | null>(null);
@@ -173,15 +174,21 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                     )}
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Chip
-                                                        label={hh.match_result.type === 'none'
-                                                            ? 'Kein Match'
-                                                            : `${matchTypeLabel(hh.match_result.type)}: ${hh.match_result.matched_household_name ?? ''}`}
-                                                        size="small"
-                                                        color={matchColor(hh.match_result.type)}
-                                                        onClick={hh.match_result.type === 'fuzzy' || hh.match_result.type === 'none'
-                                                            ? () => setMatchingFor(hh) : undefined}
-                                                    />
+                                                    {(() => {
+                                                        const overrideName = matchOverrides[hh.temp_id];
+                                                        return (
+                                                            <Chip
+                                                                label={overrideName
+                                                                    ? `Zugeordnet: ${overrideName}`
+                                                                    : hh.match_result.type === 'none'
+                                                                        ? 'Kein Match'
+                                                                        : `${matchTypeLabel(hh.match_result.type)}: ${hh.match_result.matched_household_name ?? ''}`}
+                                                                size="small"
+                                                                color={overrideName ? 'info' : matchColor(hh.match_result.type)}
+                                                                onClick={() => setMatchingFor(hh)}
+                                                            />
+                                                        );
+                                                    })()}
                                                 </TableCell>
                                                 <TableCell>
                                                     {hh.already_imported && (
@@ -279,16 +286,24 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
             {matchingFor && (
                 <MatchingDialog
                     open={!!matchingFor}
-                    household={matchingFor}
+                    title={`Haushalt zuordnen: ${matchingFor.persons[0]?.name ?? '—'}`}
+                    description={`Personen im importierten Haushalt: ${matchingFor.persons.map((p) => `${p.name} (MitglNr: ${p.member_number || '—'})`).join(', ')}`}
+                    candidates={matchingFor.match_result.fuzzy_candidates || []}
                     onClose={() => setMatchingFor(null)}
-                    onSelect={(householdId) => {
+                    onSelect={(householdId, name) => {
                         if (householdId) {
                             updateDecision(matchingFor.temp_id, {
                                 action: 'update',
                                 target_household_id: householdId,
                             });
+                            setMatchOverrides((prev) => ({ ...prev, [matchingFor.temp_id]: name || '' }));
                         } else {
                             updateDecision(matchingFor.temp_id, { action: 'create' });
+                            setMatchOverrides((prev) => {
+                                const next = { ...prev };
+                                delete next[matchingFor.temp_id];
+                                return next;
+                            });
                         }
                         setMatchingFor(null);
                     }}
