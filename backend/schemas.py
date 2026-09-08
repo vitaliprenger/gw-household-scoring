@@ -100,14 +100,38 @@ class Household(HouseholdBase):
 # --- Apartment Schemas ---
 class ApartmentBase(BaseModel):
     unit_number: str
-    size_rooms: float
+    size_rooms: Optional[float] = None
     funding_type: str
+    floor: Optional[str] = None
+    area_shares: Optional[float] = None
+    area_rent: Optional[float] = None
+    area_utilities: Optional[float] = None
+    apartment_type: Optional[str] = None
+    apartment_category: Optional[str] = None
+    wbs_raw: Optional[str] = None
+    min_occupants: Optional[int] = None
+    household_id: Optional[int] = None
 
 class ApartmentCreate(ApartmentBase):
     pass
 
+class ApartmentUpdate(BaseModel):
+    unit_number: Optional[str] = None
+    size_rooms: Optional[float] = None
+    funding_type: Optional[str] = None
+    floor: Optional[str] = None
+    area_shares: Optional[float] = None
+    area_rent: Optional[float] = None
+    area_utilities: Optional[float] = None
+    apartment_type: Optional[str] = None
+    apartment_category: Optional[str] = None
+    wbs_raw: Optional[str] = None
+    min_occupants: Optional[int] = None
+    household_id: Optional[int] = None
+
 class Apartment(ApartmentBase):
     id: int
+    household_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -151,7 +175,7 @@ class RankedHousehold(BaseModel):
         from_attributes = True
 
 class RankingGroup(BaseModel):
-    size_rooms: float
+    size_rooms: Optional[float] = None
     funding_type: str
     households: List[RankedHousehold] = []
 
@@ -327,3 +351,4 @@ class VcfCommitResponse(BaseModel):
     persons_updated: int
     persons_assigned: int
     created_household_ids: List[int] = []
+

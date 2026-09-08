@@ -39,6 +39,12 @@ class Household(Base):
     # Relationships
     people = relationship("Person", back_populates="household")
     applications = relationship("Application", back_populates="household")
+    apartment = relationship(
+        "Apartment",
+        back_populates="household",
+        foreign_keys="Apartment.household_id",
+        uselist=False,
+    )
 
 class Person(Base):
     __tablename__ = "people"
@@ -67,10 +73,24 @@ class Apartment(Base):
     __tablename__ = "apartments"
 
     id = Column(Integer, primary_key=True, index=True)
-    unit_number = Column(String, unique=True, index=True)
-    size_rooms = Column(Float) # 1.5 to 5.5
-    funding_type = Column(String) # "freifinanziert", "WBS A", "WBS B"
-    
+    unit_number = Column(String, unique=True, index=True)  # z. B. "W.002", "P.108.1"
+    size_rooms = Column(Float, nullable=True)  # 1.5 bis 5.5; None bei Sondertypen
+    funding_type = Column(String)  # "freifinanziert", "WBS A", "WBS B"
+
+    # Wohnungsdaten (Stammdaten, im Frontend editierbar)
+    floor = Column(String, nullable=True)                # EG, 1.OG, 2.OG, 3.OG
+    area_shares = Column(Float, nullable=True)           # qm Anteile
+    area_rent = Column(Float, nullable=True)             # qm mietwirksam
+    area_utilities = Column(Float, nullable=True)        # qm Nebenkosten
+    apartment_type = Column(String, nullable=True)       # "1.5", "CL Punkt", "Mini WG", ...
+    apartment_category = Column(String, nullable=True)   # Wohnungsart
+    wbs_raw = Column(String, nullable=True)              # WBS-Kennzeichen der Genossenschaft
+    min_occupants = Column(Integer, nullable=True)       # mind. Bewohner
+
+    # Ist-Belegung: Haushalt, der in dieser Wohnung wohnt
+    household_id = Column(Integer, ForeignKey("households.id"), nullable=True)
+
+    household = relationship("Household", back_populates="apartment")
     applications = relationship("Application", back_populates="apartment")
 
 class Application(Base):
