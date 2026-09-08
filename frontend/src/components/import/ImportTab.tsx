@@ -2,10 +2,11 @@ import { useState } from 'react';
 import {
     Box, Typography, Paper, Button, Alert, CircularProgress,
 } from '@mui/material';
-import { analyzeHHBogen, analyzeIndividualBogen } from '../../api';
-import { HHAnalysisResponse, IndividualAnalysisResponse } from '../../types';
+import { analyzeHHBogen, analyzeIndividualBogen, analyzeVcf } from '../../api';
+import { HHAnalysisResponse, IndividualAnalysisResponse, VcfAnalysisResponse } from '../../types';
 import HHImportWizard from './HHImportWizard';
 import IndividualImportWizard from './IndividualImportWizard';
+import VcfImportWizard from './VcfImportWizard';
 
 interface ImportTabProps {
     onImportComplete: () => void;
@@ -19,6 +20,10 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
     const [indAnalysis, setIndAnalysis] = useState<IndividualAnalysisResponse | null>(null);
     const [indWizardOpen, setIndWizardOpen] = useState(false);
     const [indLoading, setIndLoading] = useState(false);
+
+    const [vcfAnalysis, setVcfAnalysis] = useState<VcfAnalysisResponse | null>(null);
+    const [vcfWizardOpen, setVcfWizardOpen] = useState(false);
+    const [vcfLoading, setVcfLoading] = useState(false);
 
     const [error, setError] = useState('');
 
@@ -52,6 +57,23 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
             setError(e?.response?.data?.detail || 'Analyse fehlgeschlagen');
         } finally {
             setIndLoading(false);
+            event.target.value = '';
+        }
+    }
+
+    async function handleVcfUpload(event: React.ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        setVcfLoading(true);
+        setError('');
+        try {
+            const result = await analyzeVcf(file);
+            setVcfAnalysis(result);
+            setVcfWizardOpen(true);
+        } catch (e: any) {
+            setError(e?.response?.data?.detail || 'Analyse fehlgeschlagen');
+        } finally {
+            setVcfLoading(false);
             event.target.value = '';
         }
     }
@@ -92,6 +114,22 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
                 </Button>
             </Paper>
 
+            <Paper sx={{ p: 3, mt: 3 }}>
+                <Typography variant="h6" gutterBottom>3. Mitgliederliste (vCard) importieren</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Importiert Mitgliedsdaten aus dem Adressbuch-Export (.vcf): Mitgliedsnummer,
+                    Geburtsdatum, Geschlecht sowie das Datum des Aufnahmegesprächs als Beginn der
+                    Mitgliedschaft. Personen mit Wohnungsnummer in der Adresse werden als
+                    aktuelle Bewohner geführt und pro Wohnung zu einem Haushalt zusammengefasst;
+                    Partner*innen und Kinder werden zusätzlich aus dem Notizfeld gelesen.
+                </Typography>
+                <Button variant="contained" component="label" disabled={vcfLoading}>
+                    {vcfLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                    vCard-Datei hochladen
+                    <input type="file" hidden onChange={handleVcfUpload} accept=".vcf,.vcard" />
+                </Button>
+            </Paper>
+
             {hhWizardOpen && hhAnalysis && (
                 <HHImportWizard
                     open={hhWizardOpen}
@@ -107,6 +145,14 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
                     analysis={indAnalysis}
                     onClose={() => setIndWizardOpen(false)}
                     onComplete={() => { setIndWizardOpen(false); onImportComplete(); }}
+                />
+            )}
+            {vcfWizardOpen && vcfAnalysis && (
+                <VcfImportWizard
+                    open={vcfWizardOpen}
+                    analysis={vcfAnalysis}
+                    onClose={() => setVcfWizardOpen(false)}
+                    onComplete={() => { setVcfWizardOpen(false); onImportComplete(); }}
                 />
             )}
         </Box>

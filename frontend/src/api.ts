@@ -11,6 +11,9 @@ import {
     IndividualAnalysisResponse,
     IndividualCommitRequest,
     IndividualCommitResponse,
+    VcfAnalysisResponse,
+    VcfCommitRequest,
+    VcfCommitResponse,
 } from './types';
 
 const API_URL = 'http://127.0.0.1:8000';
@@ -32,8 +35,10 @@ export const login = async (password: string) => {
     return response.data;
 };
 
-export const getHouseholds = async () => {
-    const response = await api.get<Household[]>('/households/');
+export const getHouseholds = async (includeArchived = false) => {
+    const response = await api.get<Household[]>('/households/', {
+        params: includeArchived ? { include_archived: true } : {},
+    });
     return response.data;
 };
 
@@ -53,12 +58,29 @@ export const updatePerson = async (id: number, data: Partial<Person>) => {
 };
 
 export const assignPerson = async (personId: number, householdId: number) => {
-    const response = await api.post(`/people/${personId}/assign/${householdId}`);
+    const response = await api.post<Person>(`/people/${personId}/assign/${householdId}`);
     return response.data;
 };
 
-export const getAllPersons = async () => {
-    const response = await api.get<PersonWithHousehold[]>('/people/');
+export const unassignPerson = async (personId: number) => {
+    const response = await api.delete<Person>(`/people/${personId}/assign`);
+    return response.data;
+};
+
+export const getAllPersons = async (includeArchived = false) => {
+    const response = await api.get<PersonWithHousehold[]>('/people/', {
+        params: includeArchived ? { include_archived: true } : {},
+    });
+    return response.data;
+};
+
+export const toggleArchiveHousehold = async (id: number) => {
+    const response = await api.patch<{ archived: boolean }>(`/households/${id}/archive`);
+    return response.data;
+};
+
+export const toggleArchivePerson = async (id: number) => {
+    const response = await api.patch<{ archived: boolean }>(`/people/${id}/archive`);
     return response.data;
 };
 
@@ -123,5 +145,19 @@ export const analyzeIndividualBogen = async (file: File): Promise<IndividualAnal
 
 export const commitIndividualBogen = async (request: IndividualCommitRequest): Promise<IndividualCommitResponse> => {
     const response = await api.post<IndividualCommitResponse>('/import/individual-bogen/commit', request);
+    return response.data;
+};
+
+export const analyzeVcf = async (file: File): Promise<VcfAnalysisResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post<VcfAnalysisResponse>('/import/vcf/analyze', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+};
+
+export const commitVcf = async (request: VcfCommitRequest): Promise<VcfCommitResponse> => {
+    const response = await api.post<VcfCommitResponse>('/import/vcf/commit', request);
     return response.data;
 };

@@ -10,6 +10,11 @@ export interface Person {
     cultural_background?: string;
     special_needs?: string;
     member_number?: string;
+    member_since?: string;
+    individual_import_timestamp?: string;
+    vcf_import_timestamp?: string;
+    updated_at?: string;
+    archived: boolean;
 }
 
 export interface PersonWithHousehold extends Person {
@@ -19,7 +24,6 @@ export interface PersonWithHousehold extends Person {
 export interface Household {
     id: number;
     name: string;
-    member_since?: string;
     engagement_score: number;
     cultural_diversity_score: number;
     special_needs_score: number;
@@ -35,7 +39,11 @@ export interface Household {
     financial_status?: string;
     import_source?: string;
     import_timestamp?: string;
+    updated_at?: string;
     household_member_count?: number;
+    apartment_unit?: string;
+    vcf_import_timestamp?: string;
+    archived: boolean;
 }
 
 export interface ScoringConfig {
@@ -193,4 +201,66 @@ export interface IndividualCommitResponse {
     updated: number;
     created: number;
     skipped: number;
+}
+
+// --- VCF-Import Types ---
+
+export interface VcfPersonPreview {
+    temp_id: string;
+    name: string;
+    first_name: string;
+    last_name: string;
+    birth_date?: string;
+    gender?: string;
+    member_number?: string;
+    member_since?: string;
+    apartment_unit?: string;
+    role: 'member' | 'partner' | 'child';
+    source: 'vcard' | 'note';
+    mentioned_by?: string;
+}
+
+export interface VcfHouseholdPreview {
+    temp_id: string;
+    name: string;
+    apartment_unit?: string;
+    address?: string;
+    is_resident: boolean;
+    timestamp?: string;
+    persons: VcfPersonPreview[];
+    match_result: MatchResult;
+    already_imported: boolean;
+    warnings: string[];
+    existing_data_changes?: ExistingDataChanges;
+}
+
+export interface VcfAnalysisResponse {
+    session_id: string;
+    total_cards: number;
+    skipped_no_name: number;
+    total_persons: number;
+    resident_households: number;
+    households: VcfHouseholdPreview[];
+}
+
+export interface VcfDecision {
+    temp_id: string;
+    action: 'create' | 'update' | 'skip';
+    target_household_id?: number;
+    excluded_person_temp_ids: string[];
+}
+
+export interface VcfCommitRequest {
+    session_id: string;
+    decisions: VcfDecision[];
+}
+
+export interface VcfCommitResponse {
+    households_created: number;
+    households_updated: number;
+    households_skipped: number;
+    persons_created: number;
+    persons_updated: number;
+    persons_assigned: number;
+    created_household_ids: number[];
 }

@@ -1,10 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from typing import List
 
-from . import models, schemas, database, services, scoring, auth, import_service
+from datetime import datetime
+from . import models, schemas, database, services, scoring, auth, import_service, vcf_import_service
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -24,6 +25,10 @@ with database.engine.connect() as conn:
         "household_member_count": "ALTER TABLE households ADD COLUMN household_member_count INTEGER",
         "cultural_diversity_score": "ALTER TABLE households ADD COLUMN cultural_diversity_score REAL DEFAULT 0.0",
         "special_needs_score": "ALTER TABLE households ADD COLUMN special_needs_score REAL DEFAULT 0.0",
+        "archived": "ALTER TABLE households ADD COLUMN archived BOOLEAN DEFAULT 0",
+        "updated_at": "ALTER TABLE households ADD COLUMN updated_at DATETIME",
+        "apartment_unit": "ALTER TABLE households ADD COLUMN apartment_unit TEXT",
+        "vcf_import_timestamp": "ALTER TABLE households ADD COLUMN vcf_import_timestamp DATETIME",
     }
     for col, sql in hh_migrations.items():
         if col not in hh_columns:
@@ -33,10 +38,23 @@ with database.engine.connect() as conn:
     person_migrations = {
         "member_number": "ALTER TABLE people ADD COLUMN member_number TEXT",
         "individual_import_timestamp": "ALTER TABLE people ADD COLUMN individual_import_timestamp DATETIME",
+        "archived": "ALTER TABLE people ADD COLUMN archived BOOLEAN DEFAULT 0",
+        "updated_at": "ALTER TABLE people ADD COLUMN updated_at DATETIME",
+        "member_since": "ALTER TABLE people ADD COLUMN member_since DATETIME",
+        "vcf_import_timestamp": "ALTER TABLE people ADD COLUMN vcf_import_timestamp DATETIME",
     }
     for col, sql in person_migrations.items():
         if col not in person_columns:
             conn.execute(text(sql))
+
+    # Migrate member_since from households to people
+    if "member_since" in hh_columns:
+        conn.execute(text(
+            "UPDATE people SET member_since = ("
+            "  SELECT households.member_since FROM households"
+            "  WHERE households.id = people.household_id"
+            ") WHERE people.member_since IS NULL"
+        ))
 
     # Migrate special_needs from BOOLEAN to TEXT
     result = conn.execute(text("SELECT typeof(special_needs) FROM people WHERE special_needs IS NOT NULL LIMIT 1"))
@@ -104,7 +122,6 @@ def create_household(
 ):
     db_household = models.Household(
         name=household.name,
-        member_since=household.member_since,
         engagement_score=household.engagement_score,
         is_resident=household.is_resident,
     )
@@ -124,10 +141,14 @@ def create_household(
 def read_households(
     skip: int = 0,
     limit: int = 1000,
+    include_archived: bool = Query(False),
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    households = db.query(models.Household).offset(skip).limit(limit).all()
+    query = db.query(models.Household)
+    if not include_archived:
+        query = query.filter(models.Household.archived == False)
+    households = query.offset(skip).limit(limit).all()
     return households
 
 @app.get("/households/{household_id}", response_model=schemas.Household)
@@ -153,6 +174,7 @@ def update_household(
         raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(hh, field, value)
+    hh.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(hh)
     return hh
@@ -170,6 +192,7 @@ def update_person(
         raise HTTPException(status_code=404, detail="Person nicht gefunden")
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(person, field, value)
+    person.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(person)
     return person
@@ -188,16 +211,37 @@ def assign_person(
     if not hh:
         raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
     person.household_id = household_id
+    person.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(person)
+    return person
+
+@app.delete("/people/{person_id}/assign", response_model=schemas.Person)
+def unassign_person(
+    person_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Entfernt eine Person aus ihrem Haushalt (Person bleibt bestehen)."""
+    person = db.query(models.Person).filter(models.Person.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person nicht gefunden")
+    person.household_id = None
+    person.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(person)
     return person
 
 @app.get("/people/", response_model=List[schemas.PersonWithHousehold])
 def read_all_persons(
+    include_archived: bool = Query(False),
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    persons = db.query(models.Person).all()
+    query = db.query(models.Person)
+    if not include_archived:
+        query = query.filter(models.Person.archived == False)
+    persons = query.all()
     result = []
     for p in persons:
         data = schemas.PersonWithHousehold.model_validate(p)
@@ -206,12 +250,44 @@ def read_all_persons(
         result.append(data)
     return result
 
-@app.get("/people/unassigned", response_model=List[schemas.Person])
-def read_unassigned_persons(
+@app.patch("/households/{household_id}/archive")
+def toggle_archive_household(
+    household_id: int,
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    return db.query(models.Person).filter(models.Person.household_id.is_(None)).all()
+    hh = db.query(models.Household).filter(models.Household.id == household_id).first()
+    if not hh:
+        raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
+    hh.archived = not hh.archived
+    for person in hh.people:
+        person.archived = hh.archived
+    db.commit()
+    return {"archived": hh.archived}
+
+@app.patch("/people/{person_id}/archive")
+def toggle_archive_person(
+    person_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    person = db.query(models.Person).filter(models.Person.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person nicht gefunden")
+    person.archived = not person.archived
+    db.commit()
+    return {"archived": person.archived}
+
+@app.get("/people/unassigned", response_model=List[schemas.Person])
+def read_unassigned_persons(
+    include_archived: bool = Query(False),
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    query = db.query(models.Person).filter(models.Person.household_id.is_(None))
+    if not include_archived:
+        query = query.filter(models.Person.archived == False)
+    return query.all()
 
 # --- Apartments ---
 @app.post("/apartments/", response_model=schemas.Apartment)
@@ -306,6 +382,7 @@ def get_ranking(
             .filter(
                 models.Apartment.size_rooms == size_rooms,
                 models.Apartment.funding_type == funding_type,
+                models.Household.archived == False,
             )
             .order_by(models.Household.total_score.desc())
             .all()
@@ -389,6 +466,33 @@ def commit_individual_bogen(
 ):
     try:
         return import_service.commit_individual_bogen(request, db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/import/vcf/analyze", response_model=schemas.VcfAnalysisResponse)
+async def analyze_vcf(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    if not file.filename.lower().endswith(('.vcf', '.vcard')):
+        raise HTTPException(status_code=400, detail="Bitte eine .vcf-Datei hochladen.")
+    contents = await file.read()
+    try:
+        return vcf_import_service.analyze_vcf(contents, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/import/vcf/commit", response_model=schemas.VcfCommitResponse)
+def commit_vcf(
+    request: schemas.VcfCommitRequest,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    try:
+        return vcf_import_service.commit_vcf(request, db)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

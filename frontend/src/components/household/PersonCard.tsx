@@ -1,13 +1,15 @@
 import {
     Card, CardContent, Typography, Grid, TextField, Chip, Box,
-    FormControl, InputLabel, Select, MenuItem,
+    FormControl, InputLabel, Select, MenuItem, IconButton, Tooltip,
 } from '@mui/material';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
 import { Person } from '../../types';
 
 interface PersonCardProps {
     person: Person;
     editing: boolean;
     onChange: (id: number, field: string, value: string | boolean) => void;
+    onRemove?: (person: Person) => void;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -20,6 +22,7 @@ const FIELD_LABELS: Record<string, string> = {
     cultural_background: 'Kultureller Hintergrund',
     special_needs: 'Besondere Lebenslage',
     member_number: 'Mitgliedsnummer',
+    member_since: 'Mitglied seit',
 };
 
 const OCCUPATION_OPTIONS: { value: string; label: string }[] = [
@@ -68,9 +71,20 @@ function formatDate(val?: string): string {
     }
 }
 
-export default function PersonCard({ person, editing, onChange }: PersonCardProps) {
+function formatDateTime(val?: string): string {
+    if (!val) return '—';
+    try {
+        const d = new Date(val);
+        return d.toLocaleDateString('de-DE') + ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+        return val;
+    }
+}
+
+export default function PersonCard({ person, editing, onChange, onRemove }: PersonCardProps) {
     const displayFields: { key: keyof Person; label: string }[] = [
         { key: 'member_number', label: FIELD_LABELS.member_number },
+        { key: 'member_since', label: FIELD_LABELS.member_since },
         { key: 'birth_date', label: FIELD_LABELS.birth_date },
         { key: 'gender', label: FIELD_LABELS.gender },
         { key: 'occupation_type', label: FIELD_LABELS.occupation_type },
@@ -88,6 +102,13 @@ export default function PersonCard({ person, editing, onChange }: PersonCardProp
                     </Typography>
                     {person.special_needs && (
                         <Chip label="Bes. Lebenslage" size="small" color="info" />
+                    )}
+                    {onRemove && (
+                        <Tooltip title="Aus Haushalt entfernen">
+                            <IconButton size="small" sx={{ ml: 'auto' }} onClick={() => onRemove(person)}>
+                                <LinkOffIcon fontSize="small" />
+                            </IconButton>
+                        </Tooltip>
                     )}
                 </Box>
                 <Grid container spacing={1}>
@@ -120,7 +141,7 @@ export default function PersonCard({ person, editing, onChange }: PersonCardProp
                                         {label}
                                     </Typography>
                                     <Typography variant="body2">
-                                        {key === 'birth_date'
+                                        {key === 'birth_date' || key === 'member_since'
                                             ? formatDate(person[key] as string)
                                             : key === 'education_level'
                                             ? EDUCATION_LABEL_MAP[(person[key] as string)] || (person[key] as string) || '—'
@@ -133,6 +154,22 @@ export default function PersonCard({ person, editing, onChange }: PersonCardProp
                         </Grid>
                     ))}
                 </Grid>
+                {(person.individual_import_timestamp || person.updated_at) && (
+                    <Box sx={{ display: 'flex', gap: 3, mt: 1.5, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+                        {person.individual_import_timestamp && (
+                            <Box>
+                                <Typography variant="caption" color="text.secondary">Letzter Import</Typography>
+                                <Typography variant="body2">{formatDateTime(person.individual_import_timestamp)}</Typography>
+                            </Box>
+                        )}
+                        {person.updated_at && (
+                            <Box>
+                                <Typography variant="caption" color="text.secondary">Letzte Bearbeitung</Typography>
+                                <Typography variant="body2">{formatDateTime(person.updated_at)}</Typography>
+                            </Box>
+                        )}
+                    </Box>
+                )}
             </CardContent>
         </Card>
     );

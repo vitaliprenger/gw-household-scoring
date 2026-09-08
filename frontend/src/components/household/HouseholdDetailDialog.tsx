@@ -6,9 +6,12 @@ import {
     Box, Alert, CircularProgress, Checkbox, ListItemText, Chip,
     OutlinedInput,
 } from '@mui/material';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import { Household, Person } from '../../types';
-import { getHousehold, updateHousehold, updatePerson } from '../../api';
+import { getHousehold, updateHousehold, updatePerson, toggleArchiveHousehold, unassignPerson } from '../../api';
 import PersonCard from './PersonCard';
+import AddPersonDialog from './AddPersonDialog';
+import ConfirmDialog from '../common/ConfirmDialog';
 
 interface HouseholdDetailDialogProps {
     open: boolean;
@@ -37,6 +40,9 @@ export default function HouseholdDetailDialog({
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [addPersonOpen, setAddPersonOpen] = useState(false);
+    const [removeTarget, setRemoveTarget] = useState<Person | null>(null);
+    const [removing, setRemoving] = useState(false);
 
     useEffect(() => {
         if (open && householdId) {
@@ -97,16 +103,59 @@ export default function HouseholdDetailDialog({
         }
     }
 
+    async function handleToggleArchive() {
+        if (!household) return;
+        setSaving(true);
+        try {
+            await toggleArchiveHousehold(household.id);
+            onSaved();
+            const refreshed = await getHousehold(household.id);
+            setHousehold(refreshed);
+        } catch {
+            setError('Archivierung fehlgeschlagen');
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function reloadHousehold() {
+        if (!householdId) return;
+        const refreshed = await getHousehold(householdId);
+        setHousehold(refreshed);
+    }
+
+    async function handleRemovePerson() {
+        if (!removeTarget) return;
+        setRemoving(true);
+        setError('');
+        try {
+            await unassignPerson(removeTarget.id);
+            setEditPersons((prev) => {
+                const rest = { ...prev };
+                delete rest[removeTarget.id];
+                return rest;
+            });
+            setRemoveTarget(null);
+            onSaved();
+            await reloadHousehold();
+        } catch {
+            setError('Person konnte nicht entfernt werden');
+        } finally {
+            setRemoving(false);
+        }
+    }
+
     function handleCancel() {
         setEditing(false);
         setEditHH({});
         setEditPersons({});
     }
 
-    function formatDate(val?: string): string {
+    function formatDateTime(val?: string): string {
         if (!val) return '—';
         try {
-            return new Date(val).toLocaleDateString('de-DE');
+            const d = new Date(val);
+            return d.toLocaleDateString('de-DE') + ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
         } catch {
             return val;
         }
@@ -120,11 +169,25 @@ export default function HouseholdDetailDialog({
     return (
         <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
             <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                {currentHH?.name ?? 'Haushalt'}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {currentHH?.name ?? 'Haushalt'}
+                    {currentHH?.archived && <Chip label="Archiviert" size="small" color="default" />}
+                </Box>
                 {!editing && (
-                    <Button variant="outlined" size="small" onClick={() => setEditing(true)}>
-                        Bearbeiten
-                    </Button>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            color={currentHH?.archived ? 'success' : 'warning'}
+                            onClick={handleToggleArchive}
+                            disabled={saving}
+                        >
+                            {currentHH?.archived ? 'Wiederherstellen' : 'Archivieren'}
+                        </Button>
+                        <Button variant="outlined" size="small" onClick={() => setEditing(true)}>
+                            Bearbeiten
+                        </Button>
+                    </Box>
                 )}
             </DialogTitle>
             <DialogContent dividers>
@@ -134,8 +197,6 @@ export default function HouseholdDetailDialog({
                     <>
                         <Typography variant="h6" gutterBottom>Haushaltsdaten</Typography>
                         <Grid container spacing={2} sx={{ mb: 3 }}>
-                            <GridField label="Mitglied seit" value={formatDate(currentHH.member_since)} editing={editing}
-                                onChange={(v) => handleHHChange('member_since', v)} />
                             <GridField label="Engagement (0–1)" value={String(currentHH.engagement_score)} editing={editing}
                                 onChange={(v) => handleHHChange('engagement_score', Math.min(1, Math.max(0, parseFloat(v) || 0)))} />
                             <GridField label="Kulturelle Vielfalt (0–1)" value={String(currentHH.cultural_diversity_score)} editing={editing}
@@ -220,22 +281,40 @@ export default function HouseholdDetailDialog({
                                 onChange={(v) => handleHHChange('household_member_count', parseInt(v) || 0)} />
                         </Grid>
 
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexWrap: 'wrap', gap: 2 }}>
                             <FieldDisplay label="Import-Quelle" value={currentHH.import_source} />
-                            <FieldDisplay label="Import-Zeitstempel" value={formatDate(currentHH.import_timestamp)} />
+                            <FieldDisplay label="Letzter Import" value={formatDateTime(currentHH.import_timestamp)} />
+                            <FieldDisplay label="Letzte Bearbeitung" value={formatDateTime(currentHH.updated_at)} />
                             <FieldDisplay label="Gesamt-Score" value={currentHH.total_score.toFixed(2)} />
                         </Box>
 
                         <Divider sx={{ my: 2 }} />
-                        <Typography variant="h6" gutterBottom>
-                            Personen ({mergedPersons.length})
-                        </Typography>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="h6">
+                                Personen ({mergedPersons.length})
+                            </Typography>
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<PersonAddIcon />}
+                                onClick={() => setAddPersonOpen(true)}
+                                disabled={editing}
+                            >
+                                Person hinzufügen
+                            </Button>
+                        </Box>
+                        {mergedPersons.length === 0 && (
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                Diesem Haushalt ist noch keine Person zugeordnet.
+                            </Typography>
+                        )}
                         {mergedPersons.map((person) => (
                             <PersonCard
                                 key={person.id}
                                 person={person}
                                 editing={editing}
                                 onChange={handlePersonChange}
+                                onRemove={editing ? undefined : setRemoveTarget}
                             />
                         ))}
                     </>
@@ -253,6 +332,33 @@ export default function HouseholdDetailDialog({
                     <Button onClick={onClose}>Schließen</Button>
                 )}
             </DialogActions>
+
+            <AddPersonDialog
+                open={addPersonOpen}
+                householdId={householdId}
+                householdName={currentHH?.name}
+                onClose={() => setAddPersonOpen(false)}
+                onAdded={async () => {
+                    onSaved();
+                    await reloadHousehold();
+                }}
+            />
+
+            <ConfirmDialog
+                open={removeTarget !== null}
+                title="Person aus Haushalt entfernen"
+                message={
+                    removeTarget
+                        ? `${removeTarget.first_name} ${removeTarget.last_name} aus diesem Haushalt entfernen? `
+                          + 'Die Person bleibt erhalten und ist danach keinem Haushalt zugeordnet.'
+                        : ''
+                }
+                confirmLabel="Entfernen"
+                confirmColor="warning"
+                busy={removing}
+                onConfirm={handleRemovePerson}
+                onClose={() => setRemoveTarget(null)}
+            />
         </Dialog>
     );
 }

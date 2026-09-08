@@ -2,11 +2,17 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Typography, TextField, FormControlLabel, Switch, Chip, Link, InputAdornment,
-  TableSortLabel,
+  TableSortLabel, IconButton, Tooltip,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
-import { getAllPersons } from '../../api';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import UnarchiveIcon from '@mui/icons-material/Unarchive';
+import GroupAddIcon from '@mui/icons-material/GroupAdd';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
+import { getAllPersons, toggleArchivePerson, unassignPerson } from '../../api';
 import { PersonWithHousehold } from '../../types';
+import AssignHouseholdDialog from './AssignHouseholdDialog';
+import ConfirmDialog from '../common/ConfirmDialog';
 
 interface PersonsTabProps {
   onShowHousehold: (householdId: number) => void;
@@ -24,21 +30,35 @@ function formatDate(val?: string): string {
   }
 }
 
+function formatDateTime(val?: string): string {
+  if (!val) return '—';
+  try {
+    const d = new Date(val);
+    return d.toLocaleDateString('de-DE') + ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return val;
+  }
+}
+
 export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
   const [persons, setPersons] = useState<PersonWithHousehold[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('last_name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [assignTarget, setAssignTarget] = useState<PersonWithHousehold | null>(null);
+  const [unassignTarget, setUnassignTarget] = useState<PersonWithHousehold | null>(null);
+  const [unassigning, setUnassigning] = useState(false);
 
   useEffect(() => {
     loadPersons();
-  }, []);
+  }, [showArchived]);
 
   const loadPersons = async () => {
     try {
-      const data = await getAllPersons();
+      const data = await getAllPersons(showArchived);
       setPersons(data);
     } catch (e) {
       console.error('Failed to load persons', e);
@@ -78,6 +98,29 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
     return sorted;
   }, [persons, onlyUnassigned, search, sortKey, sortDir]);
 
+  const handleToggleArchive = async (personId: number) => {
+    try {
+      await toggleArchivePerson(personId);
+      await loadPersons();
+    } catch (e) {
+      console.error('Archive toggle failed', e);
+    }
+  };
+
+  const handleUnassign = async () => {
+    if (!unassignTarget) return;
+    setUnassigning(true);
+    try {
+      await unassignPerson(unassignTarget.id);
+      setUnassignTarget(null);
+      await loadPersons();
+    } catch (e) {
+      console.error('Unassign failed', e);
+    } finally {
+      setUnassigning(false);
+    }
+  };
+
   const unassignedCount = useMemo(() => persons.filter(p => !p.household_id).length, [persons]);
 
   if (loading) {
@@ -111,6 +154,15 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
             />
           }
           label={`Nur ohne Haushalt (${unassignedCount})`}
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={showArchived}
+              onChange={(_, checked) => setShowArchived(checked)}
+            />
+          }
+          label="Archivierte anzeigen"
         />
         <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
           {filtered.length} von {persons.length} Personen
@@ -158,6 +210,8 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
                 </TableSortLabel>
               </TableCell>
               <TableCell>Mitgliedsnr.</TableCell>
+              <TableCell>Letzter Import</TableCell>
+              <TableCell>Letzte Bearbeitung</TableCell>
               <TableCell>
                 <TableSortLabel
                   active={sortKey === 'household_name'}
@@ -167,16 +221,22 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
                   Haushalt
                 </TableSortLabel>
               </TableCell>
+              <TableCell align="right">Aktionen</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {filtered.map(person => (
-              <TableRow key={person.id} hover>
-                <TableCell>{person.last_name}</TableCell>
+              <TableRow key={person.id} hover sx={{ opacity: person.archived ? 0.5 : 1 }}>
+                <TableCell>
+                  {person.last_name}
+                  {person.archived && <Chip label="Archiviert" size="small" sx={{ ml: 1 }} color="default" />}
+                </TableCell>
                 <TableCell>{person.first_name}</TableCell>
                 <TableCell>{formatDate(person.birth_date)}</TableCell>
                 <TableCell>{person.gender || '—'}</TableCell>
                 <TableCell>{person.member_number || '—'}</TableCell>
+                <TableCell>{formatDateTime(person.individual_import_timestamp)}</TableCell>
+                <TableCell>{formatDateTime(person.updated_at)}</TableCell>
                 <TableCell>
                   {person.household_id && person.household_name ? (
                     <Link
@@ -190,11 +250,31 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
                     <Chip label="Kein Haushalt" size="small" color="warning" variant="outlined" />
                   )}
                 </TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                  {person.household_id ? (
+                    <Tooltip title="Aus Haushalt entfernen">
+                      <IconButton size="small" onClick={() => setUnassignTarget(person)}>
+                        <LinkOffIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  ) : (
+                    <Tooltip title="Haushalt zuordnen">
+                      <IconButton size="small" color="primary" onClick={() => setAssignTarget(person)}>
+                        <GroupAddIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  <Tooltip title={person.archived ? 'Wiederherstellen' : 'Archivieren'}>
+                    <IconButton size="small" onClick={() => handleToggleArchive(person.id)}>
+                      {person.archived ? <UnarchiveIcon fontSize="small" /> : <ArchiveIcon fontSize="small" />}
+                    </IconButton>
+                  </Tooltip>
+                </TableCell>
               </TableRow>
             ))}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} align="center">
+                <TableCell colSpan={9} align="center">
                   {onlyUnassigned ? 'Keine Personen ohne Haushalt.' : 'Keine Personen vorhanden.'}
                 </TableCell>
               </TableRow>
@@ -202,6 +282,29 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <AssignHouseholdDialog
+        open={assignTarget !== null}
+        person={assignTarget}
+        onClose={() => setAssignTarget(null)}
+        onAssigned={loadPersons}
+      />
+
+      <ConfirmDialog
+        open={unassignTarget !== null}
+        title="Person aus Haushalt entfernen"
+        message={
+          unassignTarget
+            ? `${unassignTarget.first_name} ${unassignTarget.last_name} aus dem Haushalt „${unassignTarget.household_name ?? ''}“ entfernen? `
+              + 'Die Person bleibt erhalten und steht danach ohne Haushalt in der Liste.'
+            : ''
+        }
+        confirmLabel="Entfernen"
+        confirmColor="warning"
+        busy={unassigning}
+        onConfirm={handleUnassign}
+        onClose={() => setUnassignTarget(null)}
+      />
     </Box>
   );
 }

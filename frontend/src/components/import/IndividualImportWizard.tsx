@@ -7,10 +7,11 @@ import {
     Tooltip,
 } from '@mui/material';
 import {
-    IndividualAnalysisResponse, IndividualDecision,
+    IndividualAnalysisResponse, IndividualImportPreview, IndividualDecision,
     IndividualCommitRequest,
 } from '../../types';
 import { commitIndividualBogen } from '../../api';
+import MatchingDialog from './MatchingDialog';
 
 interface IndividualImportWizardProps {
     open: boolean;
@@ -46,6 +47,8 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
         }
         return init;
     });
+    const [matchingFor, setMatchingFor] = useState<IndividualImportPreview | null>(null);
+    const [matchOverrides, setMatchOverrides] = useState<Record<string, string>>({});
     const [committing, setCommitting] = useState(false);
     const [commitResult, setCommitResult] = useState<{ updated: number; created: number; skipped: number } | null>(null);
     const [error, setError] = useState('');
@@ -143,13 +146,21 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                 <TableCell>{ind.member_number || '—'}</TableCell>
                                                 <TableCell>{ind.birth_date || '—'}</TableCell>
                                                 <TableCell>
-                                                    <Chip
-                                                        label={mt === 'none'
-                                                            ? 'Kein Match'
-                                                            : `${ind.match_result.matched_household_name ?? 'Match'}`}
-                                                        size="small"
-                                                        color={mt === 'exact_member_nr' || mt === 'exact_name_dob' ? 'success' : mt === 'fuzzy' ? 'warning' : 'default'}
-                                                    />
+                                                    {(() => {
+                                                        const overrideName = matchOverrides[ind.temp_id];
+                                                        return (
+                                                            <Chip
+                                                                label={overrideName
+                                                                    ? `Zugeordnet: ${overrideName}`
+                                                                    : mt === 'none'
+                                                                        ? 'Kein Match'
+                                                                        : `${ind.match_result.matched_household_name ?? 'Match'}`}
+                                                                size="small"
+                                                                color={overrideName ? 'info' : mt === 'exact_member_nr' || mt === 'exact_name_dob' ? 'success' : mt === 'fuzzy' ? 'warning' : 'default'}
+                                                                onClick={() => setMatchingFor(ind)}
+                                                            />
+                                                        );
+                                                    })()}
                                                 </TableCell>
                                                 <TableCell>
                                                     {statusLabel && (
@@ -222,6 +233,35 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                     <Button variant="contained" onClick={onComplete}>Schließen</Button>
                 )}
             </DialogActions>
+
+            {matchingFor && (
+                <MatchingDialog
+                    open={!!matchingFor}
+                    title={`Person zuordnen: ${matchingFor.name}`}
+                    description={`MitglNr: ${matchingFor.member_number || '—'}, Geb.: ${matchingFor.birth_date || '—'}`}
+                    candidates={matchingFor.match_result.fuzzy_candidates || []}
+                    nameColumnLabel="Person (Haushalt)"
+                    createButtonLabel="Neue Person anlegen"
+                    onClose={() => setMatchingFor(null)}
+                    onSelect={(personId, name) => {
+                        if (personId) {
+                            updateDecision(matchingFor.temp_id, {
+                                action: 'update',
+                                target_person_id: personId,
+                            });
+                            setMatchOverrides((prev) => ({ ...prev, [matchingFor.temp_id]: name || '' }));
+                        } else {
+                            updateDecision(matchingFor.temp_id, { action: 'create' });
+                            setMatchOverrides((prev) => {
+                                const next = { ...prev };
+                                delete next[matchingFor.temp_id];
+                                return next;
+                            });
+                        }
+                        setMatchingFor(null);
+                    }}
+                />
+            )}
         </Dialog>
     );
 }
