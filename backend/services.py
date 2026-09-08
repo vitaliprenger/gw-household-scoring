@@ -71,57 +71,57 @@ def seed_example_data(db: Session):
     if db.query(models.Household).first() is not None:
         return
 
+    # Beispieldaten aus realen Import-Daten (imported_data/)
+
     # -- Bewohner (Ist-Belegung) ------------------------------------------
     residents = [
         {
-            "name": "Familie Müller",
-            "member_since": _d(2018, 3, 1),
-            "engagement_score": 0.7,
+            "name": "Manuela Liebold",
+            "member_since": _d(2017, 1, 1),
+            "engagement_score": 0.8,
             "is_resident": True,
             "people": [
-                ("Thomas", "Müller", _d(1982, 5, 14), "m", "angestellt", "3", None, None),
-                ("Sabine", "Müller", _d(1985, 9, 22), "f", "angestellt", "7", None, None),
-                ("Lena", "Müller", _d(2015, 1, 10), "f", "Schüler", "0", None, None),
+                ("Manuela", "Liebold", _d(1975, 4, 12), "f", "2", "6", None, None, "1"),
+                ("Thorsten", "Liebold", _d(1972, 9, 8), "m", "4", "3", None, None, "2"),
             ],
         },
         {
-            "name": "WG Schmidt & Co",
-            "member_since": _d(2020, 7, 15),
-            "engagement_score": 0.4,
+            "name": "Gudrun Gehrke",
+            "member_since": _d(2017, 6, 1),
+            "engagement_score": 0.6,
             "is_resident": True,
             "people": [
-                ("Jan", "Schmidt", _d(1995, 11, 3), "m", "Student", "7", None, None),
-                ("Ayumi", "Tanaka", _d(1997, 4, 18), "f", "Student", "7", "japanisch", None),
+                ("Gudrun", "Gehrke", _d(1962, 3, 22), "f", "1", "7", None, None, "14"),
+                ("Mathias", "Uhl", _d(1960, 11, 15), "m", "9", "8", None, None, "13"),
             ],
         },
         {
-            "name": "Herr Becker",
+            "name": "Elke Stücke",
             "member_since": _d(2015, 1, 1),
             "engagement_score": 0.9,
             "is_resident": True,
             "people": [
-                ("Helmut", "Becker", _d(1958, 8, 30), "m", "Rentner", "3", None, None),
+                ("Elke", "Stücke", _d(1958, 1, 25), "f", "5", "4", None, None, "30"),
             ],
         },
         {
-            "name": "Familie Özdemir",
-            "member_since": _d(2019, 6, 1),
-            "engagement_score": 0.6,
+            "name": "Sebastian Danek",
+            "member_since": _d(2018, 1, 1),
+            "engagement_score": 0.5,
             "is_resident": True,
             "people": [
-                ("Kemal", "Özdemir", _d(1978, 2, 12), "m", "selbstständig", "7", "türkisch", None),
-                ("Fatma", "Özdemir", _d(1980, 12, 5), "f", "angestellt", "3", "türkisch", None),
-                ("Elif", "Özdemir", _d(2010, 7, 20), "f", "Schüler", "0", "türkisch", None),
-                ("Emre", "Özdemir", _d(2013, 3, 8), "m", "Schüler", "0", "türkisch", None),
+                ("Sebastian", "Danek", _d(1988, 7, 3), "m", "9", "7", None, None, "65"),
+                ("Tanja", "Danek", _d(1990, 2, 14), "f", "2", "6", None, None, "66"),
+                ("Ewa", "Danek", _d(2019, 3, 28), "f", "0", "0", None, None, None),
             ],
         },
         {
-            "name": "Frau Lehmann",
-            "member_since": _d(2016, 11, 1),
+            "name": "Christa Köller",
+            "member_since": _d(2016, 6, 1),
             "engagement_score": 0.3,
             "is_resident": True,
             "people": [
-                ("Ingrid", "Lehmann", _d(1955, 6, 17), "f", "Rentner", "7", None, "Pflegebedürftig (Pflegegrad 2)"),
+                ("Christa", "Köller", _d(1950, 8, 30), "f", "6", "4", None, None, "34"),
             ],
         },
     ]
@@ -129,54 +129,73 @@ def seed_example_data(db: Session):
     # -- Bewerber ----------------------------------------------------------
     applicants = [
         {
-            "name": "Familie Weber",
-            "member_since": _d(2021, 4, 1),
-            "engagement_score": 0.5,
-            "is_resident": False,
-            "people": [
-                ("Markus", "Weber", _d(1990, 3, 25), "m", "angestellt", "7", None, None),
-                ("Lisa", "Weber", _d(1992, 7, 11), "f", "selbstständig", "7", None, None),
-                ("Noah", "Weber", _d(2020, 10, 2), "m", "0", "0", None, None),
-            ],
-        },
-        {
-            "name": "Herr Nguyen",
-            "member_since": _d(2023, 1, 15),
-            "engagement_score": 0.8,
-            "is_resident": False,
-            "people": [
-                ("Minh", "Nguyen", _d(1988, 12, 1), "m", "angestellt", "7", "vietnamesisch", None),
-            ],
-        },
-        {
-            "name": "Frau Fischer",
-            "member_since": _d(2022, 9, 1),
+            "name": "Simon Kruse",
+            "member_since": _d(2024, 5, 1),
             "engagement_score": 0.2,
             "is_resident": False,
+            "wbs_status": "WBS Einkommensgruppe A",
+            "desired_apartment_size": "1,5",
+            "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
-                ("Clara", "Fischer", _d(2000, 5, 30), "f", "Student", "3", None, None),
+                ("Simon", "Kruse", _d(1988, 11, 29), "m", "1", "7", None,
+                 "Behinderung (GdB 40 mit Gleichstellung)", "637"),
             ],
         },
         {
-            "name": "Familie Al-Rashid",
-            "member_since": _d(2020, 2, 1),
+            "name": "Anja Venjakob",
+            "member_since": _d(2023, 1, 1),
+            "engagement_score": 0.5,
+            "is_resident": False,
+            "wbs_status": "kein WBS",
+            "desired_apartment_size": "3,5",
+            "desired_apartment_type": ["Standard Wohnungstypen"],
+            "people": [
+                ("Anja", "Venjakob", _d(1977, 6, 23), "f", "2", "7", None, None, "628"),
+                ("Jörg", "Höbing", _d(1974, 6, 17), "m", "2", "7", None, None, "627"),
+            ],
+        },
+        {
+            "name": "Reinhilde Tenk",
+            "member_since": _d(2017, 6, 1),
+            "engagement_score": 0.7,
+            "is_resident": False,
+            "wbs_status": "kein WBS",
+            "desired_apartment_size": "3,5",
+            "desired_apartment_type": ["Standard Wohnungstypen"],
+            "people": [
+                ("Reinhilde", "Tenk", _d(1954, 11, 10), "f", "5", "6", None, "Osteoporose", "26"),
+                ("Thomas", "Tenk", _d(1958, 8, 17), "m", "4", "4", None, None, "27"),
+            ],
+        },
+        {
+            "name": "Kerstin Nolte",
+            "member_since": _d(2019, 6, 1),
+            "engagement_score": 0.4,
+            "is_resident": False,
+            "wbs_status": "WBS Einkommensgruppe A",
+            "financial_status": "kann Anteile nicht übernehmen",
+            "desired_apartment_type": ["Standard Wohnungstypen"],
+            "people": [
+                ("Kerstin", "Nolte", _d(1986, 5, 20), "f", "2", "6", None, None, "135"),
+                ("Emmi", "Nolte", _d(2018, 1, 8), "f", "0", "0", None, None, None),
+                ("Clara", "Nolte", _d(2018, 1, 8), "f", "0", "0", None, None, None),
+            ],
+        },
+        {
+            "name": "Sandra Rocha",
+            "member_since": _d(2017, 1, 1),
             "engagement_score": 0.6,
             "is_resident": False,
+            "wbs_status": "WBS Einkommensgruppe A",
+            "desired_apartment_size": "3,5",
+            "desired_apartment_type": ["Standard Wohnungstypen"],
+            "pets_count": 1,
+            "pets_info": "Hund",
             "people": [
-                ("Omar", "Al-Rashid", _d(1975, 8, 14), "m", "angestellt", "7", "syrisch", "Geflüchteter, schwierige finanzielle Situation"),
-                ("Amira", "Al-Rashid", _d(1979, 1, 22), "f", "angestellt", "3", "syrisch", None),
-                ("Layla", "Al-Rashid", _d(2008, 4, 5), "f", "Schüler", "0", "syrisch", None),
-                ("Sami", "Al-Rashid", _d(2012, 11, 18), "m", "Schüler", "0", "syrisch", None),
-            ],
-        },
-        {
-            "name": "Herr & Frau Klein",
-            "member_since": _d(2017, 5, 1),
-            "engagement_score": 0.9,
-            "is_resident": False,
-            "people": [
-                ("Werner", "Klein", _d(1960, 3, 7), "m", "Rentner", "3", None, None),
-                ("Gisela", "Klein", _d(1962, 10, 19), "f", "Rentner", "0", None, "Schwerbehindert (GdB 60)"),
+                ("Sandra A.", "Rocha", _d(1980, 12, 15), "f", "2", "6",
+                 "lateinamerikanisch", None, "12"),
+                ("Silas K. M.", "Rocha Hegmanns", _d(2004, 9, 22), "m", "0", "4",
+                 None, None, None),
             ],
         },
     ]
@@ -204,10 +223,16 @@ def seed_example_data(db: Session):
             member_since=hh_data["member_since"],
             engagement_score=hh_data["engagement_score"],
             is_resident=hh_data["is_resident"],
+            wbs_status=hh_data.get("wbs_status"),
+            desired_apartment_size=hh_data.get("desired_apartment_size"),
+            desired_apartment_type=hh_data.get("desired_apartment_type"),
+            financial_status=hh_data.get("financial_status"),
+            pets_count=hh_data.get("pets_count", 0),
+            pets_info=hh_data.get("pets_info"),
         )
         db.add(hh)
         db.flush()
-        for first, last, birth, gender, occ, edu, culture, special in hh_data["people"]:
+        for first, last, birth, gender, occ, edu, culture, special, member_nr in hh_data["people"]:
             db.add(models.Person(
                 household_id=hh.id,
                 first_name=first,
@@ -218,6 +243,7 @@ def seed_example_data(db: Session):
                 education_level=edu,
                 cultural_background=culture,
                 special_needs=special,
+                member_number=member_nr,
             ))
         all_households.append(hh)
 
@@ -229,14 +255,14 @@ def seed_example_data(db: Session):
         db_apartments.append(apt)
     db.flush()
 
-    # Bewerbungen: jeder Bewerber bewirbt sich auf 2 passende Wohnungen
+    # Bewerbungen: Bewerber auf passende Wohnungen
     applicant_hhs = [h for h in all_households if not h.is_resident]
     assignment = [
-        (0, [5, 6]),    # Weber (3 Pers.) → 3.5er
-        (1, [0, 1]),    # Nguyen (1 Pers.) → 1.5er
-        (2, [0, 2]),    # Fischer (1 Pers.) → 1.5 + 2.5
-        (3, [7, 8]),    # Al-Rashid (4 Pers.) → 4.5 + 5.5
-        (4, [2, 3]),    # Klein (2 Pers.) → 2.5er
+        (0, [0, 1]),    # Kruse (1 Pers.) → 1.5er
+        (1, [5, 6]),    # Venjakob/Höbing (2 Pers.) → 3.5er
+        (2, [5, 6]),    # Tenk (2 Pers.) → 3.5er
+        (3, [7, 8]),    # Nolte (3 Pers.) → 4.5 + 5.5
+        (4, [5, 6]),    # Rocha (2 Pers.) → 3.5er
     ]
     for hh_idx, apt_indices in assignment:
         for apt_idx in apt_indices:
