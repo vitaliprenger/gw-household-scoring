@@ -161,6 +161,8 @@ export interface IndividualImportPreview {
     life_situation?: string;
     social_diversity?: string;
     match_result: MatchResult;
+    already_imported: boolean;
+    is_older: boolean;
     existing_data_changes?: ExistingDataChanges;
 }
 

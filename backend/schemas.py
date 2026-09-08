@@ -233,6 +233,8 @@ class IndividualImportPreview(BaseModel):
     life_situation: Optional[str] = None
     social_diversity: Optional[str] = None
     match_result: MatchResult
+    already_imported: bool = False
+    is_older: bool = False
     existing_data_changes: Optional[ExistingDataChanges] = None
 
 class IndividualAnalysisResponse(BaseModel):

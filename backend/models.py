@@ -51,6 +51,7 @@ class Person(Base):
     cultural_background = Column(String, nullable=True)
     special_needs = Column(String, nullable=True)
     member_number = Column(String, nullable=True)
+    individual_import_timestamp = Column(DateTime, nullable=True)
 
     household = relationship("Household", back_populates="people")
 
