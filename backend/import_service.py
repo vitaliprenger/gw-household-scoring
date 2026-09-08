@@ -298,10 +298,17 @@ def _deduplicate_hh(rows: list[dict]) -> list[dict]:
     for row in rows:
         if not row["persons"]:
             continue
-        p1 = row["persons"][0]
-        key = (p1.get("first_name", "") + " " + p1.get("last_name", "")).strip().lower()
-        if p1.get("member_number"):
-            key = f"nr_{p1['member_number']}"
+        member_nrs = sorted(
+            p["member_number"] for p in row["persons"] if p.get("member_number")
+        )
+        if member_nrs:
+            key = "nr_" + "|".join(member_nrs)
+        else:
+            names = sorted(
+                (p.get("first_name", "") + " " + p.get("last_name", "")).strip().lower()
+                for p in row["persons"]
+            )
+            key = "|".join(names)
         groups.setdefault(key, []).append(row)
 
     result = []
