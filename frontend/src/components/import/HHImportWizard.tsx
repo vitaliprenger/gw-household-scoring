@@ -3,7 +3,7 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, Stepper, Step, StepLabel, Typography, Box,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-    Paper, Chip, Alert,
+    Paper, Chip, Alert, Tooltip,
     FormControl, Select, MenuItem, CircularProgress,
 } from '@mui/material';
 import {
@@ -48,11 +48,15 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
         const init: Record<string, HouseholdDecision> = {};
         for (const hh of analysis.households) {
             const matchType = hh.match_result.type;
-            let action: 'create' | 'update' | 'skip' = 'create';
+            let action: 'create' | 'update' | 'skip';
             let targetId: number | undefined;
-            if (matchType === 'exact_member_nr' || matchType === 'exact_name_dob') {
+            if (hh.already_imported) {
+                action = 'skip';
+            } else if (matchType === 'exact_member_nr' || matchType === 'exact_name_dob') {
                 action = 'update';
                 targetId = hh.match_result.matched_household_id ?? undefined;
+            } else {
+                action = 'create';
             }
             init[hh.temp_id] = {
                 temp_id: hh.temp_id,
@@ -146,6 +150,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                         <TableCell>MitglNr.</TableCell>
                                         <TableCell>Mitglieder</TableCell>
                                         <TableCell>Match</TableCell>
+                                        <TableCell>Status</TableCell>
                                         <TableCell>Hinweise</TableCell>
                                         <TableCell>Aktion</TableCell>
                                     </TableRow>
@@ -155,7 +160,10 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                         const p1 = hh.persons[0];
                                         const dec = decisions[hh.temp_id];
                                         return (
-                                            <TableRow key={hh.temp_id}>
+                                            <TableRow
+                                                key={hh.temp_id}
+                                                sx={hh.already_imported ? { opacity: 0.5, bgcolor: 'action.hover' } : undefined}
+                                            >
                                                 <TableCell>{p1?.name ?? '—'}</TableCell>
                                                 <TableCell>{p1?.member_number ?? '—'}</TableCell>
                                                 <TableCell>
@@ -174,6 +182,18 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                         onClick={hh.match_result.type === 'fuzzy' || hh.match_result.type === 'none'
                                                             ? () => setMatchingFor(hh) : undefined}
                                                     />
+                                                </TableCell>
+                                                <TableCell>
+                                                    {hh.already_imported && (
+                                                        <Tooltip title="Dieser Datensatz wurde bereits mit demselben Zeitstempel importiert.">
+                                                            <Chip
+                                                                label="Bereits importiert"
+                                                                size="small"
+                                                                color="default"
+                                                                variant="outlined"
+                                                            />
+                                                        </Tooltip>
+                                                    )}
                                                 </TableCell>
                                                 <TableCell>
                                                     {hh.existing_data_changes?.data_removals?.length ? (

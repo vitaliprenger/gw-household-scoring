@@ -4,6 +4,7 @@ import {
     Button, Stepper, Step, StepLabel, Typography, Box,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
     Paper, Chip, Alert, FormControl, Select, MenuItem, CircularProgress,
+    Tooltip,
 } from '@mui/material';
 import {
     IndividualAnalysisResponse, IndividualDecision,
@@ -26,9 +27,14 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
         const init: Record<string, IndividualDecision> = {};
         for (const ind of analysis.individuals) {
             const mt = ind.match_result.type;
-            let action: 'update' | 'create' | 'skip' = 'skip';
-            if (mt === 'exact_member_nr' || mt === 'exact_name_dob') {
+            const inactive = ind.already_imported || ind.is_older;
+            let action: 'update' | 'create' | 'skip';
+            if (inactive) {
+                action = 'skip';
+            } else if (mt === 'exact_member_nr' || mt === 'exact_name_dob' || mt === 'fuzzy') {
                 action = 'update';
+            } else {
+                action = 'create';
             }
             init[ind.temp_id] = {
                 temp_id: ind.temp_id,
@@ -114,6 +120,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                         <TableCell>MitglNr.</TableCell>
                                         <TableCell>Geburtsdatum</TableCell>
                                         <TableCell>Match</TableCell>
+                                        <TableCell>Status</TableCell>
                                         <TableCell>Aktion</TableCell>
                                     </TableRow>
                                 </TableHead>
@@ -121,8 +128,17 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                     {analysis.individuals.map((ind) => {
                                         const dec = decisions[ind.temp_id];
                                         const mt = ind.match_result.type;
+                                        const inactive = ind.already_imported || ind.is_older;
+                                        const statusLabel = ind.already_imported
+                                            ? 'Bereits importiert'
+                                            : ind.is_older
+                                                ? 'Älter als vorhanden'
+                                                : null;
                                         return (
-                                            <TableRow key={ind.temp_id}>
+                                            <TableRow
+                                                key={ind.temp_id}
+                                                sx={inactive ? { opacity: 0.5, bgcolor: 'action.hover' } : undefined}
+                                            >
                                                 <TableCell>{ind.name}</TableCell>
                                                 <TableCell>{ind.member_number || '—'}</TableCell>
                                                 <TableCell>{ind.birth_date || '—'}</TableCell>
@@ -136,9 +152,24 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                     />
                                                 </TableCell>
                                                 <TableCell>
+                                                    {statusLabel && (
+                                                        <Tooltip title={ind.already_imported
+                                                            ? 'Dieser Datensatz wurde bereits mit demselben Zeitstempel importiert.'
+                                                            : 'In der Datenbank existiert ein neuerer Import für diese Person.'
+                                                        }>
+                                                            <Chip
+                                                                label={statusLabel}
+                                                                size="small"
+                                                                color={ind.already_imported ? 'default' : 'warning'}
+                                                                variant="outlined"
+                                                            />
+                                                        </Tooltip>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell>
                                                     <FormControl size="small" sx={{ minWidth: 140 }}>
                                                         <Select
-                                                            value={dec?.action ?? 'skip'}
+                                                            value={dec?.action ?? 'create'}
                                                             onChange={(e) => updateDecision(ind.temp_id, {
                                                                 action: e.target.value as 'update' | 'create' | 'skip',
                                                             })}
@@ -146,6 +177,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                             {ind.match_result.matched_household_id && (
                                                                 <MenuItem value="update">Aktualisieren</MenuItem>
                                                             )}
+                                                            <MenuItem value="create">Neu anlegen</MenuItem>
                                                             <MenuItem value="skip">Überspringen</MenuItem>
                                                         </Select>
                                                     </FormControl>

@@ -30,8 +30,13 @@ with database.engine.connect() as conn:
             conn.execute(text(sql))
 
     person_columns = {c["name"] for c in inspect(database.engine).get_columns("people")}
-    if "member_number" not in person_columns:
-        conn.execute(text("ALTER TABLE people ADD COLUMN member_number TEXT"))
+    person_migrations = {
+        "member_number": "ALTER TABLE people ADD COLUMN member_number TEXT",
+        "individual_import_timestamp": "ALTER TABLE people ADD COLUMN individual_import_timestamp DATETIME",
+    }
+    for col, sql in person_migrations.items():
+        if col not in person_columns:
+            conn.execute(text(sql))
 
     # Migrate special_needs from BOOLEAN to TEXT
     result = conn.execute(text("SELECT typeof(special_needs) FROM people WHERE special_needs IS NOT NULL LIMIT 1"))

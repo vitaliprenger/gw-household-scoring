@@ -377,7 +377,7 @@ def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
     candidates = _fuzzy_match(persons, all_households)
     top = candidates[0] if candidates else None
     return schemas.MatchResult(
-        type="fuzzy" if top and top.score >= 0.4 else "none",
+        type="fuzzy" if top else "none",
         matched_household_id=top.household_id if top else None,
         matched_household_name=top.name if top else None,
         confidence=top.score if top else 0.0,
@@ -412,6 +412,7 @@ def _fuzzy_match(persons: list[dict], all_households: list[models.Household]) ->
             member_numbers=member_nrs,
         ))
 
+    candidates = [c for c in candidates if c.score >= 0.7]
     candidates.sort(key=lambda c: c.score, reverse=True)
     return candidates
 
@@ -873,11 +874,12 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
             score=round(score, 3),
             member_numbers=[p.member_number] if p.member_number else [],
         ))
+    candidates = [c for c in candidates if c.score >= 0.7]
     candidates.sort(key=lambda c: c.score, reverse=True)
 
     top = candidates[0] if candidates else None
     return schemas.MatchResult(
-        type="fuzzy" if top and top.score >= 0.4 else "none",
+        type="fuzzy" if top else "none",
         matched_household_id=top.household_id if top else None,
         matched_household_name=top.name if top else None,
         confidence=top.score if top else 0.0,
@@ -899,6 +901,16 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
     for ind_data in parsed["individuals"]:
         match_result = match_individual_to_person(ind_data, db)
 
+        already_imported = False
+        is_older = False
+        if match_result.matched_household_id and ind_data.get("timestamp"):
+            matched_person = db.query(models.Person).get(match_result.matched_household_id)
+            if matched_person and matched_person.individual_import_timestamp:
+                if matched_person.individual_import_timestamp == ind_data["timestamp"]:
+                    already_imported = True
+                elif matched_person.individual_import_timestamp > ind_data["timestamp"]:
+                    is_older = True
+
         previews.append(schemas.IndividualImportPreview(
             temp_id=ind_data["temp_id"],
             name=ind_data["name"],
@@ -913,6 +925,8 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
             life_situation=ind_data.get("life_situation"),
             social_diversity=ind_data.get("social_diversity"),
             match_result=match_result,
+            already_imported=already_imported,
+            is_older=is_older,
         ))
 
     session = ImportSession("individual", parsed["individuals"], {})
@@ -987,6 +1001,8 @@ def _update_person_from_individual(person: models.Person, raw: dict):
         person.special_needs = None if val.lower() in ("nein", "", "keine") else val
     if raw.get("member_number") and not person.member_number:
         person.member_number = raw["member_number"]
+    if raw.get("timestamp"):
+        person.individual_import_timestamp = raw["timestamp"]
 
 
 def _create_person_from_individual(raw: dict, household_id: Optional[int], db: Session) -> models.Person:
@@ -1002,6 +1018,7 @@ def _create_person_from_individual(raw: dict, household_id: Optional[int], db: S
         education_level=raw.get("education"),
         cultural_background=raw.get("social_diversity"),
         special_needs=(lambda v: None if v.lower() in ("nein", "", "keine") else v)(raw["life_situation"].strip()) if raw.get("life_situation") else None,
+        individual_import_timestamp=raw.get("timestamp"),
     )
     db.add(person)
     return person
