@@ -74,17 +74,15 @@ class Apartment(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     unit_number = Column(String, unique=True, index=True)  # z. B. "W.002", "P.108.1"
-    size_rooms = Column(Float, nullable=True)  # 1.5 bis 5.5; None bei Sondertypen
+    size_rooms = Column(Integer, nullable=True)  # 1 bis 5; None bei Sondertypen
     funding_type = Column(String)  # "freifinanziert", "WBS A", "WBS B"
 
     # Wohnungsdaten (Stammdaten, im Frontend editierbar)
-    floor = Column(String, nullable=True)                # EG, 1.OG, 2.OG, 3.OG
+    apartment_category = Column(String, nullable=True)   # Wohnungsart
+    is_small = Column(Boolean, default=False)            # klein für ihre Zimmerzahl
     area_shares = Column(Float, nullable=True)           # qm Anteile
     area_rent = Column(Float, nullable=True)             # qm mietwirksam
     area_utilities = Column(Float, nullable=True)        # qm Nebenkosten
-    apartment_type = Column(String, nullable=True)       # "1.5", "CL Punkt", "Mini WG", ...
-    apartment_category = Column(String, nullable=True)   # Wohnungsart
-    wbs_raw = Column(String, nullable=True)              # WBS-Kennzeichen der Genossenschaft
     min_occupants = Column(Integer, nullable=True)       # mind. Bewohner
 
     # Ist-Belegung: Haushalt, der in dieser Wohnung wohnt

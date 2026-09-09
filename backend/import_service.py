@@ -114,14 +114,14 @@ def parse_timestamp(raw) -> Optional[datetime]:
     if raw is None:
         return None
     if isinstance(raw, datetime):
-        return raw
+        return raw.replace(tzinfo=None)
     s = str(raw).strip()
     if not s:
         return None
     # With timezone offset
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
         try:
-            return datetime.strptime(s, fmt)
+            return datetime.strptime(s, fmt).replace(tzinfo=None)
         except Exception:
             pass
     # Try just date
@@ -178,7 +178,6 @@ APARTMENT_TYPE_OPTIONS = [
     "Clusterwohnung",
     "Ausbauwohnung",
     "Atelierwohnung",
-    "Gartencluster",
 ]
 
 def _parse_apartment_types(val) -> list[str] | None:
@@ -538,7 +537,7 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
         if match_result.matched_household_id:
             existing = db.query(models.Household).get(match_result.matched_household_id)
             if existing and existing.import_timestamp and hh_data.get("timestamp"):
-                if existing.import_timestamp == hh_data["timestamp"]:
+                if existing.import_timestamp.replace(tzinfo=None) == hh_data["timestamp"]:
                     already_imported = True
 
         # Diff
@@ -960,9 +959,10 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
         if match_result.matched_household_id and ind_data.get("timestamp"):
             matched_person = db.query(models.Person).get(match_result.matched_household_id)
             if matched_person and matched_person.individual_import_timestamp:
-                if matched_person.individual_import_timestamp == ind_data["timestamp"]:
+                db_ts = matched_person.individual_import_timestamp.replace(tzinfo=None)
+                if db_ts == ind_data["timestamp"]:
                     already_imported = True
-                elif matched_person.individual_import_timestamp > ind_data["timestamp"]:
+                elif db_ts > ind_data["timestamp"]:
                     is_older = True
 
         previews.append(schemas.IndividualImportPreview(

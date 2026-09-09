@@ -209,7 +209,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.7,
             "is_resident": False,
             "wbs_status": "kein WBS",
-            "desired_apartment_size": "3,5",
+            # "desired_apartment_size": "3,5",
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
                 ("Marianne", "Voss", _d(1954, 3, 16), "f", "5", "6", None, "chronische Erkrankung", "51", _d(2017, 9, 1)),
@@ -220,7 +220,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.5,
             "is_resident": False,
             "wbs_status": "kein WBS",
-            "desired_apartment_size": "2,5",
+            # "desired_apartment_size": "2,5",
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
                 ("Günter", "Voss", _d(1958, 12, 4), "m", "4", "4", None, None, "52", _d(2017, 9, 1)),

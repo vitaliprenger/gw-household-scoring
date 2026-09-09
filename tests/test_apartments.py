@@ -60,23 +60,58 @@ def test_seed_data():
     check("nur bekannte Förderungsarten",
           fundings <= {"freifinanziert", "WBS A", "WBS B"}, str(fundings))
 
+    categories = {r["apartment_category"] for r in records}
+    check("nur bekannte Wohnungsarten", categories <= {
+        "Standard Wohnungstypen", "Clusterwohnung", "Ausbauwohnung",
+        "Atelierwohnung", "Joker",
+    }, str(categories))
+    check("keine Wohnungsart 'C-Riegel'", "C-Riegel" not in categories)
+    check("keine Wohnungsart 'Gartencluster'", "Gartencluster" not in categories)
+    check("keine Wohnungsart 'Wohngemeinschaft'", "Wohngemeinschaft" not in categories)
+    check("36 Clusterwohnungen", sum(
+        1 for r in records if r["apartment_category"] == "Clusterwohnung") == 36,
+        str(sum(1 for r in records if r["apartment_category"] == "Clusterwohnung")))
+
     standard = [r for r in records if r["apartment_category"] == "Standard Wohnungstypen"]
     check("Standardwohnungen haben Zimmerzahl", all(r["size_rooms"] for r in standard))
     check("Sondertypen ohne Zimmerzahl", all(
         r["size_rooms"] is None for r in records
         if r["apartment_category"] != "Standard Wohnungstypen"
     ))
+    check("Zimmerzahl ist eine ganze Zahl", all(
+        isinstance(r["size_rooms"], int) for r in standard))
+    check("Zimmerzahl 1 bis 5", {r["size_rooms"] for r in standard} == {1, 2, 3, 4, 5},
+          str(sorted({r["size_rooms"] for r in standard})))
+    check("keine Etage mehr im Datensatz", "floor" not in fields)
+    check("kein Rohwert 'Typ' mehr im Datensatz", "apartment_type" not in fields)
 
     p103 = next(r for r in records if r["unit_number"] == "P.103")
-    check("P.103: 2,5 Zimmer", p103["size_rooms"] == 2.5)
+    check("P.103: 2 Zimmer (aus 2,5)", p103["size_rooms"] == 2)
+    check("P.103: nicht klein", p103["is_small"] is False)
     check("P.103: freifinanziert (WBS N)", p103["funding_type"] == "freifinanziert")
-    check("P.103: WBS-Rohwert erhalten", p103["wbs_raw"] == "N")
     check("P.103: 56,56 qm mietwirksam", p103["area_rent"] == 56.56)
+
+    p106 = next(r for r in records if r["unit_number"] == "P.106")
+    check("P.106: 3 Zimmer (aus 3,5)", p106["size_rooms"] == 3)
+
+    # Mini WGs: Standardwohnungen mit 3 Zimmern, für ihre Zimmerzahl klein
+    small = [r for r in records if r["is_small"]]
+    check("6 kleine Wohnungen", len(small) == 6, f"({len(small)})")
+    check("kleine Wohnungen sind die Mini WGs",
+          {r["unit_number"] for r in small} ==
+          {"P.101", "P.102", "P.201", "P.202", "P.301", "P.302"},
+          str(sorted(r["unit_number"] for r in small)))
+    check("kleine Wohnungen sind Standardwohnungen",
+          all(r["apartment_category"] == "Standard Wohnungstypen" for r in small))
+    check("kleine Wohnungen haben 3 Zimmer", all(r["size_rooms"] == 3 for r in small))
+
+    riegel = next(r for r in records if r["unit_number"] == "R.201.1")
+    check("R.201.1 (C-Riegel): Clusterwohnung", riegel["apartment_category"] == "Clusterwohnung")
+    check("R.201.1: ohne Zimmerzahl", riegel["size_rooms"] is None)
 
     wpg = next(r for r in records if r["unit_number"] == "W.008.1")
     check("W.008.1: WPG-A wird WBS A", wpg["funding_type"] == "WBS A")
-    check("W.008.1: Rohwert WPG-A erhalten", wpg["wbs_raw"] == "WPG-A")
-    check("W.008.1: Wohngemeinschaft", wpg["apartment_category"] == "Wohngemeinschaft")
+    check("W.008.1 (WPG): Clusterwohnung", wpg["apartment_category"] == "Clusterwohnung")
 
     joker = next(r for r in records if r["unit_number"] == "W.107")
     check("W.107: Joker -> freifinanziert", joker["funding_type"] == "freifinanziert")
@@ -91,10 +126,11 @@ def test_seed_is_idempotent():
     check("136 in der Datenbank", db.query(models.Apartment).count() == 136)
 
     apt = by_unit(db, "P.108.1")
-    check("P.108.1 Etage", apt.floor == "1.OG")
     check("P.108.1 Clusterwohnung", apt.apartment_category == "Clusterwohnung")
     check("P.108.1 mind. 2 Bewohner", apt.min_occupants == 2)
     check("P.108.1 ohne Haushalt", apt.household_id is None)
+    check("P.101 als klein gespeichert", by_unit(db, "P.101").is_small is True)
+    check("P.103 nicht als klein gespeichert", by_unit(db, "P.103").is_small is False)
 
     # Zweiter Aufruf legt nichts an und überschreibt nichts
     apt.area_rent = 99.0
