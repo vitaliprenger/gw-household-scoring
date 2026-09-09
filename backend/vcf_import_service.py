@@ -219,7 +219,7 @@ def parse_vcf_timestamp(raw: str) -> Optional[datetime]:
     s = raw.strip()
     for fmt in ("%Y%m%dT%H%M%SZ", "%Y%m%dT%H%M%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
         try:
-            return datetime.strptime(s, fmt)
+            return datetime.strptime(s, fmt).replace(tzinfo=None)
         except ValueError:
             continue
     return None
@@ -891,7 +891,7 @@ def analyze_vcf(file_contents: bytes, db: Session) -> schemas.VcfAnalysisRespons
             existing = db.query(models.Household).get(match_result.matched_household_id)
             if existing:
                 if (existing.vcf_import_timestamp and hh_data.get("rev")
-                        and existing.vcf_import_timestamp == hh_data["rev"]):
+                        and existing.vcf_import_timestamp.replace(tzinfo=None) == hh_data["rev"]):
                     already_imported = True
                 else:
                     data_changes = compute_vcf_changes(hh_data, existing)
@@ -961,7 +961,8 @@ def _apply_person_fields(person: models.Person, data: dict) -> bool:
             continue
         setattr(person, field, value)
         changed = True
-    if data.get("rev") is not None and person.vcf_import_timestamp != data["rev"]:
+    existing_ts = person.vcf_import_timestamp.replace(tzinfo=None) if person.vcf_import_timestamp else None
+    if data.get("rev") is not None and existing_ts != data["rev"]:
         person.vcf_import_timestamp = data["rev"]
         changed = True
     if changed:

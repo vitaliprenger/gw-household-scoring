@@ -100,15 +100,13 @@ class Household(HouseholdBase):
 # --- Apartment Schemas ---
 class ApartmentBase(BaseModel):
     unit_number: str
-    size_rooms: Optional[float] = None
+    size_rooms: Optional[int] = None
     funding_type: str
-    floor: Optional[str] = None
+    apartment_category: Optional[str] = None
+    is_small: bool = False
     area_shares: Optional[float] = None
     area_rent: Optional[float] = None
     area_utilities: Optional[float] = None
-    apartment_type: Optional[str] = None
-    apartment_category: Optional[str] = None
-    wbs_raw: Optional[str] = None
     min_occupants: Optional[int] = None
     household_id: Optional[int] = None
 
@@ -117,15 +115,13 @@ class ApartmentCreate(ApartmentBase):
 
 class ApartmentUpdate(BaseModel):
     unit_number: Optional[str] = None
-    size_rooms: Optional[float] = None
+    size_rooms: Optional[int] = None
     funding_type: Optional[str] = None
-    floor: Optional[str] = None
+    apartment_category: Optional[str] = None
+    is_small: Optional[bool] = None
     area_shares: Optional[float] = None
     area_rent: Optional[float] = None
     area_utilities: Optional[float] = None
-    apartment_type: Optional[str] = None
-    apartment_category: Optional[str] = None
-    wbs_raw: Optional[str] = None
     min_occupants: Optional[int] = None
     household_id: Optional[int] = None
 
@@ -175,7 +171,7 @@ class RankedHousehold(BaseModel):
         from_attributes = True
 
 class RankingGroup(BaseModel):
-    size_rooms: Optional[float] = None
+    size_rooms: Optional[int] = None
     funding_type: str
     households: List[RankedHousehold] = []
 

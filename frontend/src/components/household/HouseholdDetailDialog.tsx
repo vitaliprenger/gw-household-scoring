@@ -27,7 +27,6 @@ const APARTMENT_TYPE_OPTIONS = [
     'Clusterwohnung',
     'Ausbauwohnung',
     'Atelierwohnung',
-    'Gartencluster',
 ];
 
 export default function HouseholdDetailDialog({

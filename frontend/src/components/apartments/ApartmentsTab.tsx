@@ -22,7 +22,7 @@ interface ApartmentsTabProps {
     onChanged?: () => void;
 }
 
-type SortKey = 'unit_number' | 'floor' | 'apartment_type' | 'size_rooms'
+type SortKey = 'unit_number' | 'size_rooms' | 'is_small' | 'apartment_category'
     | 'funding_type' | 'area_rent' | 'min_occupants' | 'household_name';
 type SortDir = 'asc' | 'desc';
 
@@ -92,8 +92,7 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
         if (q) {
             list = list.filter(a =>
                 a.unit_number.toLowerCase().includes(q) ||
-                (a.floor ?? '').toLowerCase().includes(q) ||
-                (a.apartment_type ?? '').toLowerCase().includes(q) ||
+                (a.apartment_category ?? '').toLowerCase().includes(q) ||
                 (a.household_name ?? '').toLowerCase().includes(q)
             );
         }
@@ -105,6 +104,7 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
             if (av === null || av === undefined) return 1;
             if (bv === null || bv === undefined) return -1;
             if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor;
+            if (typeof av === 'boolean' && typeof bv === 'boolean') return (Number(av) - Number(bv)) * factor;
             return String(av).localeCompare(String(bv), 'de', { numeric: true }) * factor;
         });
     }, [apartments, search, categoryFilter, fundingFilter, onlyOccupied, sortKey, sortDir]);
@@ -137,12 +137,12 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
 
     const columns: { key: SortKey; label: string; align?: 'right' }[] = [
         { key: 'unit_number', label: 'Wohnung' },
-        { key: 'floor', label: 'Etage' },
-        { key: 'apartment_type', label: 'Typ' },
         { key: 'size_rooms', label: 'Zimmer', align: 'right' },
+        { key: 'min_occupants', label: 'mind. Bew.', align: 'right' },
+        { key: 'is_small', label: 'Größe' },
+        { key: 'apartment_category', label: 'Wohnungsart' },
         { key: 'funding_type', label: 'Förderungsart' },
         { key: 'area_rent', label: 'qm mietwirksam', align: 'right' },
-        { key: 'min_occupants', label: 'mind. Bew.', align: 'right' },
         { key: 'household_name', label: 'Bewohnt von' },
     ];
 
@@ -151,7 +151,7 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
             <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
                 <TextField
                     size="small"
-                    placeholder="Wohnung, Etage, Typ oder Haushalt suchen"
+                    placeholder="Wohnung, Wohnungsart oder Haushalt suchen"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     sx={{ minWidth: 320 }}
@@ -220,24 +220,18 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
                         {visible.map((apt) => (
                             <TableRow key={apt.id} hover>
                                 <TableCell><strong>{apt.unit_number}</strong></TableCell>
-                                <TableCell>{apt.floor ?? '—'}</TableCell>
-                                <TableCell>
-                                    {apt.apartment_type ?? '—'}
-                                    {apt.apartment_category && apt.apartment_category !== 'Standard Wohnungstypen' && (
-                                        <Chip label={apt.apartment_category} size="small" sx={{ ml: 1 }} />
-                                    )}
-                                </TableCell>
                                 <TableCell align="right">{num(apt.size_rooms)}</TableCell>
+                                <TableCell align="right">{num(apt.min_occupants)}</TableCell>
+                                <TableCell>
+                                    {apt.is_small
+                                        ? <Chip label="klein" size="small" color="info" variant="outlined" />
+                                        : <Typography variant="body2" color="text.secondary">—</Typography>}
+                                </TableCell>
+                                <TableCell>{apt.apartment_category ?? '—'}</TableCell>
                                 <TableCell>
                                     <Chip label={apt.funding_type} size="small" />
-                                    {apt.wbs_raw && apt.wbs_raw !== 'N' && (
-                                        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                                            {apt.wbs_raw}
-                                        </Typography>
-                                    )}
                                 </TableCell>
                                 <TableCell align="right">{num(apt.area_rent)}</TableCell>
-                                <TableCell align="right">{num(apt.min_occupants)}</TableCell>
                                 <TableCell>
                                     {apt.household_id ? (
                                         <Link

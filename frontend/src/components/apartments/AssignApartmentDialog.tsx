@@ -61,7 +61,15 @@ export default function AssignApartmentDialog({
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                         <Typography variant="body2" color="text.secondary">Wohnung:</Typography>
                         <Typography variant="body2" fontWeight="bold">{apartment.unit_number}</Typography>
-                        {apartment.apartment_type && <Chip label={apartment.apartment_type} size="small" />}
+                        {apartment.size_rooms != null && (
+                            <Chip label={`${apartment.size_rooms} Zimmer`} size="small" />
+                        )}
+                        {apartment.is_small && (
+                            <Chip label="klein" size="small" color="info" variant="outlined" />
+                        )}
+                        {apartment.apartment_category && (
+                            <Chip label={apartment.apartment_category} size="small" />
+                        )}
                         <Chip label={apartment.funding_type} size="small" />
                     </Box>
                 )}

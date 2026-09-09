@@ -49,19 +49,41 @@ with database.engine.connect() as conn:
 
     apartment_columns = {c["name"] for c in inspect(database.engine).get_columns("apartments")}
     apartment_migrations = {
-        "floor": "ALTER TABLE apartments ADD COLUMN floor TEXT",
         "area_shares": "ALTER TABLE apartments ADD COLUMN area_shares REAL",
         "area_rent": "ALTER TABLE apartments ADD COLUMN area_rent REAL",
         "area_utilities": "ALTER TABLE apartments ADD COLUMN area_utilities REAL",
-        "apartment_type": "ALTER TABLE apartments ADD COLUMN apartment_type TEXT",
         "apartment_category": "ALTER TABLE apartments ADD COLUMN apartment_category TEXT",
-        "wbs_raw": "ALTER TABLE apartments ADD COLUMN wbs_raw TEXT",
+        "is_small": "ALTER TABLE apartments ADD COLUMN is_small BOOLEAN DEFAULT 0",
         "min_occupants": "ALTER TABLE apartments ADD COLUMN min_occupants INTEGER",
         "household_id": "ALTER TABLE apartments ADD COLUMN household_id INTEGER REFERENCES households(id)",
     }
     for col, sql in apartment_migrations.items():
         if col not in apartment_columns:
             conn.execute(text(sql))
+
+    # Mini WGs sind Standardwohnungen mit 3 Zimmern, die klein ausfallen.
+    # Muss laufen, solange die alte Typ-Spalte sie noch identifizieren kann.
+    if "apartment_type" in apartment_columns:
+        conn.execute(text(
+            "UPDATE apartments SET apartment_category = 'Standard Wohnungstypen',"
+            " size_rooms = 3, is_small = 1 WHERE apartment_type = 'Mini WG'"
+        ))
+
+    # C-Riegel, Gartencluster und Wohngemeinschaften sind Clusterwohnungen
+    conn.execute(text(
+        "UPDATE apartments SET apartment_category = 'Clusterwohnung'"
+        " WHERE apartment_category IN ('C-Riegel', 'Gartencluster', 'Wohngemeinschaft')"
+    ))
+
+    # Halbe Zimmer entfallen: 3.5 -> 3
+    conn.execute(text(
+        "UPDATE apartments SET size_rooms = CAST(size_rooms AS INTEGER) WHERE size_rooms IS NOT NULL"
+    ))
+
+    # Etage und Rohwert "Typ" werden nicht mehr geführt
+    for col in ("floor", "apartment_type"):
+        if col in apartment_columns:
+            conn.execute(text(f"ALTER TABLE apartments DROP COLUMN {col}"))
 
     # Migrate member_since from households to people
     if "member_since" in hh_columns:
@@ -95,6 +117,25 @@ with database.engine.connect() as conn:
             pass
         arr = _json.dumps([val])
         conn.execute(text("UPDATE households SET desired_apartment_type = :v WHERE id = :id"), {"v": arr, "id": r[0]})
+
+    # "Gartencluster" ist keine eigene Wohnungsart mehr, sondern eine Clusterwohnung
+    rows = conn.execute(text(
+        "SELECT id, desired_apartment_type FROM households "
+        "WHERE desired_apartment_type LIKE '%Gartencluster%'"
+    )).fetchall()
+    for r in rows:
+        try:
+            types = _json.loads(r[1])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(types, list):
+            continue
+        replaced = ["Clusterwohnung" if t == "Gartencluster" else t for t in types]
+        deduped = list(dict.fromkeys(replaced))
+        conn.execute(
+            text("UPDATE households SET desired_apartment_type = :v WHERE id = :id"),
+            {"v": _json.dumps(deduped), "id": r[0]},
+        )
 
     conn.commit()
 

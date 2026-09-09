@@ -49,14 +49,13 @@ export interface Household {
 export interface Apartment {
     id: number;
     unit_number: string;
-    floor?: string;
+    size_rooms?: number | null;
+    apartment_category?: string;
+    /** Wohnung fällt für ihre Zimmerzahl klein aus (z. B. ehemalige "Mini WG"). */
+    is_small: boolean;
     area_shares?: number;
     area_rent?: number;
     area_utilities?: number;
-    apartment_type?: string;
-    apartment_category?: string;
-    size_rooms?: number | null;
-    wbs_raw?: string;
     funding_type: string;
     min_occupants?: number;
     household_id?: number | null;

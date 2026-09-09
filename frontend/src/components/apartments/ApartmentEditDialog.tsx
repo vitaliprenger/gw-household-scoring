@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
     Dialog, DialogTitle, DialogContent, DialogActions,
-    Button, TextField, Grid, Alert, MenuItem,
+    Button, TextField, Grid, Alert, MenuItem, FormControlLabel, Switch,
 } from '@mui/material';
 import { Apartment } from '../../types';
 import { createApartment, updateApartment } from '../../api';
@@ -21,36 +21,29 @@ const CATEGORIES = [
     'Clusterwohnung',
     'Ausbauwohnung',
     'Atelierwohnung',
-    'Wohngemeinschaft',
-    'C-Riegel',
     'Joker',
-    'Gartencluster',
 ];
 
 type FormState = {
     unit_number: string;
-    floor: string;
+    size_rooms: string;
+    apartment_category: string;
+    is_small: boolean;
     area_shares: string;
     area_rent: string;
     area_utilities: string;
-    apartment_type: string;
-    apartment_category: string;
-    size_rooms: string;
-    wbs_raw: string;
     funding_type: string;
     min_occupants: string;
 };
 
 const EMPTY: FormState = {
     unit_number: '',
-    floor: '',
+    size_rooms: '',
+    apartment_category: '',
+    is_small: false,
     area_shares: '',
     area_rent: '',
     area_utilities: '',
-    apartment_type: '',
-    apartment_category: '',
-    size_rooms: '',
-    wbs_raw: '',
     funding_type: 'freifinanziert',
     min_occupants: '',
 };
@@ -60,14 +53,12 @@ function toForm(apt: Apartment): FormState {
         v === null || v === undefined ? '' : String(v);
     return {
         unit_number: apt.unit_number ?? '',
-        floor: apt.floor ?? '',
+        size_rooms: str(apt.size_rooms),
+        apartment_category: apt.apartment_category ?? '',
+        is_small: apt.is_small ?? false,
         area_shares: str(apt.area_shares),
         area_rent: str(apt.area_rent),
         area_utilities: str(apt.area_utilities),
-        apartment_type: apt.apartment_type ?? '',
-        apartment_category: apt.apartment_category ?? '',
-        size_rooms: str(apt.size_rooms),
-        wbs_raw: apt.wbs_raw ?? '',
         funding_type: apt.funding_type ?? 'freifinanziert',
         min_occupants: str(apt.min_occupants),
     };
@@ -103,18 +94,21 @@ export default function ApartmentEditDialog({
             setError('Die Wohnungsnummer ist erforderlich.');
             return;
         }
+        const rooms = toNumber(form.size_rooms);
+        if (rooms !== undefined && !Number.isInteger(rooms)) {
+            setError('Die Zimmerzahl wird als ganze Zahl geführt (aus 3,5 wird 3).');
+            return;
+        }
         setSaving(true);
         setError('');
         const payload: Partial<Apartment> = {
             unit_number: form.unit_number.trim(),
-            floor: form.floor.trim() || undefined,
+            size_rooms: rooms ?? null,
+            apartment_category: form.apartment_category.trim() || undefined,
+            is_small: form.is_small,
             area_shares: toNumber(form.area_shares),
             area_rent: toNumber(form.area_rent),
             area_utilities: toNumber(form.area_utilities),
-            apartment_type: form.apartment_type.trim() || undefined,
-            apartment_category: form.apartment_category.trim() || undefined,
-            size_rooms: toNumber(form.size_rooms) ?? null,
-            wbs_raw: form.wbs_raw.trim() || undefined,
             funding_type: form.funding_type,
             min_occupants: toNumber(form.min_occupants),
         };
@@ -150,18 +144,6 @@ export default function ApartmentEditDialog({
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                         <TextField
-                            fullWidth label="Etage" placeholder="EG, 1.OG, ..."
-                            value={form.floor} onChange={set('floor')}
-                        />
-                    </Grid>
-                    <Grid size={{ xs: 12, sm: 6 }}>
-                        <TextField
-                            fullWidth label="Typ" placeholder="1.5, CL Punkt, Mini WG, ..."
-                            value={form.apartment_type} onChange={set('apartment_type')}
-                        />
-                    </Grid>
-                    <Grid size={{ xs: 12, sm: 6 }}>
-                        <TextField
                             select fullWidth label="Wohnungsart"
                             value={form.apartment_category} onChange={set('apartment_category')}
                         >
@@ -172,7 +154,8 @@ export default function ApartmentEditDialog({
                     <Grid size={{ xs: 12, sm: 6 }}>
                         <TextField
                             fullWidth label="Zimmer" type="number"
-                            helperText="Leer lassen bei Sondertypen ohne Zimmerzahl"
+                            inputProps={{ step: 1, min: 0 }}
+                            helperText="Ganze Zahl; leer lassen bei Wohnungen ohne Zimmerangabe"
                             value={form.size_rooms} onChange={set('size_rooms')}
                         />
                     </Grid>
@@ -182,6 +165,18 @@ export default function ApartmentEditDialog({
                             value={form.min_occupants} onChange={set('min_occupants')}
                         />
                     </Grid>
+                    <Grid size={{ xs: 12 }}>
+                        <FormControlLabel
+                            control={
+                                <Switch
+                                    checked={form.is_small}
+                                    onChange={(_, checked) =>
+                                        setForm((prev) => ({ ...prev, is_small: checked }))}
+                                />
+                            }
+                            label="Klein für ihre Zimmerzahl"
+                        />
+                    </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                         <TextField
                             select fullWidth label="Förderungsart"
@@ -189,13 +184,6 @@ export default function ApartmentEditDialog({
                         >
                             {FUNDING_TYPES.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
                         </TextField>
-                    </Grid>
-                    <Grid size={{ xs: 12, sm: 6 }}>
-                        <TextField
-                            fullWidth label="WBS-Kennzeichen" placeholder="N, A, B, WPG-A, ..."
-                            helperText="Rohwert aus der Wohnungsübersicht"
-                            value={form.wbs_raw} onChange={set('wbs_raw')}
-                        />
                     </Grid>
                     <Grid size={{ xs: 12, sm: 4 }}>
                         <TextField
