@@ -45,7 +45,9 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                 temp_id: hh.temp_id,
                 action: hh.already_imported
                     ? 'skip'
-                    : hh.match_result.matched_household_id ? 'update' : 'create',
+                    : hh.match_result.matched_household_id
+                        ? 'update'
+                        : hh.apartment_unit ? 'create' : 'skip',
                 target_household_id: hh.match_result.matched_household_id ?? undefined,
                 excluded_person_temp_ids: [],
             };
@@ -258,7 +260,9 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                                                             {dec?.target_household_id && (
                                                                 <MenuItem value="update">Aktualisieren</MenuItem>
                                                             )}
-                                                            <MenuItem value="create">Neu anlegen</MenuItem>
+                                                            {hh.apartment_unit && (
+                                                                <MenuItem value="create">Neu anlegen</MenuItem>
+                                                            )}
                                                             <MenuItem value="skip">Überspringen</MenuItem>
                                                         </Select>
                                                     </FormControl>

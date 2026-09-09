@@ -1029,10 +1029,13 @@ def _sync_household(hh: models.Household, hh_data: dict, persons: list[dict], db
     hh.vcf_import_timestamp = hh_data.get("rev")
     hh.updated_at = datetime.utcnow()
 
+    has_apartment = bool(hh_data.get("apartment_unit"))
     created = updated = assigned = 0
     for data in persons:
         existing = _find_existing_person(data, hh, db)
         if existing is None:
+            if not has_apartment:
+                continue
             db.add(_new_person(data, hh.id))
             created += 1
             continue
@@ -1075,6 +1078,9 @@ def commit_vcf(request: schemas.VcfCommitRequest, db: Session) -> schemas.VcfCom
             hh = db.query(models.Household).get(decision.target_household_id)
 
         if hh is None:
+            if not raw.get("apartment_unit"):
+                households_skipped += 1
+                continue
             hh = models.Household(
                 name=raw["name"],
                 import_source=IMPORT_SOURCE,
