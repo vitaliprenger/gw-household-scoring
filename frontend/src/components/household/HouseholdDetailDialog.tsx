@@ -67,6 +67,8 @@ export default function HouseholdDetailDialog({
         ? { ...household, ...editHH }
         : null;
 
+    const nameError = editing && (currentHH?.name ?? '').trim() === '';
+
     function handleHHChange(field: string, value: string | number | boolean | string[]) {
         setEditHH((prev) => ({ ...prev, [field]: value }));
     }
@@ -80,11 +82,20 @@ export default function HouseholdDetailDialog({
 
     async function handleSave() {
         if (!household) return;
+        const payload = { ...editHH };
+        if (payload.name !== undefined) {
+            const trimmedName = payload.name.trim();
+            if (!trimmedName) {
+                setError('Haushaltsname darf nicht leer sein');
+                return;
+            }
+            payload.name = trimmedName;
+        }
         setSaving(true);
         setError('');
         try {
-            if (Object.keys(editHH).length > 0) {
-                await updateHousehold(household.id, editHH);
+            if (Object.keys(payload).length > 0) {
+                await updateHousehold(household.id, payload);
             }
             for (const [idStr, data] of Object.entries(editPersons)) {
                 if (Object.keys(data).length > 0) {
@@ -185,8 +196,21 @@ export default function HouseholdDetailDialog({
     return (
         <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
             <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {currentHH?.name ?? 'Haushalt'}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexGrow: 1, mr: 2 }}>
+                    {editing ? (
+                        <TextField
+                            label="Haushaltsname"
+                            size="small"
+                            fullWidth
+                            value={currentHH?.name ?? ''}
+                            error={nameError}
+                            helperText={nameError ? 'Haushaltsname darf nicht leer sein' : undefined}
+                            onChange={(e) => handleHHChange('name', e.target.value)}
+                            sx={{ maxWidth: 420 }}
+                        />
+                    ) : (
+                        currentHH?.name ?? 'Haushalt'
+                    )}
                     {currentHH?.archived && <Chip label="Archiviert" size="small" color="default" />}
                 </Box>
                 {!editing && (
@@ -345,7 +369,7 @@ export default function HouseholdDetailDialog({
                 {editing ? (
                     <>
                         <Button onClick={handleCancel}>Abbrechen</Button>
-                        <Button variant="contained" onClick={handleSave} disabled={saving}>
+                        <Button variant="contained" onClick={handleSave} disabled={saving || nameError}>
                             {saving ? 'Speichere...' : 'Speichern'}
                         </Button>
                     </>

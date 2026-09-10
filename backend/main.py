@@ -249,7 +249,13 @@ def update_household(
     hh = db.query(models.Household).filter(models.Household.id == household_id).first()
     if not hh:
         raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    if "name" in payload:
+        name = (payload["name"] or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Haushaltsname darf nicht leer sein")
+        payload["name"] = name
+    for field, value in payload.items():
         setattr(hh, field, value)
     hh.updated_at = datetime.utcnow()
     db.commit()
