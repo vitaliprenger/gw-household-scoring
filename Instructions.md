@@ -21,25 +21,43 @@ Für jeden Haushalt wird ein Scoring berechnet, das die Vergabeentscheidung unte
 | **Durchmischung** | Bildungsabschluss | Zielwerte pro Ausprägung (1–8, orientiert am EQR): 1 Berufsausbildungsvorbereitung, 2 Hauptschulabschluss, 3 Zweijährige Berufsausbildung/Mittlerer Schulabschluss, 4 Dreijährige Berufsausbildung/Hochschulreife (inkl. Fachabitur), 5 Erste berufliche Fortbildungsqualifikation, 6 Bachelor/FH-Diplom/Staatsexamen/Fachwirt/Meister/Fachschule/Berufsakademie, 7 Master/Uni-Diplom/Magister/Staatsexamen/Betriebswirt/Strategischer Professional, 8 Promotion. Kategorie 0 (Keine Antwort) = 0 Punkte. Gleiche Logik wie Alter. |
 | **Durchmischung** | Kulturelle Vielfalt | Erfüllungsgrad 0–1 pro Haushalt (Bonus). |
 | **Durchmischung** | Besondere Lebenslagen / Finanzen | Erfüllungsgrad 0–1 pro Haushalt (Bonus). |
-| **Wohnraumausnutzung** | Personen pro Wohnung | Mehr Personen = höheres Scoring. |
+| **Wohnraumausnutzung** | Ausfüllen der Wohnung | Bewertet, ob der Haushalt die Wohnung mit seinen Mitgliedern **ausfüllt**: Mitgliederzahl ≥ Zimmerzahl ⇒ voller Erfüllungsgrad (1), sonst **0 Punkte**. Hängt an der Zimmerzahl und wird deshalb **je Wohnungsgröße** vergeben, nicht pauschal. |
 | **Mitgliedsdauer** | Jahre in Genossenschaft | Pro Person gespeichert (`member_since`). Für das Scoring wird das früheste Eintrittsdatum aller Personen im Haushalt herangezogen. Längere Dauer = mehr Punkte. |
 | **Engagement** | Aktives Engagement im Projekt | Erfüllungsgrad 0–1. |
 
 ### Scoring-Berechnung
 
-- Das Scoring wird **unabhängig von Wohnungsgröße und Wohnungsart** berechnet. Jeder Haushalt erhält genau einen Gesamt-Score, der ausschließlich auf seinen eigenen Eigenschaften basiert.
+Ein Haushalt erhält **kein pauschales Scoring**, sondern **ein Scoring je in Frage kommender Wohnungsgröße**. Der Score besteht aus zwei Teilen:
+
+**1. Grundpunktzahl** — alle Kriterien, die ausschließlich vom Haushalt selbst abhängen. Sie ist unabhängig von Wohnungsgröße und Wohnungsart, wird von `scoring.run_scoring` berechnet und in `Household.total_score` zwischengespeichert.
+
 - Jedes Kriterium erhält ein **Gewicht** (editierbar über die UI).
 - **Zielwert-Kriterien** (Alter, Geschlecht, Haupttätigkeit, Bildung): Punkte = f(Zielwert − IST-Wert) × Anzahl passender Personen im Haushalt.
-- **Erfüllungsgrad-Kriterien** (kulturelle Vielfalt, besondere Lebenslagen, Engagement): Punkte = Erfüllungsgrad × Skalierungsfaktor.
+- **Erfüllungsgrad-Kriterien** (kulturelle Vielfalt, besondere Lebenslagen, Engagement): Punkte = Erfüllungsgrad × Gewicht.
 - **Mitgliedsdauer**: Punkte = f(Jahre), gekappt bei Maximum.
-- **Wohnraumausnutzung**: Punkte = f(Haushaltsgröße / Zimmerzahl der beantragten Wohnung).
-- Gesamt-Score = Σ (Gewicht_i × Teilscore_i).
+- Grundpunktzahl = Σ (Gewicht_i × Teilscore_i).
+
+**2. Wohnraumausnutzung** (§3 Abs. 2) — hängt an der Zimmerzahl der Wohnung und wird deshalb **je Wohnungskategorie** aufgeschlagen (`services.build_ranking`), nicht in der Grundpunktzahl gespeichert.
+
+- Ein Haushalt **füllt eine Wohnung aus**, wenn seine Mitgliederzahl der Zimmerzahl **entspricht oder sie übersteigt**. Dann gilt der volle Erfüllungsgrad (1), sonst 0.
+- Punkte = Erfüllungsgrad × `weight_occupancy`.
+- Beispiel: Ein Haushalt mit 3 Mitgliedern erhält für eine **3-Zimmer-Wohnung** die vollen Ausnutzungspunkte, für eine **4-Zimmer-Wohnung 0 Punkte**. Sein Gesamtscore ist in der Kategorie „3 Zimmer" also höher als in „4 Zimmer".
+- Wohnungen **ohne Zimmerangabe** (Cluster, Ausbau, Atelier, Joker) kennen keine Zimmerschranke; dort gilt das Kriterium als erfüllt, weil die Eignungsprüfung die Mindestbelegung bereits sicherstellt.
+- Da die Eignungsprüfung Wohnungen mit weniger Zimmern als Mitgliedern ausschließt, kommt der Fall „mehr Mitglieder als Zimmer" in der Rangliste nicht vor.
+
+**Gesamt-Score einer Kategorie** = Grundpunktzahl + Wohnraumausnutzung dieser Zimmerzahl.
 
 ### Ranking
 
 - Das **Ranking** (Rangvergabe) erfolgt **pro Wohnungskategorie** (Kombination aus Wohnungsgröße und Förderungsart), nicht über alle Haushalte hinweg.
-- Innerhalb jeder Kategorie werden die Haushalte nach ihrem Gesamt-Score absteigend sortiert und erhalten einen Rang (1, 2, 3, …).
+- Innerhalb jeder Kategorie werden die Haushalte nach ihrem **Gesamt-Score dieser Kategorie** (Grundpunktzahl + Wohnraumausnutzung der Zimmerzahl) absteigend sortiert und erhalten einen Rang (1, 2, 3, …). Derselbe Haushalt kann in unterschiedlichen Kategorien unterschiedliche Scores und damit unterschiedliche Ränge haben.
 - Ein Haushalt **bewirbt sich nicht auf einzelne Wohnungen**: er erscheint automatisch in jeder Kategorie, für die er in Frage kommt, und damit in der Regel in mehreren Kategorien.
+
+#### Nicht per Scoring vergebene Wohnungen
+
+**Clusterwohnungen** und **Joker-Zimmer** werden nicht über das Scoring vergeben. Sie werden bei der Zuordnung von Haushalten zu Wohnungen ignoriert: aus ihnen entsteht keine Wohnungskategorie, sie erscheinen also weder als Gruppe der Rangliste noch in den Filtern des Ranking-Tabs. In den Wohnungsstammdaten bleiben sie unverändert erhalten und können im Tab „Wohnungen" weiterhin manuell einem Haushalt zugeordnet werden — als Bewohner-Haushalte fließen sie wie gewohnt in die IST-Verteilung der Durchmischung ein.
+
+Maßgeblich ist die Wohnungsart (`apartment_category`); implementiert in `services.is_scored_category` / `services.NON_SCORED_CATEGORIES`, ausgewertet in `services.apartment_categories`. Wohnungen ohne gepflegte Wohnungsart gelten als per Scoring vergeben.
 
 #### Wer kommt für eine Wohnung in Frage?
 
@@ -64,7 +82,7 @@ Implementiert in `services.is_eligible` / `services.build_ranking`; getestet mit
 - **Wohnungsart** (Mehrfachauswahl): „Standard Wohnungstypen", „Clusterwohnung", „Ausbauwohnung", „Atelierwohnung". Ein Haushalt kann sich auf mehrere Wohnungsarten gleichzeitig bewerben. Die Auswahl wird als Liste gespeichert (JSON-Array im Feld `desired_apartment_type`). „Gartencluster", „C-Riegel" und die Wohngemeinschaften (WPG) sind **keine** eigenen Wohnungsarten, sondern Clusterwohnungen. In den Wohnungsstammdaten kommt zusätzlich „Joker" vor; darauf bewerben sich Haushalte nicht.
 - Wohngemeinschaften (WG) werden **nicht** vergeben.
 - Haushalte bewerben sich **nicht** auf konkrete Wohnungen; sie werden automatisch in allen Kategorien geführt, für die sie in Frage kommen (siehe „Ranking").
-- **Gruppiertes Ranking**: Haushalte werden **nicht** über alle Haushalte hinweg gerankt, sondern **pro Wohnungskategorie** (Kombination aus Wohnungsgröße und Förderungsart). Beispiel: Alle Haushalte, die für „3 Zimmer / WBS A" in Frage kommen, erhalten einen eigenen Rang innerhalb dieser Gruppe. Wohnungen ohne Zimmerangabe (Cluster, Ausbau, Atelier, Joker) bilden eine eigene Gruppe „ohne Zimmerangabe".
+- **Gruppiertes Ranking**: Haushalte werden **nicht** über alle Haushalte hinweg gerankt, sondern **pro Wohnungskategorie** (Kombination aus Wohnungsgröße und Förderungsart). Beispiel: Alle Haushalte, die für „3 Zimmer / WBS A" in Frage kommen, erhalten einen eigenen Rang innerhalb dieser Gruppe. Wohnungen ohne Zimmerangabe (Cluster, Ausbau, Atelier, Joker) bilden eine eigene Gruppe „ohne Zimmerangabe". Clusterwohnungen und Joker-Zimmer bilden überhaupt keine Kategorie, weil sie nicht per Scoring vergeben werden (s. „Nicht per Scoring vergebene Wohnungen").
 
 ### Wohnungsstammdaten
 
@@ -264,7 +282,7 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 | DELETE | `/apartments/{id}/assign` | Zuordnung lösen (Wohnung bleibt bestehen) | Auth |
 | GET | `/applications/` | Alle Bewerbungen | Auth |
 | POST | `/applications/` | Bewerbung anlegen (Haushalt → Wohnung) | Auth |
-| GET | `/ranking/` | Gruppiertes Ranking: alle geeigneten Haushalte pro (Größe, Förderungsart), nach Score sortiert | Auth |
+| GET | `/ranking/` | Gruppiertes Ranking: alle geeigneten Haushalte pro (Größe, Förderungsart), nach dem Gesamt-Score der Kategorie sortiert. Je Haushalt werden `base_score` (Grundpunktzahl), `occupancy_score` (Wohnraumausnutzung dieser Zimmerzahl) und `total_score` (Summe) geliefert | Auth |
 | PATCH | `/households/{id}/archive` | Haushalt archivieren/wiederherstellen (inkl. Personen) | Auth |
 | POST | `/people/` | Person eigenständig anlegen (ohne Haushalt) | Auth |
 | DELETE | `/people/{id}` | Person löschen (nur ohne Haushaltszuordnung; 409 wenn zugeordnet) | Auth |
@@ -300,10 +318,10 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 
 ### Frontend-Anforderungen
 
-- **Ranking-Tab**: Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart). Beide Filter stehen **standardmäßig auf „Alle“** und schränken dann nicht ein: die Rangliste zeigt zunächst **alle nicht archivierten Haushalte**, nach Score sortiert — auch solche, die für keine Wohnungskategorie in Frage kommen. Wird ein Filter gesetzt, zeigt die Tabelle die Haushalte, die für die passenden Kategorien in Frage kommen (bei mehreren Kategorien über die Haushalts-id entdoppelt). Der **Rang wird immer für die aktuelle Auswahl neu vergeben** (1, 2, 3, …).
-- **Haushalte-Tab**: Tabelle aller Haushalte mit Freitextsuche (Haushaltsname, Wohnungsnummer, WBS-Status und Namen der Haushaltsmitglieder) sowie den Filtern „Nur ohne Wohnung“ und „Archivierte anzeigen“. Der Button „Haushalt anlegen“ steht — wie im Wohnungen-Tab — rechtsbündig in der Filterzeile. Über der Tabelle wird die Zahl der sichtbaren von allen Haushalten angezeigt. Ein Klick auf eine Zeile öffnet den Haushaltsdetail-Dialog.
+- **Ranking-Tab**: Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart) und den Spalten Rang, Haushaltsname, Mitglieder, **Grundpunktzahl**, **Wohnraumausnutzung** und **Gesamtpunktzahl**. Beide Filter stehen **standardmäßig auf „Alle“** und schränken dann nicht ein: die Rangliste zeigt zunächst **alle nicht archivierten Haushalte** — auch solche, die für keine Wohnungskategorie in Frage kommen. Ohne Filter gibt es keine Zimmerzahl und damit keine Wohnraumausnutzung: die Spalte zeigt „—“, die Gesamtpunktzahl entspricht der Grundpunktzahl. Wird ein Filter gesetzt, zeigt die Tabelle die Haushalte, die für die passenden Kategorien in Frage kommen; da derselbe Haushalt je Kategorie einen anderen Score hat, wird beim Entdoppeln über die Haushalts-id die **Kategorie mit dem höchsten Gesamtscore** behalten. Der **Rang wird immer für die aktuelle Auswahl neu vergeben** (1, 2, 3, …).
+- **Haushalte-Tab**: Die Spalte „Grundpunktzahl“ zeigt `Household.total_score`, also den Score **ohne** Wohnraumausnutzung; diese kommt erst in der Rangliste je Wohnungsgröße hinzu. Tabelle aller Haushalte mit Freitextsuche (Haushaltsname, Wohnungsnummer, WBS-Status und Namen der Haushaltsmitglieder) sowie den Filtern „Nur ohne Wohnung“ und „Archivierte anzeigen“. Der Button „Haushalt anlegen“ steht — wie im Wohnungen-Tab — rechtsbündig in der Filterzeile. Über der Tabelle wird die Zahl der sichtbaren von allen Haushalten angezeigt. Ein Klick auf eine Zeile öffnet den Haushaltsdetail-Dialog.
 - **Personen-Tab**: Tabelle aller Personen mit Suche, Sortierung und den Filtern „Nur ohne Haushalt" und „Archivierte anzeigen". Pro Zeile: Haushalt zuordnen (bei Personen ohne Haushalt), aus Haushalt entfernen (bei zugeordneten Personen), Archivieren/Wiederherstellen sowie Löschen (nur bei Personen ohne Haushalt). Über der Tabelle steht zusätzlich „Alle ohne Haushalt löschen (N)"; die Aktion wird mit Anzahl bestätigt und löscht — je nach Schalter „Archivierte anzeigen" — auch archivierte Personen ohne Haushalt.
-- **Haushaltsdetail-Dialog**: Zeigt Haushaltsdaten (einschließlich zugeordnete Wohnung, sofern vorhanden) und Personenkarten. Der **Haushaltsname ist editierbar**: im Bearbeiten-Modus wird die Dialogüberschrift zum Eingabefeld „Haushaltsname“. Ein leerer Name wird abgelehnt (Speichern deaktiviert, Backend antwortet mit HTTP 400); führende und nachfolgende Leerzeichen werden entfernt. Der Bewohnerstatus (`is_resident`) wird als Nur-Lese-Feld angezeigt und ergibt sich implizit aus der Wohnungszuordnung. Erlaubt „Person hinzufügen" (Auswahl aus Personen ohne Haushalt) und das Entfernen einzelner Personen aus dem Haushalt.
+- **Haushaltsdetail-Dialog**: Zeigt Haushaltsdaten (einschließlich zugeordnete Wohnung, sofern vorhanden) und Personenkarten. Der Score erscheint als „Grundpunktzahl (ohne Wohnraumausnutzung)“. Der **Haushaltsname ist editierbar**: im Bearbeiten-Modus wird die Dialogüberschrift zum Eingabefeld „Haushaltsname“. Ein leerer Name wird abgelehnt (Speichern deaktiviert, Backend antwortet mit HTTP 400); führende und nachfolgende Leerzeichen werden entfernt. Der Bewohnerstatus (`is_resident`) wird als Nur-Lese-Feld angezeigt und ergibt sich implizit aus der Wohnungszuordnung. Erlaubt „Person hinzufügen" (Auswahl aus Personen ohne Haushalt) und das Entfernen einzelner Personen aus dem Haushalt.
 - **Wohnungen-Tab**: Tabelle aller Wohnungen (Wohnungsnummer, Zimmer, Kennzeichen „klein", Wohnungsart, Förderungsart, qm mietwirksam, mind. Bewohner, bewohnt von) mit Suche über Wohnungsnummer, Wohnungsart und Haushalt, sortierbaren Spalten und den Filtern „Wohnungsart", „Förderungsart" und „Nur belegte". Pro Zeile: bearbeiten, Haushalt zuordnen bzw. Zuordnung lösen, Wohnung löschen. Über der Tabelle „Wohnung anlegen". Der zugeordnete Haushalt ist als Link in die Haushaltsdetailansicht ausgeführt. Im Bearbeiten-Dialog wird eine Zimmerzahl mit Nachkommastelle abgelehnt.
 - **Import-Tab**: Drei Upload-Bereiche (Haushaltsbogen, Individualbogen, vCard-Mitgliederliste). Jeder öffnet einen Assistenten mit den Schritten Analyse → Zuordnung → Zusammenfassung. Im vCard-Assistenten ist jeder Haushalt aufklappbar; dort sind alle Personen mit Rolle (Mitglied/Partner*in/Kind) und Herkunft (Kontakt/Notiz) sichtbar und einzeln abwählbar.
 - **Config-Tab**: Editierbare Karten für alle Gewichte und Zielwerte (nur für eingeloggte Admins sichtbar).

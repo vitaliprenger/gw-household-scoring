@@ -164,7 +164,9 @@ class RankedHousehold(BaseModel):
     name: str
     member_count: int
     engagement_score: float
-    total_score: float
+    base_score: float       # haushaltseigene Kriterien, unabhängig von der Wohnung
+    occupancy_score: float  # Wohnraumausnutzung für die Zimmerzahl dieser Kategorie
+    total_score: float      # base_score + occupancy_score
 
     class Config:
         from_attributes = True

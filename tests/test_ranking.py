@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend import models, services
+from backend import models, scoring, services
 
 failures: list[str] = []
 
@@ -49,12 +49,13 @@ def add_household(db, name, members, wbs=None, score=0.0, archived=False,
     return hh
 
 
-def add_apartment(db, unit, size_rooms, funding, min_occupants):
+def add_apartment(db, unit, size_rooms, funding, min_occupants, category=None):
     apt = models.Apartment(
         unit_number=unit,
         size_rooms=size_rooms,
         funding_type=funding,
         min_occupants=min_occupants,
+        apartment_category=category,
     )
     db.add(apt)
     db.flush()
@@ -69,7 +70,14 @@ def group_of(groups, size_rooms, funding):
 
 
 def names(group):
-    return [hh.name for hh, _ in group["households"]]
+    return [e.household.name for e in group["households"]]
+
+
+def entry(group, name):
+    for e in group["households"]:
+        if e.household.name == name:
+            return e
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +173,7 @@ def test_ranking_groups():
           names(gnone) == ["Gross", "Paar", "Einzel"], str(names(gnone)))
 
     check("Mitgliederzahl wird mitgeliefert",
-          [m for _, m in gnone["households"]] == [4, 2, 1])
+          [e.members for e in gnone["households"]] == [4, 2, 1])
     db.close()
 
 
@@ -184,7 +192,7 @@ def test_ranking_excludes_archived():
     check("archivierte Haushalte fehlen in der Rangliste",
           names(g) == ["Aktiv", "MitArchivPerson"], str(names(g)))
     check("archivierte Personen zaehlen nicht als Mitglieder",
-          dict(zip(names(g), [m for _, m in g["households"]]))["MitArchivPerson"] == 2)
+          entry(g, "MitArchivPerson").members == 2)
     db.close()
 
 
@@ -198,9 +206,140 @@ def test_no_duplicate_rows():
     db.commit()
 
     g = group_of(services.build_ranking(db), 3, "freifinanziert")
-    ids = [hh.id for hh, _ in g["households"]]
+    ids = [e.household.id for e in g["households"]]
     check("Haushalt erscheint genau einmal je Kategorie",
           len(ids) == len(set(ids)) == 1, str(ids))
+    db.close()
+
+
+def test_occupancy_subscore():
+    print("\n== Wohnraumausnutzung (Erfuellungsgrad) ==")
+    sub = scoring.calculate_occupancy_subscore
+    check("3 Mitglieder fuellen 3 Zimmer aus", sub(3, 3) == 1.0)
+    check("3 Mitglieder fuellen 4 Zimmer NICHT aus -> 0 Punkte", sub(3, 4) == 0.0)
+    check("3 Mitglieder fuellen 5 Zimmer NICHT aus -> 0 Punkte", sub(3, 5) == 0.0)
+    check("mehr Mitglieder als Zimmer gilt als ausgefuellt", sub(4, 3) == 1.0)
+    check("1 Mitglied fuellt 1 Zimmer aus", sub(1, 1) == 1.0)
+    check("Wohnung ohne Zimmerangabe: Mindestbelegung genuegt", sub(1, None) == 1.0)
+
+
+def test_occupancy_weight():
+    print("\n== Gewichtung der Wohnraumausnutzung ==")
+    check("Erfuellung x Gewicht",
+          scoring.calculate_occupancy_score(3, 3, {"weight_occupancy": 4.0}) == 4.0)
+    check("keine Erfuellung -> 0 Punkte unabhaengig vom Gewicht",
+          scoring.calculate_occupancy_score(3, 4, {"weight_occupancy": 4.0}) == 0.0)
+    check("ohne Config greift der Default",
+          scoring.calculate_occupancy_score(3, 3, {})
+          == scoring.DEFAULT_CONFIG["weight_occupancy"]["value"])
+
+
+def test_score_per_apartment_size():
+    print("\n== Score je Wohnungsgroesse ==")
+    db = make_session()
+    db.add(models.ScoringConfig(key="weight_occupancy", value=2.0))
+    add_apartment(db, "A.3", 3, "freifinanziert", 1)
+    add_apartment(db, "A.4", 4, "freifinanziert", 1)
+    add_household(db, "Drei", 3, score=10.0)
+    db.commit()
+
+    groups = services.build_ranking(db)
+    g3 = entry(group_of(groups, 3, "freifinanziert"), "Drei")
+    g4 = entry(group_of(groups, 4, "freifinanziert"), "Drei")
+
+    check("Haushalt kommt in beiden Kategorien vor", g3 is not None and g4 is not None)
+    check("3 Mitglieder / 3 Zimmer: volle Ausnutzungspunkte",
+          g3.occupancy_score == 2.0, str(g3.occupancy_score))
+    check("3 Mitglieder / 4 Zimmer: 0 Punkte Wohnraumausnutzung",
+          g4.occupancy_score == 0.0, str(g4.occupancy_score))
+    check("Grundpunktzahl bleibt in beiden Kategorien gleich",
+          g3.base_score == g4.base_score == 10.0)
+    check("Gesamtscore fuer 3 Zimmer hoeher als fuer 4 Zimmer",
+          g3.total_score == 12.0 and g4.total_score == 10.0,
+          f"{g3.total_score} / {g4.total_score}")
+    db.close()
+
+
+def test_occupancy_changes_order():
+    print("\n== Ausnutzung beeinflusst die Reihenfolge ==")
+    db = make_session()
+    db.add(models.ScoringConfig(key="weight_occupancy", value=2.0))
+    add_apartment(db, "A.4", 4, "freifinanziert", 1)
+    add_household(db, "Drei", 3, score=10.0)   # fuellt 4 Zimmer nicht aus -> 10.0
+    add_household(db, "Vier", 4, score=9.0)    # fuellt 4 Zimmer aus       -> 11.0
+    db.commit()
+
+    g = group_of(services.build_ranking(db), 4, "freifinanziert")
+    check("ausfuellender Haushalt steht trotz kleinerer Grundpunktzahl vorn",
+          names(g) == ["Vier", "Drei"], str(names(g)))
+    check("Gesamtscores korrekt aufgeschlagen",
+          [e.total_score for e in g["households"]] == [11.0, 10.0],
+          str([e.total_score for e in g["households"]]))
+    db.close()
+
+
+def test_non_scored_categories():
+    print("\n== Nicht per Scoring vergebene Wohnungsarten ==")
+    check("Clusterwohnung wird nicht per Scoring vergeben",
+          not services.is_scored_category("Clusterwohnung"))
+    check("Joker wird nicht per Scoring vergeben",
+          not services.is_scored_category("Joker"))
+    check("Standard Wohnungstypen wird per Scoring vergeben",
+          services.is_scored_category("Standard Wohnungstypen"))
+    check("Ausbauwohnung wird per Scoring vergeben",
+          services.is_scored_category("Ausbauwohnung"))
+    check("Atelierwohnung wird per Scoring vergeben",
+          services.is_scored_category("Atelierwohnung"))
+    check("ohne Wohnungsart wird per Scoring vergeben",
+          services.is_scored_category(None))
+
+    db = make_session()
+    add_apartment(db, "S.1", 3, "freifinanziert", 2, "Standard Wohnungstypen")
+    add_apartment(db, "CL.1", 2, "WBS A", 2, "Clusterwohnung")
+    add_apartment(db, "J.1", 1, "freifinanziert", 1, "Joker")
+    add_household(db, "Paar", 2, wbs="WBS A", score=10.0)
+    db.commit()
+
+    categories = services.apartment_categories(db)
+    check("nur die Standardkategorie bleibt uebrig",
+          set(categories) == {(3, "freifinanziert")}, str(sorted(map(str, categories))))
+
+    groups = services.build_ranking(db)
+    check("Rangliste kennt nur die Standardkategorie", len(groups) == 1, str(len(groups)))
+    check("keine Clusterwohnungs-Kategorie",
+          group_of(groups, 2, "WBS A") is None)
+    check("keine Joker-Kategorie",
+          group_of(groups, 1, "freifinanziert") is None)
+    check("geeigneter Haushalt steht weiterhin in der Standardkategorie",
+          names(group_of(groups, 3, "freifinanziert")) == ["Paar"])
+    db.close()
+
+
+def test_seed_data_has_no_cluster_or_joker_categories():
+    print("\n== Stammdaten ohne Cluster/Joker ==")
+    db = make_session()
+    services.seed_apartments(db)
+    db.commit()
+
+    excluded = {
+        (a.size_rooms, a.funding_type)
+        for a in db.query(models.Apartment)
+        .filter(models.Apartment.apartment_category.in_(["Clusterwohnung", "Joker"]))
+        .all()
+    }
+    check("Stammdaten enthalten Cluster-/Joker-Wohnungen", bool(excluded))
+
+    scored = {
+        (a.size_rooms, a.funding_type)
+        for a in db.query(models.Apartment).all()
+        if services.is_scored_category(a.apartment_category)
+    }
+    categories = set(services.apartment_categories(db))
+    check("nur Kategorien der per Scoring vergebenen Wohnungen",
+          categories == scored, str(sorted(map(str, categories - scored))))
+    check("reine Cluster-/Joker-Kategorien fehlen",
+          not (categories & (excluded - scored)),
+          str(sorted(map(str, categories & (excluded - scored)))))
     db.close()
 
 
@@ -210,13 +349,14 @@ def test_ranking_with_seed_data():
     services.seed_example_data(db)
     groups = services.build_ranking(db)
     check("Kategorien aus den Wohnungsstammdaten", len(groups) > 0)
-    total = {hh.id for g in groups for hh, _ in g["households"]}
+    total = {e.household.id for g in groups for e in g["households"]}
     check("alle 11 Beispielhaushalte kommen irgendwo vor", len(total) == 11, str(len(total)))
 
     violations = []
     for g in groups:
         rooms, funding = g["size_rooms"], g["funding_type"]
-        for hh, members in g["households"]:
+        for e in g["households"]:
+            hh, members = e.household, e.members
             if rooms is not None and rooms < members:
                 violations.append(f"{hh.name}: {members} Personen in {rooms} Zimmern")
             if not services.funding_matches(hh.wbs_status, funding):
@@ -233,6 +373,12 @@ if __name__ == "__main__":
     test_ranking_groups()
     test_ranking_excludes_archived()
     test_no_duplicate_rows()
+    test_occupancy_subscore()
+    test_occupancy_weight()
+    test_score_per_apartment_size()
+    test_occupancy_changes_order()
+    test_non_scored_categories()
+    test_seed_data_has_no_cluster_or_joker_categories()
     test_ranking_with_seed_data()
 
     print("\n" + "=" * 50)
