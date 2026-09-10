@@ -178,6 +178,29 @@ def calculate_membership_score(household: models.Household) -> float:
     years = (pd.Timestamp.now() - pd.to_datetime(earliest)).days / 365.25
     return min(years, 10.0) * 2.0
 
+def calculate_occupancy_subscore(members: int, size_rooms: int | None) -> float:
+    """Erfuellungsgrad der Wohnraumausnutzung (§3 Abs. 2) fuer *eine* Wohnungsgroesse.
+
+    Ein Haushalt nutzt eine Wohnung aus, wenn er sie mit seinen Mitgliedern
+    *ausfuellt*: die Mitgliederzahl erreicht oder uebersteigt die Zimmerzahl.
+    Sonst gibt es 0 Punkte -- ein Haushalt mit 3 Mitgliedern erhaelt fuer eine
+    4-Zimmer-Wohnung also nichts, fuer eine 3-Zimmer-Wohnung die volle Punktzahl.
+
+    Wohnungen ohne Zimmerangabe (Cluster, Ausbau, Atelier, Joker) kennen keine
+    Zimmerschranke; dort ist das Kriterium mit der Mindestbelegung erfuellt, die
+    die Eignungspruefung (``services.is_eligible``) bereits sicherstellt.
+    """
+    if size_rooms is None:
+        return 1.0
+    return 1.0 if members >= size_rooms else 0.0
+
+
+def calculate_occupancy_score(members: int, size_rooms: int | None, config: dict) -> float:
+    """Gewichtete Punkte fuer die Wohnraumausnutzung in einer Wohnungsgroesse."""
+    weight = config.get("weight_occupancy", DEFAULT_CONFIG["weight_occupancy"]["value"])
+    return calculate_occupancy_subscore(members, size_rooms) * weight
+
+
 def calculate_engagement_score(household: models.Household) -> float:
     return max(0.0, min(1.0, household.engagement_score or 0.0))
 
@@ -225,6 +248,13 @@ def calculate_resident_stats(db: Session) -> dict:
 
 
 def run_scoring(db: Session):
+    """Berechnet die *Grundpunktzahl* je Haushalt und legt sie in ``total_score`` ab.
+
+    Die Grundpunktzahl umfasst alle Kriterien, die allein vom Haushalt abhaengen.
+    Die Wohnraumausnutzung (§3 Abs. 2) haengt zusaetzlich von der Zimmerzahl der
+    Wohnung ab und ist deshalb *nicht* enthalten: sie wird je Wohnungskategorie
+    in ``services.build_ranking`` aufgeschlagen.
+    """
     initialize_config(db)
     config = get_config_dict(db)
 
@@ -248,7 +278,8 @@ def run_scoring(db: Session):
         w_mem = config.get("weight_membership", 1.0)
         w_eng = config.get("weight_engagement", 1.0)
 
+        # Ohne Wohnraumausnutzung -- die kommt je Wohnungsgroesse im Ranking dazu.
         h.total_score = div_total + (mem_score * w_mem) + (eng_score * w_eng)
-    
+
     db.commit()
     return {"message": "Bewertung für alle Haushalte aktualisiert."}

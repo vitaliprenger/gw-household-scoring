@@ -75,6 +75,11 @@ export interface RankedHousehold {
     name: string;
     member_count: number;
     engagement_score: number;
+    /** Haushaltseigene Kriterien, unabhängig von der Wohnung. */
+    base_score: number;
+    /** Wohnraumausnutzung für die Zimmerzahl dieser Kategorie (null = keine Größe gewählt). */
+    occupancy_score: number | null;
+    /** base_score + occupancy_score */
     total_score: number;
 }
 

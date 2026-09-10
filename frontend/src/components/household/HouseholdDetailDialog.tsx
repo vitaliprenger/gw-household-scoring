@@ -330,7 +330,7 @@ export default function HouseholdDetailDialog({
                             <FieldDisplay label="Import-Quelle" value={currentHH.import_source} />
                             <FieldDisplay label="Letzter Import" value={formatDateTime(currentHH.import_timestamp)} />
                             <FieldDisplay label="Letzte Bearbeitung" value={formatDateTime(currentHH.updated_at)} />
-                            <FieldDisplay label="Gesamt-Score" value={currentHH.total_score.toFixed(2)} />
+                            <FieldDisplay label="Grundpunktzahl (ohne Wohnraumausnutzung)" value={currentHH.total_score.toFixed(2)} />
                         </Box>
 
                         <Divider sx={{ my: 2 }} />

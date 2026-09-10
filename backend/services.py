@@ -1,7 +1,8 @@
 import pandas as pd
 from sqlalchemy.orm import Session, selectinload
-from . import models, apartment_seed_data
+from . import models, apartment_seed_data, scoring
 from datetime import datetime, date
+from typing import NamedTuple
 import io
 import re
 
@@ -124,6 +125,22 @@ def assign_household(db: Session, apartment: models.Apartment, household_id: int
 
 # --- Eignung Haushalt <-> Wohnung ---------------------------------------
 
+#: Wohnungsarten, die **nicht** per Scoring vergeben werden. Clusterwohnungen
+#: und Joker-Zimmer werden auf anderem Weg belegt; sie bilden deshalb keine
+#: Wohnungskategorie und tauchen in der Rangliste nicht auf.
+NON_SCORED_CATEGORIES = frozenset({"Clusterwohnung", "Joker"})
+
+
+def is_scored_category(apartment_category: str | None) -> bool:
+    """Wird diese Wohnungsart per Scoring vergeben?
+
+    Clusterwohnungen und Joker-Zimmer nicht (siehe
+    :data:`NON_SCORED_CATEGORIES`); alle anderen — auch Wohnungen ohne
+    gepflegte Wohnungsart — schon.
+    """
+    return (apartment_category or "").strip() not in NON_SCORED_CATEGORIES
+
+
 # Förderstufen: ein Haushalt darf jede Wohnung bewohnen, deren Stufe
 # höchstens seiner eigenen entspricht (A > B > freifinanziert).
 _FUNDING_ORDER = {None: 0, "B": 1, "A": 2}
@@ -179,19 +196,36 @@ def is_eligible(
 
 
 def apartment_categories(db: Session) -> dict[tuple[int | None, str], int]:
-    """Alle Wohnungskategorien (Zimmerzahl, Förderungsart) mit ihrer
-    niedrigsten Mindestbewohnerzahl."""
+    """Alle per Scoring vergebenen Wohnungskategorien (Zimmerzahl,
+    Förderungsart) mit ihrer niedrigsten Mindestbewohnerzahl.
+
+    Clusterwohnungen und Joker-Zimmer bleiben außen vor (siehe
+    :func:`is_scored_category`).
+    """
     categories: dict[tuple[int | None, str], int] = {}
-    for size_rooms, funding_type, min_occupants in db.query(
+    for size_rooms, funding_type, min_occupants, category in db.query(
         models.Apartment.size_rooms,
         models.Apartment.funding_type,
         models.Apartment.min_occupants,
+        models.Apartment.apartment_category,
     ).all():
+        if not is_scored_category(category):
+            continue
         key = (size_rooms, funding_type)
         required = min_occupants or 0
         if key not in categories or required < categories[key]:
             categories[key] = required
     return categories
+
+
+class RankedEntry(NamedTuple):
+    """Ein Haushalt in einer Wohnungskategorie samt der dort erreichten Punkte."""
+
+    household: models.Household
+    members: int
+    base_score: float        # haushaltseigene Kriterien (``Household.total_score``)
+    occupancy_score: float   # gewichtete Wohnraumausnutzung dieser Zimmerzahl
+    total_score: float       # base_score + occupancy_score
 
 
 def build_ranking(db: Session) -> list[dict]:
@@ -203,16 +237,24 @@ def build_ranking(db: Session) -> list[dict]:
     es, wenn er für **eine** der Wohnungen in Frage kommt — deshalb zählt die
     niedrigste Mindestbewohnerzahl der Kategorie.
 
-    Liefert je Kategorie ``size_rooms``, ``funding_type`` und die nach Score
-    absteigend sortierten Paare ``(Haushalt, Mitgliederzahl)``.
+    Clusterwohnungen und Joker-Zimmer werden nicht per Scoring vergeben und
+    bilden deshalb keine Kategorie (siehe ``apartment_categories``).
+
+    Der Score ist **nicht** pauschal: zur Grundpunktzahl aus
+    ``scoring.run_scoring`` kommt je Kategorie die Wohnraumausnutzung hinzu
+    (siehe ``scoring.calculate_occupancy_subscore``). Derselbe Haushalt steht
+    in einer Kategorie, die er ausfüllt, deshalb höher als in einer größeren.
+
+    Liefert je Kategorie ``size_rooms``, ``funding_type`` und die nach dem
+    Gesamtscore der Kategorie absteigend sortierten ``RankedEntry``.
     """
     categories = apartment_categories(db)
+    config = scoring.get_config_dict(db)
 
     households = (
         db.query(models.Household)
         .options(selectinload(models.Household.people))
         .filter(models.Household.archived == False)
-        .order_by(models.Household.total_score.desc())
         .all()
     )
     # Mitgliederzahl einmal vorberechnen statt je Kategorie
@@ -223,15 +265,25 @@ def build_ranking(db: Session) -> list[dict]:
         categories.items(),
         key=lambda item: (item[0][0] is None, item[0][0] or 0, item[0][1]),
     ):
+        entries = []
+        for household, members in scored:
+            if not is_eligible(members, household.wbs_status,
+                               size_rooms, min_occupants, funding_type):
+                continue
+            base = household.total_score or 0.0
+            occupancy = scoring.calculate_occupancy_score(members, size_rooms, config)
+            entries.append(RankedEntry(
+                household=household,
+                members=members,
+                base_score=base,
+                occupancy_score=occupancy,
+                total_score=base + occupancy,
+            ))
+        entries.sort(key=lambda e: e.total_score, reverse=True)
         groups.append({
             "size_rooms": size_rooms,
             "funding_type": funding_type,
-            "households": [
-                (household, members)
-                for household, members in scored
-                if is_eligible(members, household.wbs_status,
-                               size_rooms, min_occupants, funding_type)
-            ],
+            "households": entries,
         })
     return groups
 

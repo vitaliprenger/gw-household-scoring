@@ -269,6 +269,9 @@ function App() {
           );
           // Ein Haushalt kommt für mehrere Kategorien in Frage: über die id
           // entdoppeln und den Rang für die aktuelle Auswahl neu vergeben.
+          // Die Wohnraumausnutzung haengt an der Zimmerzahl: derselbe Haushalt hat
+          // je Kategorie einen anderen Gesamtscore. Beim Entdoppeln zaehlt deshalb
+          // die Kategorie, in der er am besten abschneidet.
           const selectedRanked: RankedHousehold[] = unfiltered
             ? households.filter(h => !h.archived).map(h => ({
                 rank: 0,
@@ -276,11 +279,18 @@ function App() {
                 name: h.name,
                 member_count: h.people.filter(p => !p.archived).length,
                 engagement_score: h.engagement_score,
+                base_score: h.total_score,
+                occupancy_score: null,
                 total_score: h.total_score,
               }))
-            : [...new Map(
-                matchingGroups.flatMap(g => g.households).map(h => [h.id, h])
-              ).values()];
+            : [...matchingGroups
+                .flatMap(g => g.households)
+                .reduce((best, h) => {
+                  const prev = best.get(h.id);
+                  if (!prev || h.total_score > prev.total_score) best.set(h.id, h);
+                  return best;
+                }, new Map<number, RankedHousehold>())
+                .values()];
           const rankingRows: RankedHousehold[] = [...selectedRanked]
             .sort((a, b) => b.total_score - a.total_score)
             .map((h, index) => ({ ...h, rank: index + 1 }));
@@ -289,6 +299,16 @@ function App() {
             { field: 'rank', headerName: 'Rang', width: 80, type: 'number' },
             { field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180 },
             { field: 'member_count', headerName: 'Mitglieder', width: 100, type: 'number' },
+            {
+              field: 'base_score', headerName: 'Grundpunktzahl', width: 140, type: 'number',
+              valueFormatter: (value: number | undefined) => value?.toFixed(2) ?? '—',
+            },
+            {
+              field: 'occupancy_score', headerName: 'Wohnraumausnutzung', width: 170, type: 'number',
+              description: 'Punkte dafür, dass der Haushalt die Wohnung mit seinen Mitgliedern ausfüllt (Mitglieder ≥ Zimmer).',
+              valueFormatter: (value: number | null | undefined) =>
+                value === null || value === undefined ? '—' : value.toFixed(2),
+            },
             {
               field: 'total_score', headerName: 'Gesamtpunktzahl', width: 140, type: 'number',
               renderCell: (params: GridRenderCellParams<RankedHousehold>) => <strong>{params.value?.toFixed(2)}</strong>,
@@ -325,6 +345,12 @@ function App() {
                   </Select>
                 </FormControl>
               </Box>
+
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                {unfiltered
+                  ? 'Ohne Filter wird nur die Grundpunktzahl gezeigt: die Wohnraumausnutzung ergibt sich erst aus der Zimmerzahl der Wohnung.'
+                  : 'Die Wohnraumausnutzung gilt je Wohnungsgröße — ein Haushalt, der die Wohnung ausfüllt (Mitglieder ≥ Zimmer), erhält hier volle Punkte, sonst 0.'}
+              </Typography>
 
               {rankingRows.length > 0 ? (
                 <DataGrid
@@ -386,7 +412,8 @@ function App() {
               valueFormatter: (value: string | undefined) => formatDateTime(value),
             },
             {
-              field: 'total_score', headerName: 'Gesamtpunktzahl', width: 140, type: 'number',
+              field: 'total_score', headerName: 'Grundpunktzahl', width: 140, type: 'number',
+              description: 'Ohne Wohnraumausnutzung — die kommt je Wohnungsgröße in der Rangliste hinzu.',
               renderCell: (params: GridRenderCellParams<Household>) => <strong>{params.value?.toFixed(2)}</strong>,
             },
           ];

@@ -586,7 +586,11 @@ def get_ranking(
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    """Rangliste je Wohnungskategorie; die Eignung berechnet ``services.build_ranking``."""
+    """Rangliste je Wohnungskategorie; Eignung und Punkte berechnet ``services.build_ranking``.
+
+    Der Score ist je Kategorie verschieden: die Wohnraumausnutzung hängt an der
+    Zimmerzahl und steckt in ``occupancy_score``.
+    """
     return [
         schemas.RankingGroup(
             size_rooms=group["size_rooms"],
@@ -594,13 +598,15 @@ def get_ranking(
             households=[
                 schemas.RankedHousehold(
                     rank=rank,
-                    id=household.id,
-                    name=household.name,
-                    member_count=members,
-                    engagement_score=household.engagement_score,
-                    total_score=household.total_score,
+                    id=entry.household.id,
+                    name=entry.household.name,
+                    member_count=entry.members,
+                    engagement_score=entry.household.engagement_score,
+                    base_score=entry.base_score,
+                    occupancy_score=entry.occupancy_score,
+                    total_score=entry.total_score,
                 )
-                for rank, (household, members) in enumerate(group["households"], 1)
+                for rank, entry in enumerate(group["households"], 1)
             ],
         )
         for group in services.build_ranking(db)
