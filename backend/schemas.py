@@ -165,7 +165,6 @@ class RankedHousehold(BaseModel):
     member_count: int
     engagement_score: float
     total_score: float
-    people: List[Person] = []
 
     class Config:
         from_attributes = True

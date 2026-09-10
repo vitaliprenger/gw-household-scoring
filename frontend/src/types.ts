@@ -76,7 +76,6 @@ export interface RankedHousehold {
     member_count: number;
     engagement_score: number;
     total_score: number;
-    people: Person[];
 }
 
 export interface RankingGroup {

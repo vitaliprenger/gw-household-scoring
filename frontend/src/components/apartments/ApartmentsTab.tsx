@@ -228,7 +228,7 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
         disableRowSelectionOnClick
         initialState={{
           sorting: { sortModel: [{ field: 'unit_number', sort: 'asc' }] },
-          pagination: { paginationModel: { pageSize: 25 } },
+          pagination: { paginationModel: { pageSize: 100 } },
         }}
         pageSizeOptions={[10, 25, 50, 100]}
         localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
