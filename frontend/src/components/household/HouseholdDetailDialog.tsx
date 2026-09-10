@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import { Household, Person } from '../../types';
-import { getHousehold, updateHousehold, updatePerson, toggleArchiveHousehold, unassignPerson } from '../../api';
+import { getHousehold, updateHousehold, updatePerson, toggleArchiveHousehold, unassignPerson, deleteHousehold } from '../../api';
 import PersonCard from './PersonCard';
 import AddPersonDialog from './AddPersonDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
@@ -20,7 +20,7 @@ interface HouseholdDetailDialogProps {
     onSaved: () => void;
 }
 
-const WBS_OPTIONS = ['', 'kein WBS', 'WBS Einkommensgruppe A', 'WBS Einkommensgruppe B'];
+const WBS_OPTIONS = ['', 'kein WBS', 'WBS A', 'WBS B'];
 
 const APARTMENT_TYPE_OPTIONS = [
     'Standard Wohnungstypen',
@@ -42,6 +42,8 @@ export default function HouseholdDetailDialog({
     const [addPersonOpen, setAddPersonOpen] = useState(false);
     const [removeTarget, setRemoveTarget] = useState<Person | null>(null);
     const [removing, setRemoving] = useState(false);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
         if (open && householdId) {
@@ -117,6 +119,21 @@ export default function HouseholdDetailDialog({
         }
     }
 
+    async function handleDelete() {
+        if (!household) return;
+        setDeleting(true);
+        try {
+            await deleteHousehold(household.id);
+            setDeleteConfirmOpen(false);
+            onSaved();
+            onClose();
+        } catch {
+            setError('Löschen fehlgeschlagen');
+        } finally {
+            setDeleting(false);
+        }
+    }
+
     async function reloadHousehold() {
         if (!householdId) return;
         const refreshed = await getHousehold(householdId);
@@ -174,6 +191,15 @@ export default function HouseholdDetailDialog({
                 </Box>
                 {!editing && (
                     <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            color="error"
+                            onClick={() => setDeleteConfirmOpen(true)}
+                            disabled={saving}
+                        >
+                            Löschen
+                        </Button>
                         <Button
                             variant="outlined"
                             size="small"
@@ -267,14 +293,10 @@ export default function HouseholdDetailDialog({
                             <GridField label="Finanzielle Rahmenbedingungen" value={currentHH.financial_status ?? ''} editing={editing}
                                 onChange={(v) => handleHHChange('financial_status', v)} />
                             <Grid size={{ xs: 6, sm: 4 }}>
-                                {editing ? (
-                                    <FormControlLabel
-                                        control={<Switch checked={currentHH.is_resident}
-                                            onChange={(e) => handleHHChange('is_resident', e.target.checked)} />}
-                                        label="Bewohner (is_resident)" />
-                                ) : (
-                                    <FieldDisplay label="Bewohner" value={currentHH.is_resident ? 'Ja' : 'Nein'} />
-                                )}
+                                <FieldDisplay
+                                    label="Zugeordnete Wohnung"
+                                    value={currentHH.assigned_apartment_unit ?? undefined}
+                                />
                             </Grid>
                             <GridField label="Deklarierte Mitglieder" value={currentHH.household_member_count != null ? String(currentHH.household_member_count) : ''} editing={editing}
                                 onChange={(v) => handleHHChange('household_member_count', parseInt(v) || 0)} />
@@ -341,6 +363,22 @@ export default function HouseholdDetailDialog({
                     onSaved();
                     await reloadHousehold();
                 }}
+            />
+
+            <ConfirmDialog
+                open={deleteConfirmOpen}
+                title="Haushalt löschen"
+                message={
+                    household
+                        ? `Soll der Haushalt „${household.name}" endgültig gelöscht werden? `
+                          + `Alle ${household.people.length} zugehörigen Personen und Bewerbungen werden mitgelöscht.`
+                        : ''
+                }
+                confirmLabel="Endgültig löschen"
+                confirmColor="error"
+                busy={deleting}
+                onConfirm={handleDelete}
+                onClose={() => setDeleteConfirmOpen(false)}
             />
 
             <ConfirmDialog

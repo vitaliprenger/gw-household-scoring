@@ -1,4 +1,4 @@
-# GW Household Scoring
+# GW Haushalts-Scoring
 
 Scoring-Anwendung zur Vergabe freier Wohnungen in einem genossenschaftlichen Wohnprojekt.
 
@@ -42,13 +42,6 @@ npm run dev
 python tests/generate_data.py   # Erstellt test_data.xlsx
 python tests/test_flow.py       # Integration-Test (Backend muss laufen)
 ```
-
-## Login (Dev-Modus)
-
-| Username | Rolle |
-|----------|-------|
-| `admin` | Voller Zugriff |
-| `viewer` | Nur Lesen |
 
 ### Frontend
 ```bash

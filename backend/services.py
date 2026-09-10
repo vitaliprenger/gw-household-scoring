@@ -91,7 +91,13 @@ def assign_household(db: Session, apartment: models.Apartment, household_id: int
     if household_id is None:
         if apartment.household_id is None:
             return False
+        old_hh = db.query(models.Household).filter(
+            models.Household.id == apartment.household_id
+        ).first()
         apartment.household_id = None
+        if old_hh:
+            old_hh.is_resident = False
+            old_hh.updated_at = datetime.utcnow()
         return True
 
     household = db.query(models.Household).filter(models.Household.id == household_id).first()
@@ -184,7 +190,7 @@ def seed_example_data(db: Session):
             "name": "Simon Kruse",
             "engagement_score": 0.2,
             "is_resident": False,
-            "wbs_status": "WBS Einkommensgruppe A",
+            "wbs_status": "WBS A",
             "desired_apartment_size": "1,5",
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
@@ -230,7 +236,7 @@ def seed_example_data(db: Session):
             "name": "Kerstin Nolte",
             "engagement_score": 0.4,
             "is_resident": False,
-            "wbs_status": "WBS Einkommensgruppe A",
+            "wbs_status": "WBS A",
             "financial_status": "kann Anteile nicht übernehmen",
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
@@ -243,7 +249,7 @@ def seed_example_data(db: Session):
             "name": "Sandra Rocha",
             "engagement_score": 0.6,
             "is_resident": False,
-            "wbs_status": "WBS Einkommensgruppe A",
+            "wbs_status": "WBS A",
             "desired_apartment_size": "3,5",
             "desired_apartment_type": ["Standard Wohnungstypen"],
             "pets_count": 1,

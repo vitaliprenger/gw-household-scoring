@@ -24,7 +24,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from . import models, schemas
+from . import models, schemas, services
 from .import_service import (
     ImportSession,
     _cleanup_sessions,
@@ -1024,7 +1024,6 @@ def _find_existing_person(data: dict, household: models.Household, db: Session) 
 def _sync_household(hh: models.Household, hh_data: dict, persons: list[dict], db: Session) -> dict:
     hh.name = hh_data["name"]
     hh.apartment_unit = hh_data.get("apartment_unit")
-    hh.is_resident = hh_data.get("is_resident", False)
     hh.household_member_count = len(persons)
     hh.vcf_import_timestamp = hh_data.get("rev")
     hh.updated_at = datetime.utcnow()
@@ -1097,6 +1096,14 @@ def commit_vcf(request: schemas.VcfCommitRequest, db: Session) -> schemas.VcfCom
         persons_created += counts["created"]
         persons_updated += counts["updated"]
         persons_assigned += counts["assigned"]
+
+        apartment_unit = raw.get("apartment_unit")
+        if apartment_unit:
+            apt = db.query(models.Apartment).filter(
+                models.Apartment.unit_number == apartment_unit
+            ).first()
+            if apt:
+                services.assign_household(db, apt, hh.id)
 
     db.commit()
     del import_sessions[request.session_id]

@@ -157,9 +157,9 @@ def _normalize_wbs(val) -> Optional[str]:
     if "kein" in low:
         return "kein WBS"
     if "einkommensgruppe a" in low:
-        return "WBS Einkommensgruppe A"
+        return "WBS A"
     if "einkommensgruppe b" in low:
-        return "WBS Einkommensgruppe B"
+        return "WBS B"
     return s
 
 def _normalize_financial(val) -> Optional[str]:

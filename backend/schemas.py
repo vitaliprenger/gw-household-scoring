@@ -74,7 +74,6 @@ class HouseholdUpdate(BaseModel):
     engagement_score: Optional[float] = None
     cultural_diversity_score: Optional[float] = None
     special_needs_score: Optional[float] = None
-    is_resident: Optional[bool] = None
     wbs_status: Optional[str] = None
     pets_count: Optional[int] = None
     pets_info: Optional[str] = None
@@ -93,6 +92,7 @@ class Household(HouseholdBase):
     updated_at: Optional[datetime] = None
     archived: bool = False
     people: List[Person] = []
+    assigned_apartment_unit: Optional[str] = None
 
     class Config:
         from_attributes = True
