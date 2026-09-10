@@ -220,6 +220,25 @@ def read_household(
         raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
     return hh
 
+@app.delete("/households/{household_id}")
+def delete_household(
+    household_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Löscht einen Haushalt samt Personen, Bewerbungen und löst die Wohnungszuordnung."""
+    hh = db.query(models.Household).filter(models.Household.id == household_id).first()
+    if not hh:
+        raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
+    db.query(models.Application).filter(models.Application.household_id == household_id).delete()
+    db.query(models.Person).filter(models.Person.household_id == household_id).delete()
+    apt = db.query(models.Apartment).filter(models.Apartment.household_id == household_id).first()
+    if apt:
+        apt.household_id = None
+    db.delete(hh)
+    db.commit()
+    return {"deleted": household_id}
+
 @app.put("/households/{household_id}", response_model=schemas.Household)
 def update_household(
     household_id: int,
@@ -238,6 +257,54 @@ def update_household(
     return hh
 
 # --- People ---
+@app.post("/people/", response_model=schemas.Person)
+def create_person(
+    person: schemas.PersonCreate,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    db_person = models.Person(**person.model_dump())
+    db.add(db_person)
+    db.commit()
+    db.refresh(db_person)
+    return db_person
+
+@app.delete("/people/unassigned")
+def delete_unassigned_persons(
+    include_archived: bool = Query(False),
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Löscht alle Personen ohne Haushaltszuordnung auf einmal."""
+    query = db.query(models.Person).filter(models.Person.household_id.is_(None))
+    if not include_archived:
+        query = query.filter(models.Person.archived == False)
+    persons = query.all()
+    for person in persons:
+        db.delete(person)
+    db.commit()
+    return {"deleted": len(persons)}
+
+@app.delete("/people/{person_id}")
+def delete_person(
+    person_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Löscht eine Person. Blockiert, solange sie einem Haushalt zugeordnet ist."""
+    person = db.query(models.Person).filter(models.Person.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person nicht gefunden")
+    if person.household_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Person ist einem Haushalt zugeordnet und kann nicht gelöscht werden. "
+                   "Bitte zuerst aus dem Haushalt entfernen.",
+        )
+    db.delete(person)
+    db.commit()
+    return {"deleted": person_id}
+
 @app.put("/people/{person_id}", response_model=schemas.Person)
 def update_person(
     person_id: int,
@@ -441,10 +508,19 @@ def delete_apartment(
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    """Löscht eine Wohnung samt der Bewerbungen auf diese Wohnung."""
+    """Löscht eine Wohnung samt der Bewerbungen auf diese Wohnung.
+
+    Blockiert, solange ein Haushalt der Wohnung zugeordnet ist.
+    """
     apt = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
     if not apt:
         raise HTTPException(status_code=404, detail="Wohnung nicht gefunden")
+    if apt.household_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Wohnung ist einem Haushalt zugeordnet und kann nicht gelöscht werden. "
+                   "Bitte zuerst die Zuordnung lösen.",
+        )
     db.query(models.Application).filter(models.Application.apartment_id == apartment_id).delete()
     db.delete(apt)
     db.commit()

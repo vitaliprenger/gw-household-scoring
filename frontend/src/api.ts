@@ -48,8 +48,30 @@ export const getHousehold = async (id: number) => {
     return response.data;
 };
 
+export const deleteHousehold = async (id: number) => {
+    const response = await api.delete(`/households/${id}`);
+    return response.data;
+};
+
 export const updateHousehold = async (id: number, data: Partial<Household>) => {
     const response = await api.put<Household>(`/households/${id}`, data);
+    return response.data;
+};
+
+export const createPerson = async (data: Partial<Person>) => {
+    const response = await api.post<Person>('/people/', data);
+    return response.data;
+};
+
+export const deletePerson = async (id: number) => {
+    const response = await api.delete(`/people/${id}`);
+    return response.data;
+};
+
+export const deleteUnassignedPersons = async (includeArchived = false) => {
+    const response = await api.delete<{ deleted: number }>('/people/unassigned', {
+        params: includeArchived ? { include_archived: true } : {},
+    });
     return response.data;
 };
 

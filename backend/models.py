@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean, JSON, DateTime
 from sqlalchemy.orm import relationship
+from sqlalchemy.ext.hybrid import hybrid_property
 from .database import Base
 from datetime import datetime
 
@@ -45,6 +46,10 @@ class Household(Base):
         foreign_keys="Apartment.household_id",
         uselist=False,
     )
+
+    @property
+    def assigned_apartment_unit(self):
+        return self.apartment.unit_number if self.apartment else None
 
 class Person(Base):
     __tablename__ = "people"

@@ -44,6 +44,7 @@ export interface Household {
     apartment_unit?: string;
     vcf_import_timestamp?: string;
     archived: boolean;
+    assigned_apartment_unit?: string;
 }
 
 export interface Apartment {

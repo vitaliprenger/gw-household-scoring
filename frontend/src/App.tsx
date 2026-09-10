@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import {
   AppBar, Toolbar, Typography, Container, Box, Tabs, Tab,
-  Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Button, TextField, Grid, Card, CardContent, Alert, Snackbar, Chip,
+  Paper, Button, TextField, Grid, Card, CardContent, Alert, Snackbar, Chip,
   FormControl, InputLabel, Select, MenuItem, FormControlLabel, Switch
 } from '@mui/material';
+import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
+import { deDE } from '@mui/x-data-grid/locales';
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, uploadHouseholds, login, getRanking } from './api';
-import { Household, ScoringConfig, RankingGroup } from './types';
+import { Household, ScoringConfig, RankingGroup, RankedHousehold } from './types';
 import HouseholdDetailDialog from './components/household/HouseholdDetailDialog';
 import ImportTab from './components/import/ImportTab';
 import PersonsTab from './components/persons/PersonsTab';
 import ApartmentsTab from './components/apartments/ApartmentsTab';
+import CreateHouseholdDialog from './components/household/CreateHouseholdDialog';
 
 const CONFIG_LABELS: Record<string, string> = {
   weight_diversity_age:            'Altersstruktur',
@@ -75,6 +77,8 @@ function App() {
 
   const [detailHouseholdId, setDetailHouseholdId] = useState<number | null>(null);
   const [showArchivedHH, setShowArchivedHH] = useState(false);
+  const [filterNoApartment, setFilterNoApartment] = useState(false);
+  const [createHHOpen, setCreateHHOpen] = useState(false);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -187,7 +191,7 @@ function App() {
         <AppBar position="static">
           <Toolbar>
             <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-              GW Household Scoring
+              GW Haushalts-Scoring
             </Typography>
           </Toolbar>
         </AppBar>
@@ -230,7 +234,7 @@ function App() {
       <AppBar position="static">
         <Toolbar>
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            GW Household Scoring
+            GW Haushalts-Scoring
           </Typography>
           <Button color="inherit" onClick={handleLogout}>Abmelden</Button>
         </Toolbar>
@@ -256,6 +260,16 @@ function App() {
           const activeGroup = rankingGroups.find(
             g => sizeKey(g.size_rooms) === selectedSize && g.funding_type === selectedFunding
           );
+
+          const rankingColumns: GridColDef<RankedHousehold>[] = [
+            { field: 'rank', headerName: 'Rang', width: 80, type: 'number' },
+            { field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180 },
+            { field: 'member_count', headerName: 'Mitglieder', width: 100, type: 'number' },
+            {
+              field: 'total_score', headerName: 'Gesamtpunktzahl', width: 140, type: 'number',
+              renderCell: (params: GridRenderCellParams<RankedHousehold>) => <strong>{params.value?.toFixed(2)}</strong>,
+            },
+          ];
 
           return (
             <Box>
@@ -287,30 +301,19 @@ function App() {
               </Box>
 
               {activeGroup ? (
-                <TableContainer component={Paper}>
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Rang</TableCell>
-                        <TableCell>Haushaltsname</TableCell>
-                        <TableCell>Mitglieder</TableCell>
-                        <TableCell align="right">Engagement</TableCell>
-                        <TableCell align="right">Gesamtpunktzahl</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {activeGroup.households.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell>{row.rank}</TableCell>
-                          <TableCell>{row.name}</TableCell>
-                          <TableCell>{row.member_count}</TableCell>
-                          <TableCell align="right">{row.engagement_score}</TableCell>
-                          <TableCell align="right"><strong>{row.total_score.toFixed(2)}</strong></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+                <DataGrid
+                  rows={activeGroup.households}
+                  columns={rankingColumns}
+                  autoHeight
+                  density="compact"
+                  disableRowSelectionOnClick
+                  initialState={{
+                    sorting: { sortModel: [{ field: 'rank', sort: 'asc' }] },
+                    pagination: { paginationModel: { pageSize: 25 } },
+                  }}
+                  pageSizeOptions={[10, 25, 50, 100]}
+                  localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
+                />
               ) : (
                 <Paper sx={{ p: 3, textAlign: 'center' }}>
                   <Typography color="textSecondary">
@@ -324,73 +327,91 @@ function App() {
           );
         })()}
 
-        {tabValue === 1 && (
-          <Box>
-          <Box sx={{ display: 'flex', mb: 2, alignItems: 'center' }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={showArchivedHH}
-                  onChange={(_, checked) => setShowArchivedHH(checked)}
+        {tabValue === 1 && (() => {
+          const householdColumns: GridColDef<Household>[] = [
+            {
+              field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180,
+              renderCell: (params: GridRenderCellParams<Household>) => (
+                <>
+                  {params.value}
+                  {params.row.archived && <Chip label="Archiviert" size="small" sx={{ ml: 1 }} color="default" />}
+                </>
+              ),
+            },
+            {
+              field: 'people_count', headerName: 'Mitglieder', width: 100, type: 'number',
+              valueGetter: (_value: unknown, row: Household) => row.people.length,
+            },
+            {
+              field: 'wbs_status', headerName: 'WBS', width: 100,
+              renderCell: (params: GridRenderCellParams<Household>) =>
+                params.value ? <Chip label={params.value} size="small" /> : <>–</>,
+            },
+            {
+              field: 'assigned_apartment_unit', headerName: 'Wohnung', width: 110,
+              valueFormatter: (value: string | undefined) => value || '—',
+            },
+            {
+              field: 'import_timestamp', headerName: 'Letzter Import', width: 160,
+              valueFormatter: (value: string | undefined) => formatDateTime(value),
+            },
+            {
+              field: 'updated_at', headerName: 'Letzte Bearbeitung', width: 160,
+              valueFormatter: (value: string | undefined) => formatDateTime(value),
+            },
+            {
+              field: 'total_score', headerName: 'Gesamtpunktzahl', width: 140, type: 'number',
+              renderCell: (params: GridRenderCellParams<Household>) => <strong>{params.value?.toFixed(2)}</strong>,
+            },
+          ];
+
+          return (
+            <Box>
+              <Box sx={{ display: 'flex', mb: 2, alignItems: 'center', gap: 2 }}>
+                <Button variant="contained" size="small" onClick={() => setCreateHHOpen(true)}>
+                  Haushalt anlegen
+                </Button>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={filterNoApartment}
+                      onChange={(_, checked) => setFilterNoApartment(checked)}
+                    />
+                  }
+                  label="Nur ohne Wohnung"
                 />
-              }
-              label="Archivierte anzeigen"
-            />
-          </Box>
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Haushaltsname</TableCell>
-                  <TableCell align="right">Mitglieder</TableCell>
-                  <TableCell>WBS</TableCell>
-                  <TableCell>Mitglied seit</TableCell>
-                  <TableCell align="right">Engagement</TableCell>
-                  <TableCell>Bewohner</TableCell>
-                  <TableCell>Letzter Import</TableCell>
-                  <TableCell>Letzte Bearbeitung</TableCell>
-                  <TableCell align="right">Gesamtpunktzahl</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {households.map((hh) => (
-                  <TableRow
-                    key={hh.id}
-                    hover
-                    sx={{ cursor: 'pointer', opacity: hh.archived ? 0.5 : 1 }}
-                    onClick={() => setDetailHouseholdId(hh.id)}
-                  >
-                    <TableCell>
-                      {hh.name}
-                      {hh.archived && <Chip label="Archiviert" size="small" sx={{ ml: 1 }} color="default" />}
-                    </TableCell>
-                    <TableCell align="right">{hh.people.length}</TableCell>
-                    <TableCell>
-                      {hh.wbs_status ? <Chip label={hh.wbs_status} size="small" /> : '–'}
-                    </TableCell>
-                    <TableCell>{(() => {
-                      const dates = hh.people.map(p => p.member_since).filter(Boolean) as string[];
-                      if (dates.length === 0) return '–';
-                      const earliest = dates.reduce((a, b) => a < b ? a : b);
-                      return new Date(earliest).toLocaleDateString('de-DE');
-                    })()}</TableCell>
-                    <TableCell align="right">{hh.engagement_score}</TableCell>
-                    <TableCell>{hh.is_resident ? 'Ja' : 'Nein'}</TableCell>
-                    <TableCell>{formatDateTime(hh.import_timestamp)}</TableCell>
-                    <TableCell>{formatDateTime(hh.updated_at)}</TableCell>
-                    <TableCell align="right"><strong>{hh.total_score.toFixed(2)}</strong></TableCell>
-                  </TableRow>
-                ))}
-                {households.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} align="center">Keine Haushalte vorhanden.</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          </Box>
-        )}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={showArchivedHH}
+                      onChange={(_, checked) => setShowArchivedHH(checked)}
+                    />
+                  }
+                  label="Archivierte anzeigen"
+                />
+              </Box>
+              <DataGrid
+                rows={filterNoApartment ? households.filter(h => !h.assigned_apartment_unit) : households}
+                columns={householdColumns}
+                autoHeight
+                density="compact"
+                disableRowSelectionOnClick
+                onRowClick={(params) => setDetailHouseholdId(params.row.id)}
+                initialState={{
+                  sorting: { sortModel: [{ field: 'total_score', sort: 'desc' }] },
+                  pagination: { paginationModel: { pageSize: 25 } },
+                }}
+                pageSizeOptions={[10, 25, 50, 100]}
+                getRowClassName={(params) => params.row.archived ? 'archived-row' : ''}
+                sx={{
+                  '& .MuiDataGrid-row': { cursor: 'pointer' },
+                  '& .archived-row': { opacity: 0.5 },
+                }}
+                localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
+              />
+            </Box>
+          );
+        })()}
 
         {tabValue === 2 && (
           <PersonsTab onShowHousehold={(id) => setDetailHouseholdId(id)} />
@@ -493,6 +514,16 @@ function App() {
         householdId={detailHouseholdId}
         onClose={() => setDetailHouseholdId(null)}
         onSaved={loadData}
+      />
+
+      <CreateHouseholdDialog
+        open={createHHOpen}
+        onClose={() => setCreateHHOpen(false)}
+        onCreated={(hh) => {
+          setCreateHHOpen(false);
+          loadData();
+          setDetailHouseholdId(hh.id);
+        }}
       />
 
       <Snackbar open={!!message} autoHideDuration={6000} onClose={() => setMessage(null)}>

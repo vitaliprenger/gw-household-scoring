@@ -123,11 +123,12 @@ def calculate_diversity_subscores(household: models.Household, current_stats: di
         age = (pd.Timestamp.now() - pd.to_datetime(p.birth_date)).days / 365.25
         hh_stats[f"age_{calculate_age_group(age)}"] += 1
 
-        if p.gender.lower() in ['f', 'w', 'female', 'weiblich']:
+        gender = (p.gender or "").lower()
+        if gender in ['f', 'w', 'female', 'weiblich']:
             hh_stats["gender_f"] += 1
-        elif p.gender.lower() in ['m', 'male', 'männlich']:
+        elif gender in ['m', 'male', 'männlich']:
             hh_stats["gender_m"] += 1
-        elif p.gender.lower() in ['d', 'divers', 'diverse', 'non-binary']:
+        elif gender in ['d', 'divers', 'diverse', 'non-binary']:
             hh_stats["gender_d"] += 1
 
         occ = (p.occupation_type or "").strip()
@@ -204,11 +205,12 @@ def calculate_resident_stats(db: Session) -> dict:
         age = (pd.Timestamp.now() - pd.to_datetime(p.birth_date)).days / 365.25
         counts[f"age_{calculate_age_group(age)}"] += 1
 
-        if p.gender.lower() in ['f', 'w', 'female', 'weiblich']:
+        gender = (p.gender or "").lower()
+        if gender in ['f', 'w', 'female', 'weiblich']:
             counts["gender_f"] += 1
-        elif p.gender.lower() in ['m', 'male', 'männlich']:
+        elif gender in ['m', 'male', 'männlich']:
             counts["gender_m"] += 1
-        elif p.gender.lower() in ['d', 'divers', 'diverse', 'non-binary']:
+        elif gender in ['d', 'divers', 'diverse', 'non-binary']:
             counts["gender_d"] += 1
 
         occ = (p.occupation_type or "").strip()

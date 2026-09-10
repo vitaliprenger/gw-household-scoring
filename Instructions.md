@@ -1,4 +1,4 @@
-# Projektanforderungen: GW Household Scoring
+# Projektanforderungen: GW Haushalts-Scoring
 
 > **Hinweis für Menschen und LLMs:** Diese Datei ist die zentrale Quelle für alle fachlichen und technischen Anforderungen. Bei jeder Änderung oder Erweiterung der Anforderungen **muss** dieses Dokument entsprechend aktualisiert werden, bevor oder während die Implementierung erfolgt.
 
@@ -76,8 +76,9 @@ Die Spalte `Etage` aus der Quelldatei wird bewusst **nicht** übernommen; der Ro
 
 - Eine Wohnung kann **keinem oder genau einem** Haushalt zugeordnet sein (`Apartment.household_id`). Die Zuordnung bedeutet: **dieser Haushalt wohnt in dieser Wohnung**.
 - Umgekehrt wohnt ein Haushalt in **höchstens einer** Wohnung. Wird ein Haushalt einer neuen Wohnung zugeordnet, wird eine bestehende Zuordnung zu einer anderen Wohnung automatisch gelöst.
-- Mit der Zuordnung gilt der Haushalt als aktueller Bewohner: `is_resident` wird gesetzt und — falls noch leer — `apartment_unit` mit der Wohnungsnummer gefüllt. Damit fließt der Haushalt in die IST-Verteilung der Durchmischung ein.
-- Die Zuordnung erfolgt **manuell im Tab „Wohnungen"**. Beim Anlegen der Beispieldaten werden die Bewohner-Haushalte anhand ihrer `apartment_unit` automatisch mit der passenden Wohnung verknüpft.
+- Mit der Zuordnung gilt der Haushalt als aktueller Bewohner: `is_resident` wird implizit gesetzt und — falls noch leer — `apartment_unit` mit der Wohnungsnummer gefüllt. Damit fließt der Haushalt in die IST-Verteilung der Durchmischung ein.
+- `is_resident` ist **nicht direkt editierbar**; es wird ausschließlich über die Wohnungszuordnung gesteuert: Zuordnung setzt `is_resident=True`, Lösen setzt `is_resident=False`.
+- Die Zuordnung erfolgt **manuell im Tab „Wohnungen"** oder **automatisch durch den vCard-Import** (wenn die Wohnungsnummer einer existierenden Wohnung entspricht). Beim Anlegen der Beispieldaten werden die Bewohner-Haushalte anhand ihrer `apartment_unit` automatisch mit der passenden Wohnung verknüpft.
 - Das **Lösen** einer Zuordnung ist kein Löschen: Wohnung und Haushalt bleiben unverändert erhalten.
 - Das **Löschen** einer Wohnung entfernt auch die Bewerbungen auf diese Wohnung.
 
@@ -87,7 +88,7 @@ Die Spalte `Etage` aus der Quelldatei wird bewusst **nicht** übernommen; der Ro
 - Aus allen Bewohner-Haushalten wird die **IST-Verteilung** (Alter, Geschlecht etc.) aggregiert.
 - Die Abweichung der IST-Verteilung von der Soll-Verteilung bestimmt, wie viele Punkte ein Bewerber-Haushalt für Durchmischung erhält.
 - Beim Scoring werden nur Nicht-Bewohner-Haushalte bewertet; Bewohner dienen ausschließlich als Referenzdaten.
-- Gesetzt wird `is_resident` durch den **vCard-Import**: Enthält die Adresse einer Karte eine Wohnungsnummer (z. B. `W.002`), gilt die Person als aktuelle Bewohnerin. Die Wohnungsnummer wird in `Household.apartment_unit` gespeichert.
+- Der **vCard-Import** verknüpft Haushalte mit einer Wohnungsnummer automatisch mit der entsprechenden Wohnung (`services.assign_household`), sofern diese in den Stammdaten existiert. Die Wohnungsnummer wird zusätzlich in `Household.apartment_unit` gespeichert.
 
 ### Archivierung
 
@@ -97,6 +98,15 @@ Die Spalte `Etage` aus der Quelldatei wird bewusst **nicht** übernommen; der Ro
 - Über einen Toggle „Archivierte anzeigen" können sie eingeblendet werden.
 - Archivierte Einträge werden beim **Scoring** und im **Ranking** nicht berücksichtigt.
 - Archivierte Einträge können jederzeit **wiederhergestellt** werden.
+
+### Löschen von Objekten
+
+- Das **Haushalt**-Objekt ist das führende Objekt. Solange ein Haushalt zugeordnet ist, können zugeordnete Personen und Wohnungen **nicht** gelöscht werden.
+- **Haushalt löschen** (`DELETE /households/{id}`): Endgültiges Löschen. Kaskadiert: alle zugehörigen Personen und Bewerbungen werden mitgelöscht. Eine bestehende Wohnungszuordnung wird gelöst (Wohnung bleibt bestehen).
+- **Person löschen** (`DELETE /people/{id}`): Nur möglich, wenn die Person **keinem Haushalt zugeordnet** ist (`household_id IS NULL`). Andernfalls wird HTTP 409 zurückgegeben. Person muss zuerst aus dem Haushalt entfernt werden.
+- **Alle Personen ohne Haushalt löschen** (`DELETE /people/unassigned`): Löscht sämtliche Personen ohne Haushaltszuordnung in einem Schritt. Archivierte Personen werden nur mitgelöscht, wenn `include_archived=true` übergeben wird — der Aufruf löscht also genau die Personen, die im Personen-Tab mit dem Filter „Nur ohne Haushalt" sichtbar sind. Zugeordnete Personen bleiben unberührt. Antwort: Anzahl der gelöschten Personen.
+- **Wohnung löschen** (`DELETE /apartments/{id}`): Nur möglich, wenn **kein Haushalt** der Wohnung zugeordnet ist (`household_id IS NULL`). Andernfalls wird HTTP 409 zurückgegeben. Zuordnung muss zuerst gelöst werden. Bewerbungen auf die Wohnung werden mitgelöscht.
+- Im Frontend wird der Löschen-Button für Personen nur bei Personen ohne Haushalt angezeigt. Bei Wohnungen wird die Fehlermeldung des Backends angezeigt.
 
 ### Zuordnung von Personen zu Haushalten
 
@@ -229,6 +239,7 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 | POST | `/token` | Login (Passwort prüfen, Token zurückgeben) | – |
 | GET | `/households/` | Alle Haushalte mit Personen & Score | Auth |
 | POST | `/households/` | Haushalt anlegen | Auth |
+| DELETE | `/households/{id}` | Haushalt löschen (kaskadiert Personen, Bewerbungen; löst Wohnungszuordnung) | Auth |
 | GET | `/apartments/` | Alle Wohnungen inkl. Name des zugeordneten Haushalts | Auth |
 | POST | `/apartments/` | Wohnung anlegen | Auth |
 | PUT | `/apartments/{id}` | Wohnung bearbeiten | Auth |
@@ -239,6 +250,9 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 | POST | `/applications/` | Bewerbung anlegen (Haushalt → Wohnung) | Auth |
 | GET | `/ranking/` | Gruppiertes Ranking: Haushalte pro (Größe, Förderungsart), nach Score sortiert | Auth |
 | PATCH | `/households/{id}/archive` | Haushalt archivieren/wiederherstellen (inkl. Personen) | Auth |
+| POST | `/people/` | Person eigenständig anlegen (ohne Haushalt) | Auth |
+| DELETE | `/people/{id}` | Person löschen (nur ohne Haushaltszuordnung; 409 wenn zugeordnet) | Auth |
+| DELETE | `/people/unassigned` | Alle Personen ohne Haushaltszuordnung löschen (`include_archived` optional) | Auth |
 | GET | `/people/` | Alle Personen inkl. Name des zugeordneten Haushalts | Auth |
 | GET | `/people/unassigned` | Personen ohne Haushaltszuordnung | Auth |
 | PUT | `/people/{id}` | Person bearbeiten | Auth |
@@ -271,8 +285,8 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 ### Frontend-Anforderungen
 
 - **Ranking-Tab**: Gruppierte Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart). Zeigt die nach Score sortierte Tabelle der Haushalte innerhalb der gewählten Kategorie.
-- **Personen-Tab**: Tabelle aller Personen mit Suche, Sortierung und den Filtern „Nur ohne Haushalt" und „Archivierte anzeigen". Pro Zeile: Haushalt zuordnen (bei Personen ohne Haushalt), aus Haushalt entfernen (bei zugeordneten Personen) sowie Archivieren/Wiederherstellen.
-- **Haushaltsdetail-Dialog**: Zeigt Haushaltsdaten und Personenkarten. Erlaubt „Person hinzufügen" (Auswahl aus Personen ohne Haushalt) und das Entfernen einzelner Personen aus dem Haushalt.
+- **Personen-Tab**: Tabelle aller Personen mit Suche, Sortierung und den Filtern „Nur ohne Haushalt" und „Archivierte anzeigen". Pro Zeile: Haushalt zuordnen (bei Personen ohne Haushalt), aus Haushalt entfernen (bei zugeordneten Personen), Archivieren/Wiederherstellen sowie Löschen (nur bei Personen ohne Haushalt). Über der Tabelle steht zusätzlich „Alle ohne Haushalt löschen (N)"; die Aktion wird mit Anzahl bestätigt und löscht — je nach Schalter „Archivierte anzeigen" — auch archivierte Personen ohne Haushalt.
+- **Haushaltsdetail-Dialog**: Zeigt Haushaltsdaten (einschließlich zugeordnete Wohnung, sofern vorhanden) und Personenkarten. Der Bewohnerstatus (`is_resident`) wird als Nur-Lese-Feld angezeigt und ergibt sich implizit aus der Wohnungszuordnung. Erlaubt „Person hinzufügen" (Auswahl aus Personen ohne Haushalt) und das Entfernen einzelner Personen aus dem Haushalt.
 - **Wohnungen-Tab**: Tabelle aller Wohnungen (Wohnungsnummer, Zimmer, Kennzeichen „klein", Wohnungsart, Förderungsart, qm mietwirksam, mind. Bewohner, bewohnt von) mit Suche über Wohnungsnummer, Wohnungsart und Haushalt, sortierbaren Spalten und den Filtern „Wohnungsart", „Förderungsart" und „Nur belegte". Pro Zeile: bearbeiten, Haushalt zuordnen bzw. Zuordnung lösen, Wohnung löschen. Über der Tabelle „Wohnung anlegen". Der zugeordnete Haushalt ist als Link in die Haushaltsdetailansicht ausgeführt. Im Bearbeiten-Dialog wird eine Zimmerzahl mit Nachkommastelle abgelehnt.
 - **Import-Tab**: Drei Upload-Bereiche (Haushaltsbogen, Individualbogen, vCard-Mitgliederliste). Jeder öffnet einen Assistenten mit den Schritten Analyse → Zuordnung → Zusammenfassung. Im vCard-Assistenten ist jeder Haushalt aufklappbar; dort sind alle Personen mit Rolle (Mitglied/Partner*in/Kind) und Herkunft (Kontakt/Notiz) sichtbar und einzeln abwählbar.
 - **Config-Tab**: Editierbare Karten für alle Gewichte und Zielwerte (nur für eingeloggte Admins sichtbar).
