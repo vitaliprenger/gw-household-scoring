@@ -58,7 +58,7 @@ Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrati
 | `backend/services.py` | Einfacher alter Excel-Direktimport, Wohnungs-Seed, Wohnungs-/Haushaltszuordnung und Beispieldaten. | `main.py`; `tests/test_apartments.py`. | Pandas, ORM-Modelle, `apartment_seed_data`. |
 | `backend/scoring.py` | Standardgewichte/-ziele, Bewohnerstatistik, Teil-Scores und Persistierung des Gesamt-Scores. | Startup und Scoring-/Config-Routen in `main.py`. | ORM-Modelle und Pandas-Datumsrechnung. |
 | `backend/import_service.py` | In-Memory-Import-Sessions; Parsen, Deduplizieren, Matching, Vorschau und Commit für Haushalts- und Individualbogen. Stellt gemeinsame Namens-/Datums-/Matching-Helfer für vCard bereit. | Fragebogenrouten in `main.py`; `vcf_import_service.py`. | Pandas, ORM-Modelle, Pydantic-Schemas. |
-| `backend/vcf_import_service.py` | vCard-Decoding/Parsing, NOTE-Auswertung, Haushaltsbildung, Vorschau, Matching und Commit. | vCard-Routen in `main.py`; Parser-Tests. | Gemeinsame Helfer und Session-Store aus `import_service.py`, ORM-Modelle, Schemas. |
+| `backend/vcf_import_service.py` | vCard-Decoding/Parsing, NOTE-Auswertung, Haushaltsbildung, Vorschau, Matching und Commit. Erster Schritt der Importkette: legt Personen an, Haushalte nur bei Wohnungszuordnung. | vCard-Routen in `main.py`; `tests/test_vcf_import.py`, `tests/test_import_order.py`. | Gemeinsame Helfer (u. a. `match_person_in`) und Session-Store aus `import_service.py`, ORM-Modelle, Schemas. |
 | `backend/main.py` | FastAPI-Anwendung, CORS, DB-Dependency, Importzeit-Migrationen, Startup und alle HTTP-Endpunkte. | Uvicorn (`backend.main:app`), Browser über `api.ts`, Integrationstest und mögliche externe API-Clients. | Alle Backend-Module. |
 | `backend/requirements.txt` | Direkte Python-Abhängigkeiten. | `pip install -r`. | FastAPI/Uvicorn, SQLAlchemy, Pydantic, Pandas/OpenPyXL und Multipart-Unterstützung. |
 
@@ -103,6 +103,7 @@ Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrati
 | `GET /ranking/` | `main.get_ranking` | `api.getRanking` | Gruppiert Apartments nach Zimmerzahl/Förderung, verbindet Bewerbungen und sortiert Haushalte nach Score |
 | `POST /upload/households/` | `main.upload_households` | `api.uploadHouseholds`; `tests/test_flow.py` | `services.process_excel_upload` |
 | `POST /scoring/calculate` | `main.calculate_scores` | `api.calculateScores`; `tests/test_flow.py` | `scoring.run_scoring` |
+| `GET /statistics/residents` | `main.get_resident_statistics` | `api.getResidentStatistics` | `scoring.calculate_resident_statistics` |
 | `GET /scoring/config` | `main.get_scoring_config` | `api.getScoringConfig` | ORM-Abfrage |
 | `PUT /scoring/config` | `main.update_scoring_config` | `api.updateScoringConfig` | Aktualisiert vorhandene Config-Zeilen |
 | `POST /import/household-bogen/analyze` | `main.analyze_hh_bogen` | `api.analyzeHHBogen` | `import_service.analyze_household_bogen` |
@@ -133,11 +134,13 @@ flowchart LR
 
 ### Fragebogenimporte
 
-`analyze_household_bogen` ruft `parse_household_bogen` auf. Der Parser prüft Absenden/Datenschutz, normalisiert Werte, zerlegt bis zu sechs Personen und ruft `_deduplicate_hh` auf. Danach ruft die Analyse pro Haushalt `match_household`, bei Bedarf `compute_data_changes`, legt eine `ImportSession` in `import_sessions` ab und liefert die Vorschau. `commit_household_bogen` liest diese Session und ruft je Entscheidung `_create_household_from_raw` oder `_update_household_from_raw`; beide verwenden `parse_date` für Personen.
+Beide Fragebogenimporte **ergänzen ausschließlich** vorhandene Daten; angelegt wird nur über den vCard-Import (siehe unten). Datensätze ohne zuordenbares Ziel zählen als `skipped_no_match`.
 
-`analyze_individual_bogen` folgt demselben Muster über `parse_individual_bogen`, `_deduplicate_individual` und `match_individual_to_person`. `commit_individual_bogen` ruft je Entscheidung `_update_person_from_individual` oder `_create_person_from_individual` auf.
+`analyze_household_bogen` ruft `parse_household_bogen` auf. Der Parser prüft Absenden/Datenschutz, normalisiert Werte, zerlegt bis zu sechs Personen und ruft `_deduplicate_hh` auf. Danach ruft die Analyse pro Haushalt `match_household`, bei Bedarf `compute_data_changes`, meldet über `missing_base_data_warning`, ob überhaupt Haushalte existieren, legt eine `ImportSession` in `import_sessions` ab und liefert die Vorschau. `commit_household_bogen` liest diese Session und ruft für jede Entscheidung mit Zielhaushalt `_update_household_from_raw` auf; dieses findet Personen über `match_person_in` wieder und legt nur unbekannte Personen neu an.
 
-`match_household` und `match_individual_to_person` prüfen zuerst Mitgliedsnummer, dann Name plus Geburtsdatum und zuletzt `SequenceMatcher`-Kandidaten. `_cleanup_sessions` wird vor jeder Analyse ausgeführt. Commit löscht die verwendete Session; abgebrochene Sessions bleiben bis zu einer späteren Analyse oder bis zum expliziten DELETE-Endpunkt im Speicher.
+`analyze_individual_bogen` folgt demselben Muster über `parse_individual_bogen`, `_deduplicate_individual` und `match_individual_to_person`; letzteres berücksichtigt auch Personen ohne Haushalt. `commit_individual_bogen` ruft für jede Entscheidung mit Zielperson `_update_person_from_individual` auf.
+
+`match_household` und `match_individual_to_person` prüfen zuerst Mitgliedsnummer, dann Name plus Geburtsdatum und zuletzt `SequenceMatcher`-Kandidaten. `match_person_in` ist der gemeinsame Personenabgleich innerhalb einer Kandidatenliste (Mitgliedsnummer → Name → Nachname + Geburtsdatum) und wird vom Haushaltsbogen und vom vCard-Import genutzt. `_cleanup_sessions` wird vor jeder Analyse ausgeführt. Commit löscht die verwendete Session; abgebrochene Sessions bleiben bis zu einer späteren Analyse oder bis zum expliziten DELETE-Endpunkt im Speicher.
 
 ### vCard-Import
 
@@ -147,7 +150,8 @@ flowchart LR
 4. `parse_vcard_person` ruft Namens-, Datums-, Geschlechts-, Adress- und NOTE-Helfer auf. NOTE-Helfer extrahieren Eintrittsdatum, Partner, Eltern und Kinder.
 5. `build_households` verbindet gleiche Wohnungsnummern und eindeutige Partnerschaften ohne Wohnungsnummer per Union-Find (`_find`, `_union`) und ruft `_build_household` auf. `_build_household` ergänzt Partner/Kinder aus Notizen.
 6. `analyze_vcf` verwendet das gemeinsame `import_service.match_household`, ruft bei Treffern `compute_vcf_changes` auf, warnt vor mehrfachen Zielhaushalten und speichert eine gemeinsame `ImportSession`.
-7. `commit_vcf` filtert abgewählte Personen, legt nur bei vorhandener Wohnungsnummer neue Haushalte an und ruft `_sync_household` auf. Dieses sucht Personen mit `_find_existing_person`, erzeugt sie mit `_new_person` oder aktualisiert sie über `_apply_person_fields`.
+7. `commit_vcf` filtert abgewählte Personen und entscheidet je Gruppe: zugeordneter Bestandshaushalt (`action == "update"`) → `_sync_household`; sonst mit Wohnungsnummer → neuer Haushalt und `_sync_household`; ohne Wohnungsnummer → `_sync_persons` ohne Haushalt (`persons_without_household`). `_sync_persons` sucht Personen über `PersonIndex.find`, erzeugt sie mit `_new_person` oder aktualisiert sie über `_apply_person_fields`.
+8. `PersonIndex` lädt den Personenbestand einmal je Commit und wird um neu angelegte Personen fortgeschrieben. Innerhalb eines Haushalts gilt der unscharfe `match_person_in`-Abgleich, global nur ein eindeutiger Treffer (`_find_global`), damit gleichnamige Personen nicht verschmolzen werden.
 
 ## Frontend-Module
 
@@ -157,7 +161,7 @@ flowchart LR
 |---|---|---|---|
 | `frontend/index.html` | HTML-Host mit `#root`. | Browser/Vite. | Lädt `/src/main.tsx`. |
 | `frontend/src/main.tsx` | React-Einstieg und MUI-Theme. | `index.html`. | Rendert `App` in `React.StrictMode`, `ThemeProvider`, `CssBaseline`. |
-| `frontend/src/App.tsx` | Loginzustand, Hauptnavigation, Ranking, Haushaltsliste, Scoring-Konfiguration, Aktionen und globale Detailansicht. | `main.tsx`. | API-Funktionen sowie `HouseholdDetailDialog`, `PersonsTab`, `ApartmentsTab`, `ImportTab`. |
+| `frontend/src/App.tsx` | Loginzustand, Hauptnavigation (inkl. „Punkte neu berechnen" in der Kopfzeile), Ranking, Haushaltsliste, Scoring-Konfiguration und globale Detailansicht. | `main.tsx`. | API-Funktionen sowie `HouseholdDetailDialog`, `PersonsTab`, `ApartmentsTab`, `StatisticsTab`, `ImportTab`. |
 | `frontend/src/api.ts` | Axios-Client, Token-Interceptor und typisierte Funktion für jeden vom Frontend genutzten Endpunkt. | `App.tsx` und Fachkomponenten. | HTTP auf `http://127.0.0.1:8000`. |
 | `frontend/src/types.ts` | TypeScript-Spiegel der API-Daten und Importentscheidungen. | `api.ts`, `App.tsx`, alle Fachkomponenten. | Keine Laufzeitaufrufe. |
 
@@ -166,6 +170,7 @@ flowchart LR
 | Modul | Zweck | Aufgerufen bzw. gerendert von | Ruft auf bzw. rendert |
 |---|---|---|---|
 | `components/common/ConfirmDialog.tsx` | Wiederverwendbarer Bestätigungsdialog. | `HouseholdDetailDialog`, `PersonsTab`, zweimal `ApartmentsTab`. | Nur Callback-Props. |
+| `components/common/tableStyles.ts` | Gemeinsame Zebrastreifen-Stile: Klassenvergabe je Zeile und `sx` für DataGrid und einfache `<Table>`. | `App.tsx`, `PersonsTab`, `ApartmentsTab`, `StatisticsTab`. | Keine Laufzeitaufrufe. |
 | `components/household/HouseholdDetailDialog.tsx` | Lädt, zeigt und bearbeitet Haushalt und Personen; archiviert Haushalt; koordiniert Personen-Zuordnung. | `App.tsx`; zusätzlich über Links aus Personen-/Wohnungsansicht geöffnet. | `getHousehold`, `updateHousehold`, `updatePerson`, `toggleArchiveHousehold`, `unassignPerson`; rendert `PersonCard`, `AddPersonDialog`, `ConfirmDialog`. |
 | `components/household/PersonCard.tsx` | Anzeige/Bearbeitung einer Person inklusive Berufs-/Bildungsoptionen. | `HouseholdDetailDialog`. | Meldet Änderungen/Entfernen über Callbacks. |
 | `components/household/AddPersonDialog.tsx` | Wählt eine unzugeordnete Person für einen Haushalt. | `HouseholdDetailDialog`. | `getUnassignedPersons`, `assignPerson`. |
@@ -174,7 +179,8 @@ flowchart LR
 | `components/apartments/ApartmentsTab.tsx` | Wohnungsliste mit Suche, Filtern, Sortierung, CRUD und Belegungszuordnung. | `App.tsx`. | `getApartments`, `unassignApartment`, `deleteApartment`; rendert `ApartmentEditDialog`, `AssignApartmentDialog`, `ConfirmDialog`; meldet Änderungen an `App`. |
 | `components/apartments/ApartmentEditDialog.tsx` | Formular zum Anlegen/Bearbeiten einer Wohnung mit Ganzzahlprüfung für Zimmer. | `ApartmentsTab`. | `createApartment` oder `updateApartment`. |
 | `components/apartments/AssignApartmentDialog.tsx` | Wählt den Bewohnerhaushalt einer Wohnung. | `ApartmentsTab`. | `getHouseholds`, `assignApartment`. |
-| `components/import/ImportTab.tsx` | Drei Uploadflächen; startet Analyse und öffnet passenden Assistenten. | `App.tsx`. | `analyzeHHBogen`, `analyzeIndividualBogen`, `analyzeVcf`; rendert die drei Wizards. |
+| `components/statistics/StatisticsTab.tsx` | Ist-Statistik der aktuellen Bewohner je Merkmal, umschaltbar zwischen absoluten und relativen Zahlen, mit Zielwert und Abweichung. | `App.tsx`. | `getResidentStatistics`; rein anzeigend. |
+| `components/import/ImportTab.tsx` | Drei Uploadflächen in der verbindlichen Reihenfolge (1. vCard, 2. Individualbogen, 3. Haushaltsbogen); startet Analyse und öffnet passenden Assistenten. | `App.tsx`. | `analyzeHHBogen`, `analyzeIndividualBogen`, `analyzeVcf`; rendert die drei Wizards. |
 | `components/import/HHImportWizard.tsx` | Dreistufige Vorschau/Zuordnung/Commit für Haushaltsbogen. | `ImportTab`. | `commitHHBogen`; rendert `MatchingDialog` und `DataChangeDialog`. |
 | `components/import/IndividualImportWizard.tsx` | Dreistufige Vorschau/Zuordnung/Commit für Individualbogen. | `ImportTab`. | `commitIndividualBogen`; rendert `MatchingDialog`. |
 | `components/import/VcfImportWizard.tsx` | Dreistufige vCard-Vorschau mit Suche, Problemfilter, aufklappbaren Personen und Abwahl einzelner Personen. | `ImportTab`. | `commitVcf`; rendert `MatchingDialog`. |
@@ -195,8 +201,9 @@ flowchart TD
     Apartments --> EditApt[ApartmentEditDialog]
     Apartments --> AssignApt[AssignApartmentDialog]
     Apartments --> Detail
-    App -->|Tab 4| Config[Scoring-Konfiguration]
-    App -->|Tab 5| ImportTab
+    App -->|Tab 4| Statistics[StatisticsTab]
+    App -->|Tab 5| Config[Scoring-Konfiguration]
+    App -->|Tab 6| ImportTab
     ImportTab --> HH[HHImportWizard]
     ImportTab --> Individual[IndividualImportWizard]
     ImportTab --> VCF[VcfImportWizard]
@@ -204,7 +211,7 @@ flowchart TD
     Individual --> Matching
     VCF --> Matching
     HH --> Changes[DataChangeDialog]
-    App -->|Tab 6| Actions[Scoring + alter Excel-Import]
+    App -->|Tab 7| Actions[Scoring + alter Excel-Import]
 ```
 
 `App.loadData` lädt Haushalte, Ranking und Scoring-Konfiguration. Erfolgreiche Änderungen in Detail-, Wohnungs- und Importansichten laufen über `onSaved`, `onChanged` bzw. `onImportComplete` zurück zu `loadData`. `PersonsTab` verwaltet seinen eigenen Reload. Die Importanalyse geschieht schon beim Upload in `ImportTab`; die Wizards verwalten Entscheidungen lokal und senden erst beim letzten Schritt den Commit.
@@ -228,7 +235,10 @@ Tatsächliche direkte Laufzeitnutzung im Quellcode: React/ReactDOM, MUI inklusiv
 | `tests/generate_data.py` | Eigenständig gestarteter Generator für den alten Excel-Direktimport. | Pandas schreibt `tests/test_data.xlsx`. |
 | `tests/test_flow.py` | Eigenständig gestarteter HTTP-Integrationstest gegen einen bereits laufenden Server. | `/token`, alten Haushaltsupload, Scoring und Haushaltsliste. |
 | `tests/test_apartments.py` | Eigenständig gestartete In-Memory-Prüfungen für 136 Stammdaten, Seed-Idempotenz, Zuordnung und Beispieldaten. | `models.Base`, `services.seed_apartments`, `services.assign_household`, `services.seed_example_data`. |
+| `tests/test_ranking.py` | Eigenständig gestartete In-Memory-Prüfungen für Eignung Haushalt/Wohnung und die gruppierte Rangliste. | `models.Base`, `services.is_eligible`, `services.build_ranking`, `scoring.calculate_occupancy_score`. |
+| `tests/test_statistics.py` | Eigenständig gestartete In-Memory-Prüfungen der Ist-Statistik: Bezugsmenge, fehlende Angaben, Summen, Zielwerte, Haushaltsgrößen. | `models.Base`, `scoring.calculate_resident_statistics`, `scoring.calculate_resident_stats`. |
 | `tests/test_vcf_import.py` | Eigenständig gestartete Parser-/Haushaltsbildungsprüfungen ohne DB. | Öffentliche Parser- und NOTE-Helfer aus `vcf_import_service.py`. |
+| `tests/test_import_order.py` | Eigenständig gestartete In-Memory-Prüfungen der Importreihenfolge: vCard legt alle Personen an (Haushalt nur bei Wohnungszuordnung), Individual- und Haushaltsbogen ergänzen nur. | `models.Base`, `vcf_import_service.analyze_vcf`/`commit_vcf`, `import_service.commit_individual_bogen`/`commit_household_bogen`, `SAMPLE` aus `tests/test_vcf_import.py`. |
 
 Die Dateien verwenden eigene `if __name__ == "__main__"`-Runner und kein pytest-Discovery-Muster als primären Aufruf. `test_flow.py` sendet `{ "username": "admin" }`, während `main.login` ausschließlich das Feld `password` liest. Ob dieser Test absichtlich einen veralteten Auth-Vertrag dokumentiert, ist **unklar**.
 

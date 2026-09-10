@@ -15,6 +15,7 @@ import {
     VcfAnalysisResponse,
     VcfCommitRequest,
     VcfCommitResponse,
+    ResidentStatistics,
 } from './types';
 
 const API_URL = 'http://127.0.0.1:8000';
@@ -161,6 +162,11 @@ export const calculateScores = async () => {
 
 export const getRanking = async () => {
     const response = await api.get<RankingGroup[]>('/ranking/');
+    return response.data;
+};
+
+export const getResidentStatistics = async () => {
+    const response = await api.get<ResidentStatistics>('/statistics/residents');
     return response.data;
 };
 

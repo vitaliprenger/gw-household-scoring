@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import {
     IndividualAnalysisResponse, IndividualImportPreview, IndividualDecision,
-    IndividualCommitRequest,
+    IndividualCommitRequest, IndividualCommitResponse,
 } from '../../types';
 import { commitIndividualBogen } from '../../api';
 import MatchingDialog from './MatchingDialog';
@@ -29,19 +29,20 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
         for (const ind of analysis.individuals) {
             const mt = ind.match_result.type;
             const inactive = ind.already_imported || ind.is_older;
-            let action: 'update' | 'create' | 'skip';
+            let action: 'update' | 'skip';
             if (inactive) {
                 action = 'skip';
             } else if (mt === 'exact_member_nr' || mt === 'exact_name_dob' || mt === 'fuzzy') {
                 action = 'update';
             } else {
-                action = 'create';
+                // Der Individualbogen legt keine Personen an; ohne Treffer
+                // bleibt nur das Überspringen.
+                action = 'skip';
             }
             init[ind.temp_id] = {
                 temp_id: ind.temp_id,
                 action,
                 target_person_id: ind.match_result.matched_household_id ?? undefined,
-                target_household_id: undefined,
                 confirm_data_removals: false,
             };
         }
@@ -50,7 +51,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
     const [matchingFor, setMatchingFor] = useState<IndividualImportPreview | null>(null);
     const [matchOverrides, setMatchOverrides] = useState<Record<string, string>>({});
     const [committing, setCommitting] = useState(false);
-    const [commitResult, setCommitResult] = useState<{ updated: number; created: number; skipped: number } | null>(null);
+    const [commitResult, setCommitResult] = useState<IndividualCommitResponse | null>(null);
     const [error, setError] = useState('');
 
     function updateDecision(tempId: string, patch: Partial<IndividualDecision>) {
@@ -88,10 +89,11 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-                {analysis.hh_import_warning && step === 0 && (
+                {analysis.missing_base_data_warning && step === 0 && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
-                        Es wurden noch keine Haushaltsdaten importiert. Die Zuordnung der Personen
-                        zu Haushalten ist möglicherweise nicht vollständig.
+                        Es sind noch keine Personen vorhanden. Bitte zuerst die
+                        Mitgliederliste (vCard) importieren — der Individualbogen
+                        ergänzt nur bestehende Personen.
                     </Alert>
                 )}
 
@@ -109,6 +111,10 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                 {analysis.privacy_warnings.length} Einträge ohne Datenschutz-Zustimmung.
                             </Alert>
                         )}
+                        <Typography variant="body2" color="text.secondary">
+                            Der Individualbogen <strong>ergänzt vorhandene Personen</strong> und legt
+                            keine neuen an. Datensätze ohne zugeordnete Person werden übersprungen.
+                        </Typography>
                     </Box>
                 )}
 
@@ -180,15 +186,14 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                 <TableCell>
                                                     <FormControl size="small" sx={{ minWidth: 140 }}>
                                                         <Select
-                                                            value={dec?.action ?? 'create'}
+                                                            value={dec?.action ?? 'skip'}
                                                             onChange={(e) => updateDecision(ind.temp_id, {
-                                                                action: e.target.value as 'update' | 'create' | 'skip',
+                                                                action: e.target.value as 'update' | 'skip',
                                                             })}
                                                         >
-                                                            {ind.match_result.matched_household_id && (
+                                                            {(dec?.target_person_id || ind.match_result.matched_household_id) && (
                                                                 <MenuItem value="update">Aktualisieren</MenuItem>
                                                             )}
-                                                            <MenuItem value="create">Neu anlegen</MenuItem>
                                                             <MenuItem value="skip">Überspringen</MenuItem>
                                                         </Select>
                                                     </FormControl>
@@ -206,10 +211,16 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                     <Box>
                         <Typography variant="h6" gutterBottom>Import abgeschlossen</Typography>
                         <Alert severity="success">
-                            <strong>{commitResult.updated}</strong> Personen aktualisiert,{' '}
-                            <strong>{commitResult.created}</strong> neu angelegt,{' '}
+                            <strong>{commitResult.updated}</strong> Personen ergänzt,{' '}
                             <strong>{commitResult.skipped}</strong> übersprungen.
                         </Alert>
+                        {commitResult.skipped_no_match > 0 && (
+                            <Alert severity="info" sx={{ mt: 2 }}>
+                                <strong>{commitResult.skipped_no_match}</strong> Datensätze ohne
+                                zugeordnete Person wurden nicht übernommen — der Individualbogen
+                                legt keine neuen Personen an.
+                            </Alert>
+                        )}
                     </Box>
                 )}
             </DialogContent>
@@ -241,7 +252,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                     description={`MitglNr: ${matchingFor.member_number || '—'}, Geb.: ${matchingFor.birth_date || '—'}`}
                     candidates={matchingFor.match_result.fuzzy_candidates || []}
                     nameColumnLabel="Person (Haushalt)"
-                    createButtonLabel="Neue Person anlegen"
+                    createButtonLabel="Nicht zuordnen (überspringen)"
                     onClose={() => setMatchingFor(null)}
                     onSelect={(personId, name) => {
                         if (personId) {
@@ -251,7 +262,10 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                             });
                             setMatchOverrides((prev) => ({ ...prev, [matchingFor.temp_id]: name || '' }));
                         } else {
-                            updateDecision(matchingFor.temp_id, { action: 'create' });
+                            updateDecision(matchingFor.temp_id, {
+                                action: 'skip',
+                                target_person_id: undefined,
+                            });
                             setMatchOverrides((prev) => {
                                 const next = { ...prev };
                                 delete next[matchingFor.temp_id];

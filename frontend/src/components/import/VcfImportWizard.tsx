@@ -47,7 +47,7 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                     ? 'skip'
                     : hh.match_result.matched_household_id
                         ? 'update'
-                        : hh.apartment_unit ? 'create' : 'skip',
+                        : 'create',
                 target_household_id: hh.match_result.matched_household_id ?? undefined,
                 excluded_person_temp_ids: [],
             };
@@ -77,14 +77,21 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
         });
     }, [analysis.households, search, onlyProblems]);
 
+    const withApartment = useMemo(
+        () => new Set(analysis.households.filter((hh) => hh.apartment_unit).map((hh) => hh.temp_id)),
+        [analysis.households],
+    );
+
     const counts = useMemo(() => {
         const values = Object.values(decisions);
+        const created = values.filter((d) => d.action === 'create');
         return {
-            create: values.filter((d) => d.action === 'create').length,
+            create: created.filter((d) => withApartment.has(d.temp_id)).length,
+            personsOnly: created.filter((d) => !withApartment.has(d.temp_id)).length,
             update: values.filter((d) => d.action === 'update').length,
             skip: values.filter((d) => d.action === 'skip').length,
         };
-    }, [decisions]);
+    }, [decisions, withApartment]);
 
     function updateDecision(tempId: string, patch: Partial<VcfDecision>) {
         setDecisions((prev) => ({ ...prev, [tempId]: { ...prev[tempId], ...patch } }));
@@ -140,12 +147,19 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                             </Alert>
                         )}
                         <Alert severity="info">
-                            Haushalte werden über die <strong>Wohnungsnummer</strong> aus der Adresse
-                            gebildet — alle Personen derselben Wohnung gelten als ein Haushalt und
-                            werden als <strong>aktuelle Bewohner</strong> markiert. Für Personen ohne
-                            Wohnungsnummer werden die im Notizfeld genannten Partnerschaften genutzt.
-                            Partner*innen und Kinder aus dem Notizfeld sind Schätzungen aus Freitext —
-                            bitte im nächsten Schritt prüfen und ggf. abwählen.
+                            Die vCard-Datei ist der <strong>erste Importschritt</strong> und legt den
+                            Personenbestand an: alle enthaltenen Personen werden angelegt, sofern noch
+                            keine passende Person existiert; vorhandene Personen werden mit den
+                            vCard-Daten überschrieben (leere Felder überschreiben nichts).
+                            Partner*innen und Kinder aus dem Notizfeld werden ebenfalls als Personen
+                            angelegt — sie sind Schätzungen aus Freitext, bitte im nächsten Schritt
+                            prüfen und ggf. abwählen.
+                            <br /><br />
+                            Ein <strong>Haushalt</strong> entsteht nur dort, wo die Adresse eine
+                            <strong> Wohnungsnummer</strong> enthält: alle Personen derselben Wohnung
+                            bilden einen Haushalt und gelten als <strong>aktuelle Bewohner</strong>.
+                            Alle übrigen Personen bleiben ohne Haushalt und können später zugeordnet
+                            werden.
                         </Alert>
                     </Box>
                 )}
@@ -169,7 +183,8 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                             />
                             <Box sx={{ flexGrow: 1 }} />
                             <Typography variant="body2" color="text.secondary">
-                                {counts.create} neu · {counts.update} aktualisieren · {counts.skip} überspringen
+                                {counts.create} Haushalte neu · {counts.personsOnly} nur Personen ·{' '}
+                                {counts.update} aktualisieren · {counts.skip} überspringen
                             </Typography>
                         </Box>
 
@@ -230,7 +245,9 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                                                 <TableCell>
                                                     {hh.apartment_unit
                                                         ? <Chip label={hh.apartment_unit} size="small" color="success" />
-                                                        : <Typography variant="body2" color="text.secondary">kein Bewohner</Typography>}
+                                                        : <Typography variant="body2" color="text.secondary">
+                                                            ohne Haushalt
+                                                        </Typography>}
                                                 </TableCell>
                                                 <TableCell align="right">
                                                     {hh.persons.length - excluded.length}
@@ -255,14 +272,22 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                                                             value={dec?.action ?? 'create'}
                                                             onChange={(e) => updateDecision(hh.temp_id, {
                                                                 action: e.target.value as VcfDecision['action'],
+                                                                // "neu anlegen" darf keinen Treffer mitschleppen
+                                                                target_household_id: e.target.value === 'update'
+                                                                    ? dec?.target_household_id
+                                                                        ?? hh.match_result.matched_household_id ?? undefined
+                                                                    : undefined,
                                                             })}
                                                         >
-                                                            {dec?.target_household_id && (
+                                                            {(dec?.target_household_id
+                                                                || hh.match_result.matched_household_id) && (
                                                                 <MenuItem value="update">Aktualisieren</MenuItem>
                                                             )}
-                                                            {hh.apartment_unit && (
-                                                                <MenuItem value="create">Neu anlegen</MenuItem>
-                                                            )}
+                                                            <MenuItem value="create">
+                                                                {hh.apartment_unit
+                                                                    ? 'Haushalt neu anlegen'
+                                                                    : 'Nur Personen anlegen'}
+                                                            </MenuItem>
                                                             <MenuItem value="skip">Überspringen</MenuItem>
                                                         </Select>
                                                     </FormControl>
@@ -373,15 +398,16 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                         <Typography variant="h6" gutterBottom>Import abgeschlossen</Typography>
                         <Alert severity="success">
                             <strong>{commitResult.households_created}</strong> Haushalte neu angelegt,{' '}
-                            <strong>{commitResult.households_updated}</strong> aktualisiert,{' '}
-                            <strong>{commitResult.households_skipped}</strong> übersprungen.<br />
-                            <strong>{commitResult.persons_created}</strong> Personen neu angelegt,{' '}
+                            <strong>{commitResult.households_updated}</strong> aktualisiert.<br />
+                            <strong>{commitResult.persons_created}</strong> Personen neu angelegt
+                            (davon <strong>{commitResult.persons_without_household}</strong> ohne
+                            Haushalt),{' '}
                             <strong>{commitResult.persons_updated}</strong> aktualisiert,{' '}
                             <strong>{commitResult.persons_assigned}</strong> einem Haushalt zugeordnet.
                         </Alert>
                         <Alert severity="info" sx={{ mt: 2 }}>
-                            Das Scoring wurde nicht neu berechnet. Bitte im Actions-Tab
-                            „Score berechnen" ausführen.
+                            Das Scoring wurde nicht neu berechnet. Bitte oben in der
+                            Kopfzeile „Punkte neu berechnen" ausführen.
                         </Alert>
                     </Box>
                 )}
@@ -412,6 +438,9 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                         + `Personen: ${matchingFor.persons.map((p) => p.name).join(', ')}`
                     }
                     candidates={matchingFor.match_result.fuzzy_candidates || []}
+                    createButtonLabel={matchingFor.apartment_unit
+                        ? 'Neuen Haushalt anlegen'
+                        : 'Ohne Haushalt (nur Personen anlegen)'}
                     onClose={() => setMatchingFor(null)}
                     onSelect={(householdId, name) => {
                         if (householdId) {

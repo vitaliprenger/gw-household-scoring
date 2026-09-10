@@ -232,8 +232,10 @@ def build_ranking(db: Session) -> list[dict]:
     """Rangliste je Wohnungskategorie (Zimmerzahl x Förderungsart).
 
     Haushalte bewerben sich nicht auf einzelne Wohnungen: jeder nicht
-    archivierte Haushalt erscheint automatisch in jeder Kategorie, für die er
-    in Frage kommt (siehe ``is_eligible``). Innerhalb einer Kategorie genügt
+    archivierte Haushalt ohne Wohnung erscheint automatisch in jeder Kategorie,
+    für die er in Frage kommt (siehe ``is_eligible``). Bestehende Bewohner
+    (``is_resident``) suchen keine Wohnung und bleiben deshalb aus der
+    Rangliste heraus. Innerhalb einer Kategorie genügt
     es, wenn er für **eine** der Wohnungen in Frage kommt — deshalb zählt die
     niedrigste Mindestbewohnerzahl der Kategorie.
 
@@ -255,6 +257,7 @@ def build_ranking(db: Session) -> list[dict]:
         db.query(models.Household)
         .options(selectinload(models.Household.people))
         .filter(models.Household.archived == False)
+        .filter(models.Household.is_resident == False)
         .all()
     )
     # Mitgliederzahl einmal vorberechnen statt je Kategorie

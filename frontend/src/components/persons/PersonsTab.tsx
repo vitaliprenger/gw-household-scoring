@@ -17,6 +17,7 @@ import {
 import { PersonWithHousehold } from '../../types';
 import AssignHouseholdDialog from './AssignHouseholdDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
+import { zebraGridSx, zebraRowClassName } from '../common/tableStyles';
 
 interface PersonsTabProps {
   onShowHousehold: (householdId: number) => void;
@@ -253,8 +254,10 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
           pagination: { paginationModel: { pageSize: 100 } },
         }}
         pageSizeOptions={[10, 25, 50, 100]}
-        getRowClassName={(params) => params.row.archived ? 'archived-row' : ''}
-        sx={{ '& .archived-row': { opacity: 0.5 } }}
+        getRowClassName={(params) =>
+          [zebraRowClassName(params), params.row.archived ? 'archived-row' : ''].filter(Boolean).join(' ')
+        }
+        sx={{ ...zebraGridSx, '& .archived-row': { opacity: 0.5 } }}
         localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
       />
 

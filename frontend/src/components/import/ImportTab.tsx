@@ -84,28 +84,38 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
 
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
+            <Alert severity="info" sx={{ mb: 3 }}>
+                Die Reihenfolge ist verbindlich: Die <strong>Mitgliederliste (vCard)</strong> legt
+                Personen und — bei erkannter Wohnungszuordnung — Haushalte an. Die beiden
+                Fragebögen <strong>ergänzen anschließend nur noch</strong> vorhandene Personen
+                bzw. Haushalte; sie legen selbst nichts Neues an.
+            </Alert>
+
             <Paper sx={{ p: 3, mb: 3 }}>
-                <Typography variant="h6" gutterBottom>1. Haushaltsbogen importieren</Typography>
+                <Typography variant="h6" gutterBottom>1. Mitgliederliste (vCard) importieren</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Importiert Haushaltsdaten aus dem Haushaltsbogen-Fragebogen (Excel .xlsx).
-                    Erkennt automatisch das alte (LimeSurvey) und neue (Nextcloud Forms) Format.
+                    Grundlage für alle weiteren Importe. Legt aus dem Adressbuch-Export (.vcf) alle
+                    enthaltenen Personen an — inklusive der im Notizfeld genannten Partner*innen und
+                    Kinder (Name + Geburtsdatum) — und übernimmt Mitgliedsnummer, Geburtsdatum,
+                    Geschlecht sowie das Datum des Aufnahmegesprächs als Beginn der Mitgliedschaft.
+                    Vorhandene Personen werden mit den vCard-Daten überschrieben; leere Felder
+                    überschreiben nichts. Ein Haushalt entsteht nur bei erkannter Wohnungsnummer:
+                    alle Personen derselben Wohnung bilden einen Haushalt und gelten als aktuelle
+                    Bewohner. Alle übrigen Personen bleiben ohne Haushalt.
                 </Typography>
-                <Button variant="contained" component="label" disabled={hhLoading}>
-                    {hhLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                    HH-Fragebogen hochladen
-                    <input type="file" hidden onChange={handleHHUpload} accept=".xlsx" />
+                <Button variant="contained" component="label" disabled={vcfLoading}>
+                    {vcfLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                    vCard-Datei hochladen
+                    <input type="file" hidden onChange={handleVcfUpload} accept=".vcf,.vcard" />
                 </Button>
             </Paper>
 
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: 3, mb: 3 }}>
                 <Typography variant="h6" gutterBottom>2. Individualbogen importieren</Typography>
-                <Alert severity="info" sx={{ mb: 2 }}>
-                    Bitte importieren Sie zuerst den Haushaltsbogen, damit die Zuordnung
-                    der Einzelpersonen zu Haushalten möglich ist.
-                </Alert>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Importiert individuelle Personeninformationen (Geschlecht, Beruf, Bildung etc.)
-                    und ordnet sie den bestehenden Haushalten zu.
+                    Ergänzt individuelle Personeninformationen (Geschlecht, Beruf, Bildung etc.)
+                    bei Personen, die vorhanden sind und zugeordnet werden können — auch bei
+                    Personen ohne Haushalt. Neue Personen werden nicht angelegt.
                 </Typography>
                 <Button variant="contained" component="label" disabled={indLoading}>
                     {indLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
@@ -114,19 +124,18 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
                 </Button>
             </Paper>
 
-            <Paper sx={{ p: 3, mt: 3 }}>
-                <Typography variant="h6" gutterBottom>3. Mitgliederliste (vCard) importieren</Typography>
+            <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>3. Haushaltsbogen importieren</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Importiert Mitgliedsdaten aus dem Adressbuch-Export (.vcf): Mitgliedsnummer,
-                    Geburtsdatum, Geschlecht sowie das Datum des Aufnahmegesprächs als Beginn der
-                    Mitgliedschaft. Personen mit Wohnungsnummer in der Adresse werden als
-                    aktuelle Bewohner geführt und pro Wohnung zu einem Haushalt zusammengefasst;
-                    Partner*innen und Kinder werden zusätzlich aus dem Notizfeld gelesen.
+                    Ergänzt bestehende Haushalte um die Angaben aus dem Haushaltsbogen-Fragebogen
+                    (Excel .xlsx): WBS-Status, Wohnungswunsch, Haustiere und finanzielle
+                    Rahmenbedingungen. Erkennt automatisch das alte (LimeSurvey) und neue
+                    (Nextcloud Forms) Format. Neue Haushalte werden nicht angelegt.
                 </Typography>
-                <Button variant="contained" component="label" disabled={vcfLoading}>
-                    {vcfLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                    vCard-Datei hochladen
-                    <input type="file" hidden onChange={handleVcfUpload} accept=".vcf,.vcard" />
+                <Button variant="contained" component="label" disabled={hhLoading}>
+                    {hhLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                    HH-Fragebogen hochladen
+                    <input type="file" hidden onChange={handleHHUpload} accept=".xlsx" />
                 </Button>
             </Paper>
 

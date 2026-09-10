@@ -34,8 +34,9 @@ def make_session():
 
 
 def add_household(db, name, members, wbs=None, score=0.0, archived=False,
-                  archived_members=0):
-    hh = models.Household(name=name, wbs_status=wbs, total_score=score, archived=archived)
+                  archived_members=0, is_resident=False):
+    hh = models.Household(name=name, wbs_status=wbs, total_score=score, archived=archived,
+                          is_resident=is_resident)
     db.add(hh)
     db.flush()
     for i in range(members + archived_members):
@@ -196,6 +197,21 @@ def test_ranking_excludes_archived():
     db.close()
 
 
+def test_ranking_excludes_residents():
+    print("\n== Bestehende Bewohner ==")
+    db = make_session()
+    add_apartment(db, "A.1", 3, "freifinanziert", 1)
+    add_household(db, "Bewerber", 2, score=10.0)
+    add_household(db, "Bewohner", 2, score=99.0, is_resident=True)
+    db.commit()
+
+    groups = services.build_ranking(db)
+    g = group_of(groups, 3, "freifinanziert")
+    check("bestehende Bewohner fehlen in der Rangliste",
+          names(g) == ["Bewerber"], str(names(g)))
+    db.close()
+
+
 def test_no_duplicate_rows():
     print("\n== Keine Dubletten ==")
     db = make_session()
@@ -350,7 +366,16 @@ def test_ranking_with_seed_data():
     groups = services.build_ranking(db)
     check("Kategorien aus den Wohnungsstammdaten", len(groups) > 0)
     total = {e.household.id for g in groups for e in g["households"]}
-    check("alle 11 Beispielhaushalte kommen irgendwo vor", len(total) == 11, str(len(total)))
+    applicants = {
+        hh.id for hh in db.query(models.Household).filter(
+            models.Household.is_resident == False,
+            models.Household.archived == False,
+        ).all()
+    }
+    check("alle 6 Bewerber-Haushalte kommen irgendwo vor",
+          total == applicants, str(sorted(applicants - total)))
+    check("kein Bewohner-Haushalt in der Rangliste",
+          all(not e.household.is_resident for g in groups for e in g["households"]))
 
     violations = []
     for g in groups:
@@ -372,6 +397,7 @@ if __name__ == "__main__":
     test_is_eligible()
     test_ranking_groups()
     test_ranking_excludes_archived()
+    test_ranking_excludes_residents()
     test_no_duplicate_rows()
     test_occupancy_subscore()
     test_occupancy_weight()
