@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import {
   AppBar, Toolbar, Typography, Container, Box, Tabs, Tab,
   Paper, Button, TextField, Grid, Card, CardContent, Alert, Snackbar, Chip,
-  FormControl, InputLabel, Select, MenuItem, FormControlLabel, Switch
+  FormControl, InputLabel, Select, MenuItem, FormControlLabel, Switch, InputAdornment
 } from '@mui/material';
+import SearchIcon from '@mui/icons-material/Search';
+import AddIcon from '@mui/icons-material/Add';
 import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { deDE } from '@mui/x-data-grid/locales';
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, uploadHouseholds, login, getRanking } from './api';
@@ -81,6 +83,7 @@ function App() {
   const [showArchivedHH, setShowArchivedHH] = useState(false);
   const [filterNoApartment, setFilterNoApartment] = useState(false);
   const [createHHOpen, setCreateHHOpen] = useState(false);
+  const [householdSearch, setHouseholdSearch] = useState('');
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -388,12 +391,40 @@ function App() {
             },
           ];
 
+          let visibleHouseholds = households;
+          if (filterNoApartment) {
+            visibleHouseholds = visibleHouseholds.filter(h => !h.assigned_apartment_unit);
+          }
+          const hhQuery = householdSearch.trim().toLowerCase();
+          if (hhQuery) {
+            visibleHouseholds = visibleHouseholds.filter(h =>
+              h.name.toLowerCase().includes(hhQuery) ||
+              (h.assigned_apartment_unit ?? '').toLowerCase().includes(hhQuery) ||
+              (h.apartment_unit ?? '').toLowerCase().includes(hhQuery) ||
+              (h.wbs_status ?? '').toLowerCase().includes(hhQuery) ||
+              h.people.some(pers =>
+                `${pers.first_name} ${pers.last_name}`.toLowerCase().includes(hhQuery)
+              )
+            );
+          }
+
           return (
             <Box>
-              <Box sx={{ display: 'flex', mb: 2, alignItems: 'center', gap: 2 }}>
-                <Button variant="contained" size="small" onClick={() => setCreateHHOpen(true)}>
-                  Haushalt anlegen
-                </Button>
+              <Box sx={{ display: 'flex', mb: 2, alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <TextField
+                  size="small"
+                  placeholder="Haushalt, Wohnung oder Person suchen"
+                  value={householdSearch}
+                  onChange={(e) => setHouseholdSearch(e.target.value)}
+                  sx={{ minWidth: 320 }}
+                  slotProps={{
+                    input: {
+                      startAdornment: (
+                        <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
+                      ),
+                    },
+                  }}
+                />
                 <FormControlLabel
                   control={
                     <Switch
@@ -412,9 +443,16 @@ function App() {
                   }
                   label="Archivierte anzeigen"
                 />
+                <Box sx={{ flexGrow: 1 }} />
+                <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateHHOpen(true)}>
+                  Haushalt anlegen
+                </Button>
               </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {visibleHouseholds.length} von {households.length} Haushalten
+              </Typography>
               <DataGrid
-                rows={filterNoApartment ? households.filter(h => !h.assigned_apartment_unit) : households}
+                rows={visibleHouseholds}
                 columns={householdColumns}
                 autoHeight
                 density="compact"
