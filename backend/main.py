@@ -612,6 +612,20 @@ def get_ranking(
         for group in services.build_ranking(db)
     ]
 
+# --- Ist-Statistik ---
+@app.get("/statistics/residents", response_model=schemas.ResidentStatistics)
+def get_resident_statistics(
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Ist-Statistik der aktuellen Bewohner: je Merkmal absolute Zahlen und Anteile.
+
+    Bezugsmenge sind dieselben Personen, die auch die IST-Verteilung der
+    Durchmischung bilden (nicht archivierte Personen in nicht archivierten
+    Haushalten mit ``is_resident=True``).
+    """
+    return scoring.calculate_resident_statistics(db)
+
 @app.get("/scoring/config", response_model=List[schemas.ScoringConfig])
 def get_scoring_config(
     db: Session = Depends(get_db),

@@ -154,12 +154,14 @@ export interface HHAnalysisResponse {
     skipped_not_submitted: number;
     skipped_duplicates: number;
     privacy_warnings: PrivacyWarning[];
+    /** Es existieren noch keine Haushalte - bitte zuerst die vCard importieren. */
+    missing_base_data_warning: boolean;
     households: HouseholdImportPreview[];
 }
 
 export interface HouseholdDecision {
     temp_id: string;
-    action: 'create' | 'update' | 'skip';
+    action: 'update' | 'skip';
     target_household_id?: number;
     confirm_data_removals: boolean;
 }
@@ -170,10 +172,10 @@ export interface HHCommitRequest {
 }
 
 export interface HHCommitResponse {
-    imported: number;
     updated: number;
     skipped: number;
-    created_household_ids: number[];
+    /** Ohne zugeordneten Haushalt - der Import legt keine Haushalte an. */
+    skipped_no_match: number;
 }
 
 export interface IndividualImportPreview {
@@ -201,15 +203,15 @@ export interface IndividualAnalysisResponse {
     skipped_not_submitted: number;
     skipped_duplicates: number;
     privacy_warnings: PrivacyWarning[];
-    hh_import_warning: boolean;
+    /** Es existieren noch keine Personen - bitte zuerst die vCard importieren. */
+    missing_base_data_warning: boolean;
     individuals: IndividualImportPreview[];
 }
 
 export interface IndividualDecision {
     temp_id: string;
-    action: 'update' | 'create' | 'skip';
+    action: 'update' | 'skip';
     target_person_id?: number;
-    target_household_id?: number;
     confirm_data_removals: boolean;
 }
 
@@ -220,8 +222,9 @@ export interface IndividualCommitRequest {
 
 export interface IndividualCommitResponse {
     updated: number;
-    created: number;
     skipped: number;
+    /** Ohne zugeordnete Person - der Import legt keine Personen an. */
+    skipped_no_match: number;
 }
 
 // --- VCF-Import Types ---
@@ -283,5 +286,37 @@ export interface VcfCommitResponse {
     persons_created: number;
     persons_updated: number;
     persons_assigned: number;
+    /** Neu angelegte Personen ohne Haushalt (keine Wohnungszuordnung). */
+    persons_without_household: number;
     created_household_ids: number[];
+}
+
+// --- Ist-Statistik ---
+
+export interface StatisticsGroup {
+    key: string;
+    label: string;
+    /** Absolute Zahl. */
+    count: number;
+    /** Anteil an der Bezugsgröße der Kategorie (0..1). */
+    ratio: number;
+    /** Zielwert als Anteil, sofern konfiguriert. */
+    target_ratio?: number | null;
+    /** Zielwert absolut (target_ratio × total). */
+    target_count?: number | null;
+}
+
+export interface StatisticsCategory {
+    key: string;
+    label: string;
+    /** Bezugsgröße der Anteile: Personen oder Haushalte. */
+    basis: 'person' | 'household';
+    total: number;
+    groups: StatisticsGroup[];
+}
+
+export interface ResidentStatistics {
+    household_count: number;
+    person_count: number;
+    categories: StatisticsCategory[];
 }

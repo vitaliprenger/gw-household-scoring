@@ -16,6 +16,7 @@ import { Apartment } from '../../types';
 import ApartmentEditDialog from './ApartmentEditDialog';
 import AssignApartmentDialog from './AssignApartmentDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
+import { zebraGridSx, zebraRowClassName } from '../common/tableStyles';
 
 interface ApartmentsTabProps {
   onShowHousehold: (householdId: number) => void;
@@ -231,6 +232,8 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
           pagination: { paginationModel: { pageSize: 100 } },
         }}
         pageSizeOptions={[10, 25, 50, 100]}
+        getRowClassName={zebraRowClassName}
+        sx={zebraGridSx}
         localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
       />
 

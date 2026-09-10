@@ -176,6 +176,28 @@ class RankingGroup(BaseModel):
     funding_type: str
     households: List[RankedHousehold] = []
 
+# --- Ist-Statistik Schemas ---
+class StatisticsGroup(BaseModel):
+    """Eine Merkmalsauspraegung der Ist-Statistik, absolut und relativ."""
+    key: str
+    label: str
+    count: int                              # absolute Zahl
+    ratio: float                            # Anteil an der Bezugsgroesse (0..1)
+    target_ratio: Optional[float] = None    # Zielwert als Anteil, falls konfiguriert
+    target_count: Optional[float] = None    # Zielwert absolut (target_ratio x total)
+
+class StatisticsCategory(BaseModel):
+    key: str
+    label: str
+    basis: str                              # "person" oder "household"
+    total: int                              # Bezugsgroesse der Anteile
+    groups: List[StatisticsGroup] = []
+
+class ResidentStatistics(BaseModel):
+    household_count: int
+    person_count: int
+    categories: List[StatisticsCategory] = []
+
 # --- Import Schemas ---
 class ImportPersonPreview(BaseModel):
     name: str
@@ -233,6 +255,7 @@ class HHAnalysisResponse(BaseModel):
     skipped_not_submitted: int
     skipped_duplicates: int = 0
     privacy_warnings: List[PrivacyWarning] = []
+    missing_base_data_warning: bool = False
     households: List[HouseholdImportPreview] = []
 
 class HouseholdDecision(BaseModel):
@@ -246,10 +269,9 @@ class HHCommitRequest(BaseModel):
     decisions: List[HouseholdDecision]
 
 class HHCommitResponse(BaseModel):
-    imported: int
     updated: int
     skipped: int
-    created_household_ids: List[int] = []
+    skipped_no_match: int = 0
 
 class IndividualImportPreview(BaseModel):
     temp_id: str
@@ -275,7 +297,7 @@ class IndividualAnalysisResponse(BaseModel):
     skipped_not_submitted: int
     skipped_duplicates: int = 0
     privacy_warnings: List[PrivacyWarning] = []
-    hh_import_warning: bool = False
+    missing_base_data_warning: bool = False
     individuals: List[IndividualImportPreview] = []
 
 class IndividualDecision(BaseModel):
@@ -291,8 +313,8 @@ class IndividualCommitRequest(BaseModel):
 
 class IndividualCommitResponse(BaseModel):
     updated: int
-    created: int
     skipped: int
+    skipped_no_match: int = 0
 
 # --- VCF-Import Schemas ---
 class VcfPersonPreview(BaseModel):
@@ -347,5 +369,6 @@ class VcfCommitResponse(BaseModel):
     persons_created: int
     persons_updated: int
     persons_assigned: int
+    persons_without_household: int = 0
     created_household_ids: List[int] = []
 

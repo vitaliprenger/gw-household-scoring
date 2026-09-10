@@ -30,6 +30,7 @@ from .import_service import (
     _cleanup_sessions,
     import_sessions,
     match_household,
+    match_person_in,
     normalize_member_number,
     normalize_name,
     parse_date,
@@ -984,61 +985,85 @@ def _new_person(data: dict, household_id: Optional[int]) -> models.Person:
     )
 
 
-def _find_existing_person(data: dict, household: models.Household, db: Session) -> Optional[models.Person]:
-    """Sucht die Person zuerst im Haushalt, dann global ueber die Mitgliedsnummer."""
-    member_number = data.get("member_number")
-    if member_number:
-        for person in household.people:
-            if person.member_number == member_number:
-                return person
+class PersonIndex:
+    """Alle Personen der Datenbank, damit jede vCard-Karte wiedergefunden wird.
 
-    key = _name_key(data.get("first_name"), data.get("last_name"))
-    for person in household.people:
-        if _name_key(person.first_name, person.last_name) == key:
-            return person
+    Der vCard-Import legt auch Personen ohne Haushalt an; ohne Haushalt gibt es
+    keine kleine Kandidatenliste mehr, deshalb wird der Bestand einmal geladen
+    und um neu angelegte Personen fortgeschrieben.
+    """
 
-    # Zweitnamen unterscheiden sich haeufig zwischen den Quellen
-    # ("Jonathan Rye Matt" vs. "Jonathan Matt") -> Rufname + Nachname vergleichen
-    birth = _as_datetime(data.get("birth_date"))
-    last = (data.get("last_name") or "").strip().lower()
-    first_token = (data.get("first_name") or "").strip().split(" ")[0].lower()
-    for person in household.people:
-        person_last = (person.last_name or "").strip().lower()
-        if person_last != last:
-            continue
-        if birth and person.birth_date == birth:
-            return person
-        person_first = (person.first_name or "").strip().split(" ")[0].lower()
-        if first_token and person_first == first_token:
-            return person
+    def __init__(self, db: Session):
+        self.people = db.query(models.Person).all()
 
-    if member_number:
-        return (
-            db.query(models.Person)
-            .filter(models.Person.member_number == member_number)
-            .first()
+    def add(self, person: models.Person) -> None:
+        self.people.append(person)
+
+    def find(self, data: dict, household: Optional[models.Household]) -> Optional[models.Person]:
+        # Innerhalb des Haushalts darf unschaerfer verglichen werden
+        # ("Jonathan Rye Matt" vs. "Jonathan Matt").
+        if household is not None:
+            found = match_person_in(list(household.people), data, loose=True)
+            if found is not None:
+                return found
+        return self._find_global(data)
+
+    def _find_global(self, data: dict) -> Optional[models.Person]:
+        """Sucht im gesamten Bestand - nur bei eindeutigen Treffern.
+
+        Ueber alle Haushalte hinweg sind Namen nicht eindeutig; ein mehrdeutiger
+        Treffer wuerde zwei verschiedene Menschen verschmelzen. Deshalb zaehlt
+        hier nur die Mitgliedsnummer oder ein Name, den genau eine Person traegt.
+        """
+        member_number = data.get("member_number")
+        if member_number:
+            for person in self.people:
+                if person.member_number == member_number:
+                    return person
+
+        birth = parse_date(data.get("birth_date"))
+        key = _name_key(data.get("first_name"), data.get("last_name"))
+        if key == "|":
+            return None
+
+        matches = [
+            person for person in self.people
+            if _name_key(person.first_name, person.last_name) == key
+        ]
+        if len(matches) != 1:
+            return None
+        person = matches[0]
+        person_birth = (
+            person.birth_date.date() if isinstance(person.birth_date, datetime)
+            else person.birth_date
         )
-    return None
+        # Widersprechende Geburtsdaten = zwei verschiedene Personen
+        if birth and person_birth and birth != person_birth:
+            return None
+        return person
 
 
-def _sync_household(hh: models.Household, hh_data: dict, persons: list[dict], db: Session) -> dict:
-    hh.name = hh_data["name"]
-    hh.apartment_unit = hh_data.get("apartment_unit")
-    hh.household_member_count = len(persons)
-    hh.vcf_import_timestamp = hh_data.get("rev")
-    hh.updated_at = datetime.utcnow()
+def _sync_persons(
+    persons: list[dict],
+    hh: Optional[models.Household],
+    index: PersonIndex,
+    db: Session,
+) -> dict:
+    """Legt die Personen einer vCard-Gruppe an bzw. aktualisiert sie.
 
-    has_apartment = bool(hh_data.get("apartment_unit"))
+    Ohne Haushalt (``hh is None``) entstehen Personen ohne Zuordnung: der
+    Import legt Haushalte nur fuer Wohnungszuordnungen an.
+    """
     created = updated = assigned = 0
     for data in persons:
-        existing = _find_existing_person(data, hh, db)
+        existing = index.find(data, hh)
         if existing is None:
-            if not has_apartment:
-                continue
-            db.add(_new_person(data, hh.id))
+            person = _new_person(data, hh.id if hh else None)
+            db.add(person)
+            index.add(person)
             created += 1
             continue
-        if existing.household_id is None:
+        if hh is not None and existing.household_id is None:
             # Person war bisher keinem Haushalt zugeordnet
             existing.household_id = hh.id
             existing.updated_at = datetime.utcnow()
@@ -1049,15 +1074,42 @@ def _sync_household(hh: models.Household, hh_data: dict, persons: list[dict], db
     return {"created": created, "updated": updated, "assigned": assigned}
 
 
+def _sync_household(
+    hh: models.Household,
+    hh_data: dict,
+    persons: list[dict],
+    index: PersonIndex,
+    db: Session,
+) -> dict:
+    hh.name = hh_data["name"]
+    hh.apartment_unit = hh_data.get("apartment_unit")
+    hh.household_member_count = len(persons)
+    hh.vcf_import_timestamp = hh_data.get("rev")
+    hh.updated_at = datetime.utcnow()
+
+    return _sync_persons(persons, hh, index, db)
+
+
 def commit_vcf(request: schemas.VcfCommitRequest, db: Session) -> schemas.VcfCommitResponse:
+    """Uebernimmt die bestaetigten vCard-Entscheidungen.
+
+    Der vCard-Import ist der erste Schritt der Importkette und legt den
+    Personenbestand an: *alle* Personen einer Karte werden angelegt, sofern
+    keine passende Person existiert. Ein Haushalt entsteht nur dort, wo die
+    vCard eine Wohnungszuordnung enthaelt (alle Personen derselben Wohnung
+    bilden einen Haushalt) oder wo der Assistent einen bestehenden Haushalt
+    zugeordnet hat. Alle uebrigen Personen bleiben ohne Haushalt.
+    """
     session = import_sessions.get(request.session_id)
     if not session:
         raise ValueError("Import-Session nicht gefunden oder abgelaufen")
 
     raw_map = {r["temp_id"]: r for r in session.raw_data}
+    index = PersonIndex(db)
 
     households_created = households_updated = households_skipped = 0
     persons_created = persons_updated = persons_assigned = 0
+    persons_without_household = 0
     created_ids: list[int] = []
 
     for decision in request.decisions:
@@ -1076,10 +1128,12 @@ def commit_vcf(request: schemas.VcfCommitRequest, db: Session) -> schemas.VcfCom
         if decision.action == "update" and decision.target_household_id:
             hh = db.query(models.Household).get(decision.target_household_id)
 
-        if hh is None:
-            if not raw.get("apartment_unit"):
-                households_skipped += 1
-                continue
+        apartment_unit = raw.get("apartment_unit")
+
+        if hh is not None:
+            households_updated += 1
+            counts = _sync_household(hh, raw, persons, index, db)
+        elif apartment_unit:
             hh = models.Household(
                 name=raw["name"],
                 import_source=IMPORT_SOURCE,
@@ -1089,16 +1143,19 @@ def commit_vcf(request: schemas.VcfCommitRequest, db: Session) -> schemas.VcfCom
             db.flush()
             created_ids.append(hh.id)
             households_created += 1
+            counts = _sync_household(hh, raw, persons, index, db)
         else:
-            households_updated += 1
+            # Ohne Wohnungszuordnung entsteht kein Haushalt - die Personen
+            # werden trotzdem angelegt und koennen spaeter zugeordnet werden.
+            households_skipped += 1
+            counts = _sync_persons(persons, None, index, db)
+            persons_without_household += counts["created"]
 
-        counts = _sync_household(hh, raw, persons, db)
         persons_created += counts["created"]
         persons_updated += counts["updated"]
         persons_assigned += counts["assigned"]
 
-        apartment_unit = raw.get("apartment_unit")
-        if apartment_unit:
+        if hh is not None and apartment_unit:
             apt = db.query(models.Apartment).filter(
                 models.Apartment.unit_number == apartment_unit
             ).first()
@@ -1115,5 +1172,6 @@ def commit_vcf(request: schemas.VcfCommitRequest, db: Session) -> schemas.VcfCom
         persons_created=persons_created,
         persons_updated=persons_updated,
         persons_assigned=persons_assigned,
+        persons_without_household=persons_without_household,
         created_household_ids=created_ids,
     )

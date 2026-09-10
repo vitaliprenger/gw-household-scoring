@@ -6,15 +6,18 @@ import {
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
+import CalculateIcon from '@mui/icons-material/Calculate';
 import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { deDE } from '@mui/x-data-grid/locales';
-import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, uploadHouseholds, login, getRanking } from './api';
+import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, login, getRanking } from './api';
 import { Household, ScoringConfig, RankingGroup, RankedHousehold } from './types';
 import HouseholdDetailDialog from './components/household/HouseholdDetailDialog';
 import ImportTab from './components/import/ImportTab';
 import PersonsTab from './components/persons/PersonsTab';
 import ApartmentsTab from './components/apartments/ApartmentsTab';
+import StatisticsTab from './components/statistics/StatisticsTab';
 import CreateHouseholdDialog from './components/household/CreateHouseholdDialog';
+import { zebraGridSx, zebraRowClassName } from './components/common/tableStyles';
 
 const CONFIG_LABELS: Record<string, string> = {
   weight_diversity_age:            'Altersstruktur',
@@ -164,18 +167,6 @@ function App() {
     }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files[0]) {
-      try {
-        await uploadHouseholds(event.target.files[0]);
-        setMessage({ text: "Datei erfolgreich hochgeladen!", type: 'success' });
-        loadData();
-      } catch (error) {
-        setMessage({ text: "Upload fehlgeschlagen.", type: 'error' });
-      }
-    }
-  };
-
   const formatDateTime = (val?: string): string => {
     if (!val) return '—';
     try {
@@ -237,6 +228,15 @@ function App() {
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
             GW Haushalts-Scoring
           </Typography>
+          <Button
+            color="inherit"
+            variant="outlined"
+            startIcon={<CalculateIcon />}
+            onClick={handleCalculate}
+            sx={{ mr: 2 }}
+          >
+            Punkte neu berechnen
+          </Button>
           <Button color="inherit" onClick={handleLogout}>Abmelden</Button>
         </Toolbar>
       </AppBar>
@@ -248,9 +248,9 @@ function App() {
             <Tab label="Alle Haushalte" />
             <Tab label="Personen" />
             <Tab label="Wohnungen" />
+            <Tab label="Ist-Statistik" />
             <Tab label="Bewertungskonfiguration" />
             <Tab label="Datenimport" />
-            <Tab label="Aktionen" />
           </Tabs>
         </Box>
 
@@ -260,8 +260,10 @@ function App() {
           const fundingTypes = [...new Set(rankingGroups.map(g => g.funding_type))].sort();
 
           // Ein Filter auf "Alle" schränkt nicht ein. Stehen beide Filter auf
-          // "Alle", zeigt die Rangliste jeden nicht archivierten Haushalt --
-          // auch solche, die für keine Wohnungskategorie in Frage kommen.
+          // "Alle", zeigt die Rangliste jeden nicht archivierten Haushalt ohne
+          // Wohnung -- auch solche, die für keine Wohnungskategorie in Frage
+          // kommen. Bestehende Bewohner suchen keine Wohnung und bleiben wie im
+          // Backend (services.build_ranking) aus der Rangliste heraus.
           const unfiltered = selectedSize === FILTER_ALL && selectedFunding === FILTER_ALL;
           const matchingGroups = rankingGroups.filter(
             g => (selectedSize === FILTER_ALL || sizeKey(g.size_rooms) === selectedSize)
@@ -273,7 +275,7 @@ function App() {
           // je Kategorie einen anderen Gesamtscore. Beim Entdoppeln zaehlt deshalb
           // die Kategorie, in der er am besten abschneidet.
           const selectedRanked: RankedHousehold[] = unfiltered
-            ? households.filter(h => !h.archived).map(h => ({
+            ? households.filter(h => !h.archived && !h.is_resident).map(h => ({
                 rank: 0,
                 id: h.id,
                 name: h.name,
@@ -364,6 +366,8 @@ function App() {
                     pagination: { paginationModel: { pageSize: 100 } },
                   }}
                   pageSizeOptions={[10, 25, 50, 100]}
+                  getRowClassName={zebraRowClassName}
+                  sx={zebraGridSx}
                   localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
                 />
               ) : (
@@ -490,8 +494,11 @@ function App() {
                   pagination: { paginationModel: { pageSize: 100 } },
                 }}
                 pageSizeOptions={[10, 25, 50, 100]}
-                getRowClassName={(params) => params.row.archived ? 'archived-row' : ''}
+                getRowClassName={(params) =>
+                  [zebraRowClassName(params), params.row.archived ? 'archived-row' : ''].filter(Boolean).join(' ')
+                }
                 sx={{
+                  ...zebraGridSx,
                   '& .MuiDataGrid-row': { cursor: 'pointer' },
                   '& .archived-row': { opacity: 0.5 },
                 }}
@@ -512,7 +519,11 @@ function App() {
           />
         )}
 
-        {tabValue === 4 && (() => {
+        {tabValue === 4 && (
+          <StatisticsTab />
+        )}
+
+        {tabValue === 5 && (() => {
           const diversityWeights = configs.filter(c => c.key.startsWith('weight_diversity_'));
           const otherWeights = configs.filter(c => c.key.startsWith('weight_') && !c.key.startsWith('weight_diversity_'));
           const naturalSort = (a: ScoringConfig, b: ScoringConfig) =>
@@ -574,26 +585,8 @@ function App() {
           );
         })()}
 
-        {tabValue === 5 && (
-          <ImportTab onImportComplete={loadData} />
-        )}
-
         {tabValue === 6 && (
-          <Box>
-            <Grid container spacing={2}>
-              <Grid>
-                <Button variant="contained" color="secondary" onClick={handleCalculate}>
-                  Punkte neu berechnen
-                </Button>
-              </Grid>
-              <Grid>
-                <Button variant="contained" component="label">
-                  Excel-Daten hochladen (alt)
-                  <input type="file" hidden onChange={handleFileUpload} accept=".xlsx" />
-                </Button>
-              </Grid>
-            </Grid>
-          </Box>
+          <ImportTab onImportComplete={loadData} />
         )}
       </Container>
 

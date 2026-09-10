@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import {
     HHAnalysisResponse, HouseholdImportPreview, HouseholdDecision,
-    HHCommitRequest,
+    HHCommitRequest, HHCommitResponse,
 } from '../../types';
 import { commitHHBogen } from '../../api';
 import MatchingDialog from './MatchingDialog';
@@ -48,7 +48,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
         const init: Record<string, HouseholdDecision> = {};
         for (const hh of analysis.households) {
             const matchType = hh.match_result.type;
-            let action: 'create' | 'update' | 'skip';
+            let action: 'update' | 'skip';
             let targetId: number | undefined;
             if (hh.already_imported) {
                 action = 'skip';
@@ -56,7 +56,9 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                 action = 'update';
                 targetId = hh.match_result.matched_household_id ?? undefined;
             } else {
-                action = 'create';
+                // Der Haushaltsbogen legt keine Haushalte an; ohne sicheren
+                // Treffer muss die Zuordnung manuell erfolgen.
+                action = 'skip';
             }
             init[hh.temp_id] = {
                 temp_id: hh.temp_id,
@@ -71,7 +73,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
     const [matchOverrides, setMatchOverrides] = useState<Record<string, string>>({});
     const [dataChangeFor, setDataChangeFor] = useState<HouseholdImportPreview | null>(null);
     const [committing, setCommitting] = useState(false);
-    const [commitResult, setCommitResult] = useState<{ imported: number; updated: number; skipped: number } | null>(null);
+    const [commitResult, setCommitResult] = useState<HHCommitResponse | null>(null);
     const [error, setError] = useState('');
 
     function updateDecision(tempId: string, patch: Partial<HouseholdDecision>) {
@@ -114,6 +116,14 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
+                {analysis.missing_base_data_warning && step === 0 && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                        Es sind noch keine Haushalte vorhanden. Bitte zuerst die
+                        Mitgliederliste (vCard) importieren — der Haushaltsbogen
+                        ergänzt nur bestehende Haushalte.
+                    </Alert>
+                )}
+
                 {step === 0 && (
                     <Box>
                         <Typography variant="h6" gutterBottom>Analyse-Ergebnis</Typography>
@@ -135,7 +145,9 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                             </Alert>
                         )}
                         <Typography variant="body2" color="text.secondary">
-                            Im nächsten Schritt können Sie für jeden Haushalt entscheiden: Neu anlegen, vorhandenen aktualisieren oder überspringen.
+                            Der Haushaltsbogen <strong>ergänzt bestehende Haushalte</strong> und legt
+                            keine neuen an. Im nächsten Schritt entscheiden Sie je Datensatz:
+                            vorhandenen Haushalt aktualisieren oder überspringen.
                         </Typography>
                     </Box>
                 )}
@@ -215,16 +227,16 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                 <TableCell>
                                                     <FormControl size="small" sx={{ minWidth: 140 }}>
                                                         <Select
-                                                            value={dec?.action ?? 'create'}
+                                                            value={dec?.action ?? 'skip'}
                                                             onChange={(e) => updateDecision(hh.temp_id, {
-                                                                action: e.target.value as 'create' | 'update' | 'skip',
+                                                                action: e.target.value as 'update' | 'skip',
                                                                 target_household_id: e.target.value === 'update'
-                                                                    ? hh.match_result.matched_household_id ?? undefined
+                                                                    ? dec?.target_household_id
+                                                                        ?? hh.match_result.matched_household_id ?? undefined
                                                                     : undefined,
                                                             })}
                                                         >
-                                                            <MenuItem value="create">Neu anlegen</MenuItem>
-                                                            {hh.match_result.matched_household_id && (
+                                                            {(dec?.target_household_id || hh.match_result.matched_household_id) && (
                                                                 <MenuItem value="update">Aktualisieren</MenuItem>
                                                             )}
                                                             <MenuItem value="skip">Überspringen</MenuItem>
@@ -251,10 +263,16 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                     <Box>
                         <Typography variant="h6" gutterBottom>Import abgeschlossen</Typography>
                         <Alert severity="success" sx={{ mb: 2 }}>
-                            <strong>{commitResult.imported}</strong> Haushalte neu angelegt,{' '}
-                            <strong>{commitResult.updated}</strong> aktualisiert,{' '}
+                            <strong>{commitResult.updated}</strong> Haushalte ergänzt,{' '}
                             <strong>{commitResult.skipped}</strong> übersprungen.
                         </Alert>
+                        {commitResult.skipped_no_match > 0 && (
+                            <Alert severity="info">
+                                <strong>{commitResult.skipped_no_match}</strong> Datensätze ohne
+                                zugeordneten Haushalt wurden nicht übernommen — der Haushaltsbogen
+                                legt keine neuen Haushalte an.
+                            </Alert>
+                        )}
                     </Box>
                 )}
             </DialogContent>
@@ -289,6 +307,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                     title={`Haushalt zuordnen: ${matchingFor.persons[0]?.name ?? '—'}`}
                     description={`Personen im importierten Haushalt: ${matchingFor.persons.map((p) => `${p.name} (MitglNr: ${p.member_number || '—'})`).join(', ')}`}
                     candidates={matchingFor.match_result.fuzzy_candidates || []}
+                    createButtonLabel="Nicht zuordnen (überspringen)"
                     onClose={() => setMatchingFor(null)}
                     onSelect={(householdId, name) => {
                         if (householdId) {
@@ -298,7 +317,10 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                             });
                             setMatchOverrides((prev) => ({ ...prev, [matchingFor.temp_id]: name || '' }));
                         } else {
-                            updateDecision(matchingFor.temp_id, { action: 'create' });
+                            updateDecision(matchingFor.temp_id, {
+                                action: 'skip',
+                                target_household_id: undefined,
+                            });
                             setMatchOverrides((prev) => {
                                 const next = { ...prev };
                                 delete next[matchingFor.temp_id];

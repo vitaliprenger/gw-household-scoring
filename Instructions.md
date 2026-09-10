@@ -119,9 +119,21 @@ Die Spalte `Etage` aus der Quelldatei wird bewusst **nicht** übernommen; der Ro
 
 - Haushalte mit dem Flag `is_resident=True` stellen die aktuelle Belegung der Genossenschaft dar.
 - Aus allen Bewohner-Haushalten wird die **IST-Verteilung** (Alter, Geschlecht etc.) aggregiert.
+- Bezugsmenge sind die **nicht archivierten Personen nicht archivierter Bewohner-Haushalte** (`scoring.resident_people`). Archivierte Einträge zählen — wie überall — nicht mit.
+- Personen **ohne gepflegte Angabe** zu einem Merkmal (kein Geburtsdatum, kein Geschlecht, Berufs- bzw. Bildungskategorie 0 oder leer) zählen in **keiner** fachlichen Gruppe mit; sie werden als „keine Angabe" geführt. Bezugsgröße der Anteile bleibt die Gesamtzahl der Bewohner-Personen, damit sich die Anteile aller Gruppen eines Merkmals zu 100 % ergänzen.
 - Die Abweichung der IST-Verteilung von der Soll-Verteilung bestimmt, wie viele Punkte ein Bewerber-Haushalt für Durchmischung erhält.
 - Beim Scoring werden nur Nicht-Bewohner-Haushalte bewertet; Bewohner dienen ausschließlich als Referenzdaten.
 - Der **vCard-Import** verknüpft Haushalte mit einer Wohnungsnummer automatisch mit der entsprechenden Wohnung (`services.assign_household`), sofern diese in den Stammdaten existiert. Die Wohnungsnummer wird zusätzlich in `Household.apartment_unit` gespeichert.
+
+### Ist-Statistik der aktuellen Bewohner
+
+Die aggregierte Belegung wird als eigene Seite ausgewiesen (Tab „Ist-Statistik", `GET /statistics/residents`, berechnet in `scoring.calculate_resident_statistics`).
+
+- Grundlage ist **dieselbe Personenmenge wie die IST-Verteilung** der Durchmischung (s. „Ist-Belegung"). Die relativen Zahlen der Seite sind damit exakt die Werte, gegen die die Zielwerte im Scoring verrechnet werden.
+- Ausgewiesen werden je Merkmal **absolute Zahlen** (Anzahl Personen bzw. Haushalte) **und relative Zahlen** (Anteil an der Bezugsgröße). Beide Darstellungen zeigen dieselben Daten; die Seite schaltet zwischen ihnen um.
+- Merkmale: **Altersgruppen** (inkl. „unter 20"), **Geschlecht**, **Haupttätigkeit**, **Bildungsabschluss** — Bezugsgröße sind die Personen — sowie **Haushaltsgröße** — Bezugsgröße sind die Haushalte.
+- Zu jeder Ausprägung wird der **Zielwert** aus der Bewertungskonfiguration mitgeliefert, absolut (Zielwert × Bezugsgröße) und relativ, dazu die Abweichung Ist − Ziel. Ohne konfigurierten Zielwert bleiben diese Felder leer: „unter 20" (die Zielwerte der Altersstruktur gelten erst ab 20 Jahren), „keine Angabe" und die Haushaltsgröße.
+- Die Seite ist reine Auswertung: sie verändert keine Daten und stößt keine Berechnung an.
 
 ### Archivierung
 
@@ -152,13 +164,29 @@ Die Spalte `Etage` aus der Quelldatei wird bewusst **nicht** übernommen; der Ro
 
 ### Datenimport
 
+#### Reihenfolge der Importe
+
+Die drei Importe bauen aufeinander auf und müssen in dieser Reihenfolge ausgeführt werden. **Nur der vCard-Import legt Daten an**; die beiden Fragebogen-Importe ergänzen ausschließlich, was bereits existiert. Damit hängt die Vollständigkeit der Stammdaten an einer einzigen Quelle und die Fragebögen können keine konkurrierenden Dubletten erzeugen.
+
+| # | Import | Legt an | Ergänzt |
+|---|--------|---------|---------|
+| 1 | **vCard-Mitgliederliste** (.vcf) | alle enthaltenen Personen; Haushalte **nur** bei erkannter Wohnungszuordnung | vorhandene Personen und Haushalte |
+| 2 | **Individualbogen** (.xlsx) | – | vorhandene Personen (auch solche ohne Haushalt) |
+| 3 | **Haushaltsbogen** (.xlsx) | – | vorhandene Haushalte |
+
+Die Assistenten von Individual- und Haushaltsbogen bieten deshalb nur noch „Aktualisieren" und „Überspringen" an; Datensätze ohne zuordenbares Ziel werden als `skipped_no_match` ausgewiesen. Fehlen die Basisdaten komplett (keine Personen bzw. keine Haushalte in der Datenbank), weist der jeweilige Assistent im Analyse-Schritt darauf hin, dass zuerst die vCard-Datei zu importieren ist.
+
+#### Fragebogen-Importe (Excel)
+
 - Haushalts- und Personendaten werden per **Excel-Upload** (.xlsx) importiert.
 - Erwartete Spalten: `Household Name`, `Member Since`, `Engagement Score`, `First Name`, `Last Name`, `Birth Date`, `Gender`, `Occupation`, `Education`, `Cultural Background`, `Special Needs`. `Member Since` wird pro Person gespeichert (bei altem Format ohne personenbezogenes Datum wird der Wert der ersten Zeile für alle Personen des Haushalts übernommen).
 - Mehrere Zeilen mit gleichem `Household Name` werden zu einem Haushalt gruppiert.
+- **Individualbogen** (`import_service.commit_individual_bogen`): ergänzt Geschlecht, Haupttätigkeit, Bildungsabschluss, kulturellen Hintergrund und besondere Lebenslage bei einer zugeordneten Person. Die Zuordnung berücksichtigt **alle** Personen — auch die vom vCard-Import angelegten Personen **ohne Haushalt**. Eine Mitgliedsnummer wird nur gesetzt, wenn die Person noch keine hat. Neue Personen entstehen nicht.
+- **Haushaltsbogen** (`import_service.commit_household_bogen`): ergänzt WBS-Status, Wohnungswunsch, Haustiere, Rollstuhlgerechtigkeit und finanzielle Rahmenbedingungen eines bestehenden Haushalts. Neue Haushalte entstehen nicht. Personen des Fragebogens werden über `import_service.match_person_in` (Mitgliedsnummer → Name → Nachname + Geburtsdatum) im Haushalt wiedergefunden, damit abweichende Schreibweisen keine Dubletten zu den bereits per vCard angelegten Personen erzeugen; nur wirklich unbekannte Personen werden dem Haushalt hinzugefügt. Geburtsdatum und Mitgliedsnummer werden dabei nur **gefüllt**, nicht überschrieben — führende Quelle ist die vCard.
 
 #### vCard-Import (Mitgliederliste, .vcf)
 
-Zusätzlich zu den Fragebögen können Mitgliedsdaten aus dem Adressbuch-Export der Genossenschaft (vCard 3.0/4.0) importiert werden. Der Import aktualisiert sowohl Personen- als auch Haushaltsdaten.
+Der vCard-Import ist der **erste Schritt der Importkette** und legt den Personen- und Haushaltsbestand an. Quelle ist der Adressbuch-Export der Genossenschaft (vCard 3.0/4.0).
 
 **Feld-Mapping pro Kontakt:**
 
@@ -173,10 +201,18 @@ Zusätzlich zu den Fragebögen können Mitgliedsdaten aus dem Adressbuch-Export 
 | `X-ANNIVERSARY` / `X-ABDATE` (Label „Anniversary"/„Jahrestag") | `Person.member_since` | Fallback, wenn kein Aufnahmegespräch in der Notiz steht; Label „Todestag" wird ignoriert |
 | `REV` | `Household.vcf_import_timestamp`, `Person.vcf_import_timestamp` | Idempotenz: gleicher Zeitstempel ⇒ „bereits importiert" |
 
+**Anlegen von Personen:**
+
+- Der Import legt **alle** in der Datei enthaltenen Personen an, sofern keine passende Person im System gefunden wird — unabhängig davon, ob eine Wohnungszuordnung vorliegt.
+- Dazu zählen auch die aus dem Notizfeld gelesenen **Kinder** (Name + Geburtsdatum) und **Partner\*innen ohne eigene Karte**.
+- Gefundene Personen werden mit den vCard-Daten **überschrieben**; **leere vCard-Werte überschreiben nichts** (Geburtsdatum, Geschlecht, Mitgliedsnummer, Mitglied seit). Felder, die die vCard nicht kennt (Haupttätigkeit, Bildungsabschluss, …), bleiben unangetastet.
+- Personen werden über `PersonIndex` wiedergefunden: innerhalb eines zugeordneten Haushalts unscharf (Mitgliedsnummer → Name → Nachname + Geburtsdatum, inkl. Rufname), über den gesamten Bestand hinweg dagegen nur bei **eindeutigen** Treffern (Mitgliedsnummer oder ein Name, den genau eine Person trägt, ohne widersprechendes Geburtsdatum). Ein mehrdeutiger Name führt zu einer neuen Person, damit nicht zwei verschiedene Menschen verschmolzen werden.
+
 **Haushaltsbildung:**
 
+- Ein Haushalt entsteht **nur bei erkannter Wohnungszuordnung** — oder wenn im Assistenten ausdrücklich ein bestehender Haushalt zugeordnet wurde. **Für alle übrigen Personen wird kein Haushalt angelegt**: sie bleiben ohne Zuordnung und sind im Personen-Tab über den Filter „Nur ohne Haushalt" erreichbar (`persons_without_household` in der Import-Zusammenfassung).
 - **Primär über die Wohnungsnummer**: Alle Personen mit identischer Wohnungsnummer bilden genau einen Haushalt und werden als aktuelle Bewohner geführt. Cluster-Zimmer (`P.108.1`, `P.108.2`, …) sind eigene Haushalte.
-- **Sekundär über Partnerbeziehungen** aus dem Notizfeld (`Partner:`, `Partnerin:`, `Mann von`, `Frau von`, `gehört zu`), aber nur zwischen Personen **ohne** Wohnungsnummer, damit die Wohnungszuordnung nicht überschrieben wird.
+- **Sekundär über Partnerbeziehungen** aus dem Notizfeld (`Partner:`, `Partnerin:`, `Mann von`, `Frau von`, `gehört zu`), aber nur zwischen Personen **ohne** Wohnungsnummer, damit die Wohnungszuordnung nicht überschrieben wird. Aus dieser Gruppierung entsteht kein Haushalt; sie hält die Personen im Assistenten lediglich zusammen.
 - **Elternbeziehungen** (`Tochter von X`, `Sohn von X`) werden bewusst **nicht** zum Gruppieren genutzt — erwachsene Kinder mit eigener Familie würden sonst mit dem Elternhaushalt verschmolzen. Sie können im Import-Assistenten manuell zugeordnet werden.
 - Aus dem Notizfeld gelesene **Kinder** (`Kind: Name (TT.MM.JJJJ)`, `Kinder:`-Blöcke, `Tochter: Name TT.MM.JJJJ`) und **Partner\*innen ohne eigene Karte** werden als zusätzliche Personen ohne Mitgliedsnummer angelegt. Nennen beide Partner\*innen dasselbe Kind, wird über Vorname + Geburtsdatum entdoppelt.
 - `Household.household_member_count` = Anzahl der übernommenen Personen (Mitglieder + Partner\*innen + Kinder).
@@ -187,7 +223,7 @@ Zusätzlich zu den Fragebögen können Mitgliedsdaten aus dem Adressbuch-Export 
 - Da das Notizfeld Freitext ist, sind daraus abgeleitete Personen **Schätzungen**. Im Assistenten lässt sich jede Person einzeln abwählen (`excluded_person_temp_ids`).
 - Der Import **löscht nie** Personen. Personen, die nur in der Datenbank existieren, bleiben erhalten und werden in der Vorschau ausgewiesen.
 - Leere vCard-Werte überschreiben keine vorhandenen Daten.
-- **Primärzweck ist die Ergänzung fehlender Daten** bei vorhandenen Einträgen. Neue Haushalte und Personen werden **nur** angelegt, wenn sie eine Wohnungsnummer besitzen (= bereits eine Wohnung bewohnen). Haushalte ohne Wohnungsnummer, die keinem bestehenden Haushalt zugeordnet werden können, werden übersprungen.
+- Im Assistenten steht je Gruppe „Haushalt neu anlegen" bzw. — ohne Wohnungsnummer — „Nur Personen anlegen", „Aktualisieren" (bestehender Haushalt) und „Überspringen" zur Wahl. „Überspringen" verwirft die Gruppe vollständig, es werden dann auch keine Personen angelegt.
 - Zeigen mehrere Import-Haushalte auf denselben bestehenden Haushalt, wird das als Warnung angezeigt.
 - Der Score wird **nicht** automatisch neu berechnet.
 
@@ -297,6 +333,7 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 | POST | `/import/vcf/analyze` | vCard-Datei analysieren, Vorschau + Match-Vorschläge | Auth |
 | POST | `/import/vcf/commit` | Bestätigte vCard-Entscheidungen übernehmen | Auth |
 | POST | `/scoring/calculate` | Scoring neu berechnen | Auth |
+| GET | `/statistics/residents` | Ist-Statistik der aktuellen Bewohner: je Merkmal absolute Zahlen, Anteile und Zielwerte | Auth |
 | GET | `/scoring/config` | Gewichte & Zielwerte lesen | Auth |
 | PUT | `/scoring/config` | Gewichte & Zielwerte ändern | Auth |
 
@@ -318,15 +355,16 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 
 ### Frontend-Anforderungen
 
-- **Ranking-Tab**: Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart) und den Spalten Rang, Haushaltsname, Mitglieder, **Grundpunktzahl**, **Wohnraumausnutzung** und **Gesamtpunktzahl**. Beide Filter stehen **standardmäßig auf „Alle“** und schränken dann nicht ein: die Rangliste zeigt zunächst **alle nicht archivierten Haushalte** — auch solche, die für keine Wohnungskategorie in Frage kommen. Ohne Filter gibt es keine Zimmerzahl und damit keine Wohnraumausnutzung: die Spalte zeigt „—“, die Gesamtpunktzahl entspricht der Grundpunktzahl. Wird ein Filter gesetzt, zeigt die Tabelle die Haushalte, die für die passenden Kategorien in Frage kommen; da derselbe Haushalt je Kategorie einen anderen Score hat, wird beim Entdoppeln über die Haushalts-id die **Kategorie mit dem höchsten Gesamtscore** behalten. Der **Rang wird immer für die aktuelle Auswahl neu vergeben** (1, 2, 3, …).
+- **Ranking-Tab**: Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart) und den Spalten Rang, Haushaltsname, Mitglieder, **Grundpunktzahl**, **Wohnraumausnutzung** und **Gesamtpunktzahl**. Beide Filter stehen **standardmäßig auf „Alle“** und schränken dann nicht ein: die Rangliste zeigt zunächst **alle nicht archivierten Haushalte, die keine Wohnung bewohnen** — auch solche, die für keine Wohnungskategorie in Frage kommen. **Bestehende Bewohner (`is_resident=True`) erscheinen nie in der Rangliste**: sie suchen keine Wohnung und dienen nur als Referenzdaten der Durchmischung. Wird die Wohnungszuordnung eines Haushalts gelöst, taucht er wieder in der Rangliste auf. Ohne Filter gibt es keine Zimmerzahl und damit keine Wohnraumausnutzung: die Spalte zeigt „—“, die Gesamtpunktzahl entspricht der Grundpunktzahl. Wird ein Filter gesetzt, zeigt die Tabelle die Haushalte, die für die passenden Kategorien in Frage kommen; da derselbe Haushalt je Kategorie einen anderen Score hat, wird beim Entdoppeln über die Haushalts-id die **Kategorie mit dem höchsten Gesamtscore** behalten. Der **Rang wird immer für die aktuelle Auswahl neu vergeben** (1, 2, 3, …).
 - **Haushalte-Tab**: Die Spalte „Grundpunktzahl“ zeigt `Household.total_score`, also den Score **ohne** Wohnraumausnutzung; diese kommt erst in der Rangliste je Wohnungsgröße hinzu. Tabelle aller Haushalte mit Freitextsuche (Haushaltsname, Wohnungsnummer, WBS-Status und Namen der Haushaltsmitglieder) sowie den Filtern „Nur ohne Wohnung“ und „Archivierte anzeigen“. Der Button „Haushalt anlegen“ steht — wie im Wohnungen-Tab — rechtsbündig in der Filterzeile. Über der Tabelle wird die Zahl der sichtbaren von allen Haushalten angezeigt. Ein Klick auf eine Zeile öffnet den Haushaltsdetail-Dialog.
 - **Personen-Tab**: Tabelle aller Personen mit Suche, Sortierung und den Filtern „Nur ohne Haushalt" und „Archivierte anzeigen". Pro Zeile: Haushalt zuordnen (bei Personen ohne Haushalt), aus Haushalt entfernen (bei zugeordneten Personen), Archivieren/Wiederherstellen sowie Löschen (nur bei Personen ohne Haushalt). Über der Tabelle steht zusätzlich „Alle ohne Haushalt löschen (N)"; die Aktion wird mit Anzahl bestätigt und löscht — je nach Schalter „Archivierte anzeigen" — auch archivierte Personen ohne Haushalt.
 - **Haushaltsdetail-Dialog**: Zeigt Haushaltsdaten (einschließlich zugeordnete Wohnung, sofern vorhanden) und Personenkarten. Der Score erscheint als „Grundpunktzahl (ohne Wohnraumausnutzung)“. Der **Haushaltsname ist editierbar**: im Bearbeiten-Modus wird die Dialogüberschrift zum Eingabefeld „Haushaltsname“. Ein leerer Name wird abgelehnt (Speichern deaktiviert, Backend antwortet mit HTTP 400); führende und nachfolgende Leerzeichen werden entfernt. Der Bewohnerstatus (`is_resident`) wird als Nur-Lese-Feld angezeigt und ergibt sich implizit aus der Wohnungszuordnung. Erlaubt „Person hinzufügen" (Auswahl aus Personen ohne Haushalt) und das Entfernen einzelner Personen aus dem Haushalt.
 - **Wohnungen-Tab**: Tabelle aller Wohnungen (Wohnungsnummer, Zimmer, Kennzeichen „klein", Wohnungsart, Förderungsart, qm mietwirksam, mind. Bewohner, bewohnt von) mit Suche über Wohnungsnummer, Wohnungsart und Haushalt, sortierbaren Spalten und den Filtern „Wohnungsart", „Förderungsart" und „Nur belegte". Pro Zeile: bearbeiten, Haushalt zuordnen bzw. Zuordnung lösen, Wohnung löschen. Über der Tabelle „Wohnung anlegen". Der zugeordnete Haushalt ist als Link in die Haushaltsdetailansicht ausgeführt. Im Bearbeiten-Dialog wird eine Zimmerzahl mit Nachkommastelle abgelehnt.
 - **Import-Tab**: Drei Upload-Bereiche (Haushaltsbogen, Individualbogen, vCard-Mitgliederliste). Jeder öffnet einen Assistenten mit den Schritten Analyse → Zuordnung → Zusammenfassung. Im vCard-Assistenten ist jeder Haushalt aufklappbar; dort sind alle Personen mit Rolle (Mitglied/Partner*in/Kind) und Herkunft (Kontakt/Notiz) sichtbar und einzeln abwählbar.
+- **Ist-Statistik-Tab**: Auswertung der aktuellen Belegung. Kopfzeile mit der Zahl der Bewohner-Haushalte und der Personen, darunter ein Umschalter „Absolute Zahlen" / „Relative Zahlen". Je Merkmal (Altersgruppen, Geschlecht, Haupttätigkeit, Bildungsabschluss, Haushaltsgröße) eine Tabelle mit den Spalten Ausprägung, Anzahl bzw. Anteil, Zielwert und Abweichung sowie einer Summenzeile. Merkmale ohne Zielwert zeigen nur Ausprägung und Wert.
 - **Config-Tab**: Editierbare Karten für alle Gewichte und Zielwerte (nur für eingeloggte Admins sichtbar).
-- **Actions-Tab**: Buttons für „Score berechnen" und „Excel hochladen" (nur Admin).
-- **Tabellen**: Alle Datentabellen (Ranking, Haushalte, Personen, Wohnungen) zeigen standardmäßig **100 Zeilen pro Seite**; wählbar sind 10, 25, 50 und 100.
+- **Tabellen**: Alle Datentabellen (Ranking, Haushalte, Personen, Wohnungen) zeigen standardmäßig **100 Zeilen pro Seite**; wählbar sind 10, 25, 50 und 100. Alle Tabellen sind **abwechselnd eingefärbt (Zebrastreifen)**: jede zweite Zeile erhält einen leicht abgesetzten Hintergrund. Die Streifen richten sich nach der Position in der aktuellen Seite und bleiben daher nach Sortieren, Filtern und Blättern korrekt; der Hover-Effekt bleibt auf allen Zeilen sichtbar. In den Tabellen der Ist-Statistik bleibt die Summenzeile ungestreift.
+- **Kopfzeile (AppBar)**: Der Button „Punkte neu berechnen" steht in der Kopfzeile der Seite und ist damit aus jedem Tab erreichbar. Einen eigenen „Aktionen"-Tab gibt es nicht mehr; der frühere Alt-Upload „Excel-Daten hochladen" entfällt, Excel-Dateien werden ausschließlich über den Datenimport-Tab eingelesen.
 - Login/Logout über AppBar.
 
 ---
@@ -336,7 +374,7 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 - Backend-Code in `backend/`, Frontend in `frontend/`, Tests in `tests/`.
 - Import-Logik: Fragebögen in `backend/import_service.py`, vCard in `backend/vcf_import_service.py` (nutzt Session-Store, Namensnormalisierung und Haushalts-Matching aus `import_service`).
 - Wohnungsstammdaten: `backend/apartment_seed_data.py` (generiert aus `imported_data/Wohnungen.xlsx`), angelegt über `services.seed_apartments`; die Zuordnung zum Haushalt erfolgt über `services.assign_household`.
-- Tests: `python tests/test_apartments.py` (Wohnungsstammdaten und Zuordnung), `python tests/test_ranking.py` (Eignung und Rangliste), `python tests/test_vcf_import.py` (vCard-Import). Alle laufen ohne Server gegen eine In-Memory-Datenbank.
+- Tests: `python tests/test_apartments.py` (Wohnungsstammdaten und Zuordnung), `python tests/test_ranking.py` (Eignung und Rangliste), `python tests/test_statistics.py` (Ist-Statistik der Bewohner), `python tests/test_vcf_import.py` (vCard-Import). Alle laufen ohne Server gegen eine In-Memory-Datenbank.
 - Pydantic V2: `from_attributes = True` statt `orm_mode`.
 - Relative Imports innerhalb des `backend`-Packages.
 - `backend/__init__.py` muss vorhanden sein.

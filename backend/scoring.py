@@ -5,6 +5,35 @@ import numpy as np
 
 AGE_GROUPS = ["20_29", "30_39", "40_49", "50_59", "60_69", "70_79", "80_89", "over_89"]
 
+# "unter 20" ist keine Zielgruppe der Durchmischung (§3 Abs. 1a), gehoert aber
+# in die Ist-Statistik: die Bevoelkerungsanteile beziehen sich auf ab 20 Jahre.
+AGE_GROUPS_ALL = ["under_20"] + AGE_GROUPS
+
+AGE_LABELS = {
+    "under_20": "unter 20",
+    "20_29": "20 bis 29",
+    "30_39": "30 bis 39",
+    "40_49": "40 bis 49",
+    "50_59": "50 bis 59",
+    "60_69": "60 bis 69",
+    "70_79": "70 bis 79",
+    "80_89": "80 bis 89",
+    "over_89": "über 89",
+}
+
+GENDER_GROUPS = ["f", "m", "d"]
+
+GENDER_LABELS = {
+    "f": "weiblich",
+    "m": "männlich",
+    "d": "divers",
+}
+
+# Personen ohne gepflegte Angabe zaehlen in keiner fachlichen Gruppe mit,
+# werden in der Ist-Statistik aber ausgewiesen.
+UNKNOWN_GROUP = "unknown"
+UNKNOWN_LABEL = "keine Angabe"
+
 OCCUPATION_GROUPS = [str(i) for i in range(1, 11)]
 
 OCCUPATION_LABELS = {
@@ -96,6 +125,80 @@ def calculate_age_group(age):
     if age < 90: return "80_89"
     return "over_89"
 
+
+def person_age(person: models.Person) -> float | None:
+    """Alter in Jahren, ``None`` wenn kein Geburtsdatum gepflegt ist."""
+    if not person.birth_date:
+        return None
+    return (pd.Timestamp.now() - pd.to_datetime(person.birth_date)).days / 365.25
+
+
+def person_age_group(person: models.Person) -> str:
+    age = person_age(person)
+    return UNKNOWN_GROUP if age is None else calculate_age_group(age)
+
+
+def person_gender_group(person: models.Person) -> str:
+    gender = (person.gender or "").strip().lower()
+    if gender in ['f', 'w', 'female', 'weiblich']:
+        return "f"
+    if gender in ['m', 'male', 'männlich']:
+        return "m"
+    if gender in ['d', 'divers', 'diverse', 'non-binary']:
+        return "d"
+    return UNKNOWN_GROUP
+
+
+def person_occupation_group(person: models.Person) -> str:
+    """Berufskategorie 1--10; Kategorie 0 und Leereintrag gelten als keine Angabe."""
+    occ = (person.occupation_type or "").strip()
+    return occ if occ in OCCUPATION_GROUPS else UNKNOWN_GROUP
+
+
+def person_education_group(person: models.Person) -> str:
+    """Bildungsstufe 1--8; Kategorie 0 und Leereintrag gelten als keine Angabe."""
+    edu = (person.education_level or "").strip()
+    return edu if edu in EDUCATION_GROUPS else UNKNOWN_GROUP
+
+
+def count_people(people) -> dict:
+    """Absolute Haeufigkeiten je Merkmalsauspraegung ueber die uebergebenen Personen.
+
+    Personen ohne gepflegte Angabe landen in ``<merkmal>_unknown`` und damit in
+    keiner fachlichen Gruppe -- ein fehlendes Geburtsdatum ist keine Altersgruppe.
+    Ueber alle Gruppen eines Merkmals summiert ergibt sich stets die Personenzahl.
+    """
+    counts = {f"age_{g}": 0 for g in AGE_GROUPS_ALL}
+    counts.update({f"gender_{g}": 0 for g in GENDER_GROUPS})
+    counts.update({f"occupation_{g}": 0 for g in OCCUPATION_GROUPS})
+    counts.update({f"education_{g}": 0 for g in EDUCATION_GROUPS})
+    counts.update({f"{dim}_{UNKNOWN_GROUP}": 0
+                   for dim in ("age", "gender", "occupation", "education")})
+
+    for p in people:
+        counts[f"age_{person_age_group(p)}"] += 1
+        counts[f"gender_{person_gender_group(p)}"] += 1
+        counts[f"occupation_{person_occupation_group(p)}"] += 1
+        counts[f"education_{person_education_group(p)}"] += 1
+
+    return counts
+
+
+def resident_households(db: Session):
+    """Nicht archivierte Haushalte, die aktuell eine Wohnung bewohnen."""
+    return db.query(models.Household).filter(
+        models.Household.is_resident == True,
+        models.Household.archived == False,
+    ).all()
+
+
+def resident_people(db: Session):
+    """Nicht archivierte Personen der Bewohner-Haushalte.
+
+    Das ist die Referenzmenge der IST-Verteilung (Durchmischung, §3 Abs. 1).
+    """
+    return [p for h in resident_households(db) for p in h.people if not p.archived]
+
 def calculate_diversity_subscores(household: models.Household, current_stats: dict, config: dict) -> dict:
     """Returns individual sub-scores per diversity dimension (§3 Abs. 1a–f)."""
     subscores = {
@@ -110,34 +213,11 @@ def calculate_diversity_subscores(household: models.Household, current_stats: di
     subscores["diversity_cultural"] = max(0.0, min(1.0, household.cultural_diversity_score or 0.0))
     subscores["diversity_special_needs"] = max(0.0, min(1.0, household.special_needs_score or 0.0))
 
-    people = household.people
+    people = [p for p in household.people if not p.archived]
     if not people:
         return subscores
 
-    hh_stats = {f"age_{g}": 0 for g in ["under_20"] + AGE_GROUPS}
-    hh_stats.update({f"occupation_{g}": 0 for g in OCCUPATION_GROUPS})
-    hh_stats.update({f"education_{g}": 0 for g in EDUCATION_GROUPS})
-    hh_stats.update({"gender_f": 0, "gender_m": 0, "gender_d": 0})
-
-    for p in people:
-        age = (pd.Timestamp.now() - pd.to_datetime(p.birth_date)).days / 365.25
-        hh_stats[f"age_{calculate_age_group(age)}"] += 1
-
-        gender = (p.gender or "").lower()
-        if gender in ['f', 'w', 'female', 'weiblich']:
-            hh_stats["gender_f"] += 1
-        elif gender in ['m', 'male', 'männlich']:
-            hh_stats["gender_m"] += 1
-        elif gender in ['d', 'divers', 'diverse', 'non-binary']:
-            hh_stats["gender_d"] += 1
-
-        occ = (p.occupation_type or "").strip()
-        if occ in OCCUPATION_GROUPS:
-            hh_stats[f"occupation_{occ}"] += 1
-
-        edu = (p.education_level or "").strip()
-        if edu in EDUCATION_GROUPS:
-            hh_stats[f"education_{edu}"] += 1
+    hh_stats = count_people(people)
 
     for group in AGE_GROUPS:
         target = config.get(f"target_age_{group}", 0.0)
@@ -205,46 +285,147 @@ def calculate_engagement_score(household: models.Household) -> float:
     return max(0.0, min(1.0, household.engagement_score or 0.0))
 
 def calculate_resident_stats(db: Session) -> dict:
-    residents = db.query(models.Household).filter(
-        models.Household.is_resident == True,
-        models.Household.archived == False,
-    ).all()
-    people = [p for h in residents for p in h.people]
+    """IST-Verteilung der aktuellen Bewohner als Anteile je Merkmalsauspraegung.
+
+    Bezugsgroesse ist die Zahl aller Bewohner-Personen -- auch derer ohne Angabe
+    zum Merkmal. Die Anteile sind die Vergleichswerte fuer die Zielwerte der
+    Durchmischung (§3 Abs. 1).
+    """
+    people = resident_people(db)
+    counts = count_people(people)
     total = len(people)
 
     if total == 0:
-        result = {f"ratio_age_{g}": 0.0 for g in AGE_GROUPS}
-        result.update({f"ratio_occupation_{g}": 0.0 for g in OCCUPATION_GROUPS})
-        result.update({f"ratio_education_{g}": 0.0 for g in EDUCATION_GROUPS})
-        result.update({"ratio_gender_f": 0.0, "ratio_gender_m": 0.0, "ratio_gender_d": 0.0})
-        return result
-
-    counts = {f"age_{g}": 0 for g in ["under_20"] + AGE_GROUPS}
-    counts.update({f"occupation_{g}": 0 for g in OCCUPATION_GROUPS})
-    counts.update({f"education_{g}": 0 for g in EDUCATION_GROUPS})
-    counts.update({"gender_f": 0, "gender_m": 0, "gender_d": 0})
-
-    for p in people:
-        age = (pd.Timestamp.now() - pd.to_datetime(p.birth_date)).days / 365.25
-        counts[f"age_{calculate_age_group(age)}"] += 1
-
-        gender = (p.gender or "").lower()
-        if gender in ['f', 'w', 'female', 'weiblich']:
-            counts["gender_f"] += 1
-        elif gender in ['m', 'male', 'männlich']:
-            counts["gender_m"] += 1
-        elif gender in ['d', 'divers', 'diverse', 'non-binary']:
-            counts["gender_d"] += 1
-
-        occ = (p.occupation_type or "").strip()
-        if occ in OCCUPATION_GROUPS:
-            counts[f"occupation_{occ}"] += 1
-
-        edu = (p.education_level or "").strip()
-        if edu in EDUCATION_GROUPS:
-            counts[f"education_{edu}"] += 1
+        return {f"ratio_{k}": 0.0 for k in counts}
 
     return {f"ratio_{k}": v / total for k, v in counts.items()}
+
+
+def _statistics_groups(dimension: str, groups, labels: dict, counts: dict,
+                       total: int, config: dict, target_prefix=None) -> list:
+    """Eine Merkmalsauspraegung je Zeile: absolute Zahl, Anteil und Zielwert.
+
+    Ohne ``target_prefix`` (oder ohne hinterlegten Zielwert) bleiben die
+    Soll-Felder leer -- z. B. bei "unter 20" und "keine Angabe", fuer die es
+    keinen Zielwert der Durchmischung gibt.
+    """
+    entries = []
+    for group in groups:
+        count = counts.get(f"{dimension}_{group}", 0)
+        target = config.get(f"{target_prefix}_{group}") if target_prefix else None
+        entries.append({
+            "key": group,
+            "label": labels.get(group, group),
+            "count": count,
+            "ratio": count / total if total else 0.0,
+            "target_ratio": target,
+            "target_count": target * total if target is not None else None,
+        })
+    return entries
+
+
+def calculate_resident_statistics(db: Session) -> dict:
+    """Ist-Statistik der aktuellen Bewohner -- absolut und relativ.
+
+    Grundlage sind dieselben Personen, aus denen die IST-Verteilung der
+    Durchmischung entsteht (``resident_people``). Je Merkmal wird der Zielwert
+    aus der Bewertungskonfiguration mitgeliefert, damit Ist und Soll direkt
+    vergleichbar sind.
+    """
+    config = get_config_dict(db)
+
+    households = resident_households(db)
+    people = [p for h in households for p in h.people if not p.archived]
+    counts = count_people(people)
+
+    person_total = len(people)
+    household_total = len(households)
+
+    numbered = lambda labels: {k: f"{k} – {v}" for k, v in labels.items()}
+    unknown_label = {UNKNOWN_GROUP: UNKNOWN_LABEL}
+
+    categories = [
+        {
+            "key": "age",
+            "label": "Altersgruppen",
+            "basis": "person",
+            "total": person_total,
+            # Zielwerte gelten erst ab 20 Jahren: "unter 20" bleibt ohne Soll.
+            "groups": (
+                _statistics_groups("age", ["under_20"], AGE_LABELS, counts, person_total, config)
+                + _statistics_groups("age", AGE_GROUPS, AGE_LABELS, counts, person_total,
+                                     config, "target_age")
+                + _statistics_groups("age", [UNKNOWN_GROUP], unknown_label, counts,
+                                     person_total, config)
+            ),
+        },
+        {
+            "key": "gender",
+            "label": "Geschlecht",
+            "basis": "person",
+            "total": person_total,
+            "groups": (
+                _statistics_groups("gender", GENDER_GROUPS, GENDER_LABELS, counts,
+                                   person_total, config, "target_gender")
+                + _statistics_groups("gender", [UNKNOWN_GROUP], unknown_label, counts,
+                                     person_total, config)
+            ),
+        },
+        {
+            "key": "occupation",
+            "label": "Haupttätigkeit",
+            "basis": "person",
+            "total": person_total,
+            "groups": (
+                _statistics_groups("occupation", OCCUPATION_GROUPS, numbered(OCCUPATION_LABELS),
+                                   counts, person_total, config, "target_occupation")
+                + _statistics_groups("occupation", [UNKNOWN_GROUP], unknown_label, counts,
+                                     person_total, config)
+            ),
+        },
+        {
+            "key": "education",
+            "label": "Bildungsabschluss",
+            "basis": "person",
+            "total": person_total,
+            "groups": (
+                _statistics_groups("education", EDUCATION_GROUPS, numbered(EDUCATION_LABELS),
+                                   counts, person_total, config, "target_education")
+                + _statistics_groups("education", [UNKNOWN_GROUP], unknown_label, counts,
+                                     person_total, config)
+            ),
+        },
+    ]
+
+    # Haushaltsgroesse: Bezugsgroesse sind die Haushalte, nicht die Personen.
+    size_counts = {}
+    for h in households:
+        members = len([p for p in h.people if not p.archived])
+        size_counts[members] = size_counts.get(members, 0) + 1
+
+    categories.append({
+        "key": "household_size",
+        "label": "Haushaltsgröße",
+        "basis": "household",
+        "total": household_total,
+        "groups": [
+            {
+                "key": str(size),
+                "label": "1 Person" if size == 1 else f"{size} Personen",
+                "count": count,
+                "ratio": count / household_total if household_total else 0.0,
+                "target_ratio": None,
+                "target_count": None,
+            }
+            for size, count in sorted(size_counts.items())
+        ],
+    })
+
+    return {
+        "household_count": household_total,
+        "person_count": person_total,
+        "categories": categories,
+    }
 
 
 def run_scoring(db: Session):

@@ -321,6 +321,51 @@ def _deduplicate_hh(rows: list[dict]) -> list[dict]:
 # Matching
 # ---------------------------------------------------------------------------
 
+def person_name_key(first_name: Optional[str], last_name: Optional[str]) -> str:
+    return (first_name or "").strip().lower() + "|" + (last_name or "").strip().lower()
+
+
+def match_person_in(people, data: dict, loose: bool = True):
+    """Sucht zu einem Import-Datensatz die passende Person in ``people``.
+
+    Reihenfolge: Mitgliedsnummer, exakter Name, Nachname + Geburtsdatum.
+    ``loose`` erlaubt zusaetzlich den Vergleich ueber Rufname + Nachname
+    ("Jonathan Rye Matt" vs. "Jonathan Matt"); das ist innerhalb eines
+    Haushalts sinnvoll, ueber den gesamten Datenbestand hinweg dagegen zu
+    unscharf.
+    """
+    member_number = data.get("member_number")
+    if member_number:
+        for person in people:
+            if person.member_number and person.member_number == member_number:
+                return person
+
+    key = person_name_key(data.get("first_name"), data.get("last_name"))
+    if key != "|":
+        for person in people:
+            if person_name_key(person.first_name, person.last_name) == key:
+                return person
+
+    last = (data.get("last_name") or "").strip().lower()
+    if not last:
+        return None
+    birth = parse_date(data.get("birth_date"))
+    first_token = (data.get("first_name") or "").strip().split(" ")[0].lower()
+    for person in people:
+        if (person.last_name or "").strip().lower() != last:
+            continue
+        person_birth = (
+            person.birth_date.date() if isinstance(person.birth_date, datetime)
+            else person.birth_date
+        )
+        if birth and person_birth == birth:
+            return person
+        person_first = (person.first_name or "").strip().split(" ")[0].lower()
+        if loose and first_token and person_first == first_token:
+            return person
+    return None
+
+
 def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
     persons = hh_data.get("persons", [])
     all_households = db.query(models.Household).all()
@@ -528,6 +573,9 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
     _cleanup_sessions()
     parsed = parse_household_bogen(file_contents)
 
+    # Ohne vorher angelegte Haushalte (vCard) kann nichts zugeordnet werden.
+    households_present = db.query(models.Household).count() > 0
+
     previews = []
     for hh_data in parsed["households"]:
         match_result = match_household(hh_data, db)
@@ -579,6 +627,7 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
         skipped_not_submitted=parsed["skipped_not_submitted"],
         skipped_duplicates=parsed["skipped_duplicates"],
         privacy_warnings=[schemas.PrivacyWarning(**w) for w in parsed["privacy_warnings"]],
+        missing_base_data_warning=not households_present,
         households=previews,
     )
 
@@ -588,16 +637,21 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
 # ---------------------------------------------------------------------------
 
 def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> schemas.HHCommitResponse:
+    """Ergaenzt bestehende Haushalte um die Angaben aus dem Haushaltsbogen.
+
+    Neue Haushalte entstehen hier nicht mehr: der Haushaltsbestand kommt aus
+    dem vCard-Import (Wohnungszuordnung). Datensaetze ohne zugeordneten
+    Haushalt werden als ``skipped_no_match`` ausgewiesen.
+    """
     session = import_sessions.get(request.session_id)
     if not session:
         raise ValueError("Import-Session nicht gefunden oder abgelaufen")
 
     raw_map = {r["temp_id"]: r for r in session.raw_data}
 
-    imported = 0
     updated = 0
     skipped = 0
-    created_ids = []
+    skipped_no_match = 0
 
     for dec in request.decisions:
         if dec.action == "skip":
@@ -609,65 +663,26 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
             skipped += 1
             continue
 
-        if dec.action == "create":
-            hh = _create_household_from_raw(raw, db)
-            created_ids.append(hh.id)
-            imported += 1
+        existing = (
+            db.query(models.Household).get(dec.target_household_id)
+            if dec.target_household_id else None
+        )
+        if existing is None:
+            skipped_no_match += 1
+            continue
 
-        elif dec.action == "update" and dec.target_household_id:
-            existing = db.query(models.Household).get(dec.target_household_id)
-            if existing:
-                _update_household_from_raw(existing, raw, db)
-                updated += 1
-            else:
-                hh = _create_household_from_raw(raw, db)
-                created_ids.append(hh.id)
-                imported += 1
+        _update_household_from_raw(existing, raw, db)
+        updated += 1
 
     db.commit()
 
     del import_sessions[request.session_id]
 
     return schemas.HHCommitResponse(
-        imported=imported,
         updated=updated,
         skipped=skipped,
-        created_household_ids=created_ids,
+        skipped_no_match=skipped_no_match,
     )
-
-
-def _create_household_from_raw(raw: dict, db: Session) -> models.Household:
-    p1 = raw["persons"][0] if raw["persons"] else {}
-    name = f"{p1.get('first_name', '')} {p1.get('last_name', '')}".strip() or "Unbekannt"
-
-    hh = models.Household(
-        name=name,
-        wbs_status=raw.get("wbs_status"),
-        pets_count=raw.get("pets_count", 0),
-        pets_info=raw.get("pets_info"),
-        desired_apartment_size=raw.get("desired_apartment_size"),
-        desired_apartment_type=raw.get("desired_apartment_type"),
-        wheelchair_accessible=raw.get("wheelchair_accessible", False),
-        financial_status=raw.get("financial_status"),
-        import_timestamp=raw.get("timestamp"),
-        import_source="HH-Fragebogen",
-        household_member_count=raw.get("declared_member_count"),
-    )
-    db.add(hh)
-    db.flush()
-
-    for p_data in raw["persons"]:
-        dob = parse_date(p_data.get("birth_date"))
-        person = models.Person(
-            household_id=hh.id,
-            first_name=p_data.get("first_name", ""),
-            last_name=p_data.get("last_name", ""),
-            birth_date=datetime(dob.year, dob.month, dob.day) if dob else None,
-            member_number=p_data.get("member_number"),
-        )
-        db.add(person)
-
-    return hh
 
 
 def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
@@ -682,25 +697,22 @@ def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
     hh.import_source = "HH-Fragebogen"
     hh.household_member_count = raw.get("declared_member_count")
 
-    existing_persons = {
-        (p.first_name or "").lower() + "|" + (p.last_name or "").lower(): p
-        for p in hh.people
-    }
+    # Personen werden ueber Mitgliedsnummer/Name/Geburtsdatum wiedergefunden,
+    # damit Schreibweisen aus dem Fragebogen keine Dubletten zu den bereits
+    # per vCard angelegten Personen erzeugen.
+    known = list(hh.people)
 
     for p_data in raw["persons"]:
-        fn = (p_data.get("first_name") or "").lower()
-        ln = (p_data.get("last_name") or "").lower()
-        key = fn + "|" + ln
-
         dob = parse_date(p_data.get("birth_date"))
         dob_dt = datetime(dob.year, dob.month, dob.day) if dob else None
 
-        if key in existing_persons:
-            ep = existing_persons[key]
-            if p_data.get("member_number"):
+        ep = match_person_in(known, p_data)
+        if ep is not None:
+            if p_data.get("member_number") and not ep.member_number:
                 ep.member_number = p_data["member_number"]
-            if dob_dt:
+            if dob_dt and not ep.birth_date:
                 ep.birth_date = dob_dt
+            ep.updated_at = datetime.utcnow()
         else:
             person = models.Person(
                 household_id=hh.id,
@@ -708,8 +720,10 @@ def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
                 last_name=p_data.get("last_name", ""),
                 birth_date=dob_dt,
                 member_number=p_data.get("member_number"),
+                updated_at=datetime.utcnow(),
             )
             db.add(person)
+            known.append(person)
 
 
 # ---------------------------------------------------------------------------
@@ -859,7 +873,9 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
     ln = (ind_data.get("last_name") or "").strip().lower()
     dob_str = ind_data.get("birth_date")
 
-    all_persons = db.query(models.Person).filter(models.Person.household_id.isnot(None)).all()
+    # Der vCard-Import legt Personen auch ohne Haushalt an; sie muessen hier
+    # ebenfalls als Kandidaten auftauchen.
+    all_persons = db.query(models.Person).all()
 
     # Always compute fuzzy candidates so users can re-assign even exact matches
     import_name = f"{fn} {ln}".strip()
@@ -884,8 +900,8 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
             .filter(models.Person.member_number == member_nr)
             .first()
         )
-        if matched and matched.household_id:
-            hh = db.query(models.Household).get(matched.household_id)
+        if matched:
+            hh = db.query(models.Household).get(matched.household_id) if matched.household_id else None
             _ensure_person_candidate(candidates, matched, hh)
             return schemas.MatchResult(
                 type="exact_member_nr",
@@ -948,7 +964,8 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
     _cleanup_sessions()
     parsed = parse_individual_bogen(file_contents)
 
-    hh_imported = db.query(models.Household).filter(models.Household.import_source.isnot(None)).count() > 0
+    # Ohne vorher importierte Personen (vCard) kann nichts zugeordnet werden.
+    persons_present = db.query(models.Person).count() > 0
 
     previews = []
     for ind_data in parsed["individuals"]:
@@ -992,12 +1009,18 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
         skipped_not_submitted=parsed["skipped_not_submitted"],
         skipped_duplicates=parsed.get("skipped_duplicates", 0),
         privacy_warnings=[schemas.PrivacyWarning(**w) for w in parsed["privacy_warnings"]],
-        hh_import_warning=not hh_imported,
+        missing_base_data_warning=not persons_present,
         individuals=previews,
     )
 
 
 def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Session) -> schemas.IndividualCommitResponse:
+    """Ergaenzt die Angaben des Individualbogens bei vorhandenen Personen.
+
+    Neue Personen werden hier nicht angelegt: der Personenbestand kommt aus
+    dem vCard-Import. Datensaetze ohne zugeordnete Person werden als
+    ``skipped_no_match`` ausgewiesen.
+    """
     session = import_sessions.get(request.session_id)
     if not session:
         raise ValueError("Import-Session nicht gefunden oder abgelaufen")
@@ -1005,8 +1028,8 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
     raw_map = {r["temp_id"]: r for r in session.raw_data}
 
     updated_count = 0
-    created_count = 0
     skipped_count = 0
+    skipped_no_match = 0
 
     for dec in request.decisions:
         if dec.action == "skip":
@@ -1018,17 +1041,16 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
             skipped_count += 1
             continue
 
-        if dec.action == "update" and dec.target_person_id:
-            person = db.query(models.Person).get(dec.target_person_id)
-            if person:
-                _update_person_from_individual(person, raw)
-                updated_count += 1
-            else:
-                skipped_count += 1
+        person = (
+            db.query(models.Person).get(dec.target_person_id)
+            if dec.target_person_id else None
+        )
+        if person is None:
+            skipped_no_match += 1
+            continue
 
-        elif dec.action == "create":
-            person = _create_person_from_individual(raw, dec.target_household_id, db)
-            created_count += 1
+        _update_person_from_individual(person, raw)
+        updated_count += 1
 
     db.commit()
 
@@ -1036,8 +1058,8 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
 
     return schemas.IndividualCommitResponse(
         updated=updated_count,
-        created=created_count,
         skipped=skipped_count,
+        skipped_no_match=skipped_no_match,
     )
 
 
@@ -1057,22 +1079,4 @@ def _update_person_from_individual(person: models.Person, raw: dict):
         person.member_number = raw["member_number"]
     if raw.get("timestamp"):
         person.individual_import_timestamp = raw["timestamp"]
-
-
-def _create_person_from_individual(raw: dict, household_id: Optional[int], db: Session) -> models.Person:
-    dob = parse_date(raw.get("birth_date"))
-    person = models.Person(
-        household_id=household_id,
-        first_name=raw.get("first_name", ""),
-        last_name=raw.get("last_name", ""),
-        birth_date=datetime(dob.year, dob.month, dob.day) if dob else None,
-        member_number=raw.get("member_number"),
-        gender=raw.get("gender"),
-        occupation_type=raw.get("occupation"),
-        education_level=raw.get("education"),
-        cultural_background=raw.get("social_diversity"),
-        special_needs=(lambda v: None if v.lower() in ("nein", "", "keine") else v)(raw["life_situation"].strip()) if raw.get("life_situation") else None,
-        individual_import_timestamp=raw.get("timestamp"),
-    )
-    db.add(person)
-    return person
+    person.updated_at = datetime.utcnow()
