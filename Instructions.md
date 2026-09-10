@@ -39,7 +39,22 @@ Für jeden Haushalt wird ein Scoring berechnet, das die Vergabeentscheidung unte
 
 - Das **Ranking** (Rangvergabe) erfolgt **pro Wohnungskategorie** (Kombination aus Wohnungsgröße und Förderungsart), nicht über alle Haushalte hinweg.
 - Innerhalb jeder Kategorie werden die Haushalte nach ihrem Gesamt-Score absteigend sortiert und erhalten einen Rang (1, 2, 3, …).
-- Ein Haushalt kann in mehreren Kategorien erscheinen, wenn er sich auf Wohnungen verschiedener Kategorien beworben hat.
+- Ein Haushalt **bewirbt sich nicht auf einzelne Wohnungen**: er erscheint automatisch in jeder Kategorie, für die er in Frage kommt, und damit in der Regel in mehreren Kategorien.
+
+#### Wer kommt für eine Wohnung in Frage?
+
+Ein Haushalt kommt für eine Wohnung in Frage, wenn **alle** drei Bedingungen erfüllt sind:
+
+1. **Mindestbewohner**: Die Zahl der (nicht archivierten) Haushaltsmitglieder erreicht mindestens die `min_occupants` der Wohnung.
+2. **Zimmerzahl**: Die Wohnung hat **nicht weniger Zimmer als der Haushalt Mitglieder** (`size_rooms >= Mitgliederzahl`). Wohnungen ohne Zimmerangabe (Cluster, Ausbau, Atelier, Joker) unterliegen dieser Schranke nicht.
+3. **Förderbedingung**: Ein Haushalt darf jede Wohnung bewohnen, deren Förderstufe höchstens seiner eigenen entspricht:
+   - **WBS A** darf WBS A, WBS B und freifinanziert bewohnen,
+   - **WBS B** darf WBS B und freifinanziert bewohnen,
+   - **freifinanziert / ohne Angabe** darf nur freifinanziert bewohnen.
+
+Innerhalb einer Kategorie genügt es, wenn der Haushalt für **eine** der Wohnungen in Frage kommt; maßgeblich ist deshalb die niedrigste `min_occupants` der Kategorie.
+
+Implementiert in `services.is_eligible` / `services.build_ranking`; getestet mit `python tests/test_ranking.py`.
 
 ### Wohnungstypen
 
@@ -48,8 +63,8 @@ Für jeden Haushalt wird ein Scoring berechnet, das die Vergabeentscheidung unte
 - **Förderungsart**: „freifinanziert", „WBS A", „WBS B".
 - **Wohnungsart** (Mehrfachauswahl): „Standard Wohnungstypen", „Clusterwohnung", „Ausbauwohnung", „Atelierwohnung". Ein Haushalt kann sich auf mehrere Wohnungsarten gleichzeitig bewerben. Die Auswahl wird als Liste gespeichert (JSON-Array im Feld `desired_apartment_type`). „Gartencluster", „C-Riegel" und die Wohngemeinschaften (WPG) sind **keine** eigenen Wohnungsarten, sondern Clusterwohnungen. In den Wohnungsstammdaten kommt zusätzlich „Joker" vor; darauf bewerben sich Haushalte nicht.
 - Wohngemeinschaften (WG) werden **nicht** vergeben.
-- Haushalte bewerben sich auf **konkrete Wohnungen** und konkurrieren mit anderen Bewerbern desselben Typs.
-- **Gruppiertes Ranking**: Haushalte werden **nicht** über alle Bewerber hinweg gerankt, sondern **pro Wohnungskategorie** (Kombination aus Wohnungsgröße und Förderungsart). Beispiel: Alle Bewerber auf „3 Zimmer / WBS A" erhalten einen eigenen Rang innerhalb dieser Gruppe. Wohnungen ohne Zimmerangabe (Cluster, Ausbau, Atelier, Joker) bilden eine eigene Gruppe „ohne Zimmerangabe".
+- Haushalte bewerben sich **nicht** auf konkrete Wohnungen; sie werden automatisch in allen Kategorien geführt, für die sie in Frage kommen (siehe „Ranking").
+- **Gruppiertes Ranking**: Haushalte werden **nicht** über alle Haushalte hinweg gerankt, sondern **pro Wohnungskategorie** (Kombination aus Wohnungsgröße und Förderungsart). Beispiel: Alle Haushalte, die für „3 Zimmer / WBS A" in Frage kommen, erhalten einen eigenen Rang innerhalb dieser Gruppe. Wohnungen ohne Zimmerangabe (Cluster, Ausbau, Atelier, Joker) bilden eine eigene Gruppe „ohne Zimmerangabe".
 
 ### Wohnungsstammdaten
 
@@ -248,7 +263,7 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 | DELETE | `/apartments/{id}/assign` | Zuordnung lösen (Wohnung bleibt bestehen) | Auth |
 | GET | `/applications/` | Alle Bewerbungen | Auth |
 | POST | `/applications/` | Bewerbung anlegen (Haushalt → Wohnung) | Auth |
-| GET | `/ranking/` | Gruppiertes Ranking: Haushalte pro (Größe, Förderungsart), nach Score sortiert | Auth |
+| GET | `/ranking/` | Gruppiertes Ranking: alle geeigneten Haushalte pro (Größe, Förderungsart), nach Score sortiert | Auth |
 | PATCH | `/households/{id}/archive` | Haushalt archivieren/wiederherstellen (inkl. Personen) | Auth |
 | POST | `/people/` | Person eigenständig anlegen (ohne Haushalt) | Auth |
 | DELETE | `/people/{id}` | Person löschen (nur ohne Haushaltszuordnung; 409 wenn zugeordnet) | Auth |
@@ -284,13 +299,14 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 
 ### Frontend-Anforderungen
 
-- **Ranking-Tab**: Gruppierte Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart). Zeigt die nach Score sortierte Tabelle der Haushalte innerhalb der gewählten Kategorie.
+- **Ranking-Tab**: Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart). Beide Filter stehen **standardmäßig auf „Alle“** und schränken dann nicht ein: die Rangliste zeigt zunächst **alle nicht archivierten Haushalte**, nach Score sortiert — auch solche, die für keine Wohnungskategorie in Frage kommen. Wird ein Filter gesetzt, zeigt die Tabelle die Haushalte, die für die passenden Kategorien in Frage kommen (bei mehreren Kategorien über die Haushalts-id entdoppelt). Der **Rang wird immer für die aktuelle Auswahl neu vergeben** (1, 2, 3, …).
 - **Personen-Tab**: Tabelle aller Personen mit Suche, Sortierung und den Filtern „Nur ohne Haushalt" und „Archivierte anzeigen". Pro Zeile: Haushalt zuordnen (bei Personen ohne Haushalt), aus Haushalt entfernen (bei zugeordneten Personen), Archivieren/Wiederherstellen sowie Löschen (nur bei Personen ohne Haushalt). Über der Tabelle steht zusätzlich „Alle ohne Haushalt löschen (N)"; die Aktion wird mit Anzahl bestätigt und löscht — je nach Schalter „Archivierte anzeigen" — auch archivierte Personen ohne Haushalt.
 - **Haushaltsdetail-Dialog**: Zeigt Haushaltsdaten (einschließlich zugeordnete Wohnung, sofern vorhanden) und Personenkarten. Der Bewohnerstatus (`is_resident`) wird als Nur-Lese-Feld angezeigt und ergibt sich implizit aus der Wohnungszuordnung. Erlaubt „Person hinzufügen" (Auswahl aus Personen ohne Haushalt) und das Entfernen einzelner Personen aus dem Haushalt.
 - **Wohnungen-Tab**: Tabelle aller Wohnungen (Wohnungsnummer, Zimmer, Kennzeichen „klein", Wohnungsart, Förderungsart, qm mietwirksam, mind. Bewohner, bewohnt von) mit Suche über Wohnungsnummer, Wohnungsart und Haushalt, sortierbaren Spalten und den Filtern „Wohnungsart", „Förderungsart" und „Nur belegte". Pro Zeile: bearbeiten, Haushalt zuordnen bzw. Zuordnung lösen, Wohnung löschen. Über der Tabelle „Wohnung anlegen". Der zugeordnete Haushalt ist als Link in die Haushaltsdetailansicht ausgeführt. Im Bearbeiten-Dialog wird eine Zimmerzahl mit Nachkommastelle abgelehnt.
 - **Import-Tab**: Drei Upload-Bereiche (Haushaltsbogen, Individualbogen, vCard-Mitgliederliste). Jeder öffnet einen Assistenten mit den Schritten Analyse → Zuordnung → Zusammenfassung. Im vCard-Assistenten ist jeder Haushalt aufklappbar; dort sind alle Personen mit Rolle (Mitglied/Partner*in/Kind) und Herkunft (Kontakt/Notiz) sichtbar und einzeln abwählbar.
 - **Config-Tab**: Editierbare Karten für alle Gewichte und Zielwerte (nur für eingeloggte Admins sichtbar).
 - **Actions-Tab**: Buttons für „Score berechnen" und „Excel hochladen" (nur Admin).
+- **Tabellen**: Alle Datentabellen (Ranking, Haushalte, Personen, Wohnungen) zeigen standardmäßig **100 Zeilen pro Seite**; wählbar sind 10, 25, 50 und 100.
 - Login/Logout über AppBar.
 
 ---
@@ -300,7 +316,7 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 - Backend-Code in `backend/`, Frontend in `frontend/`, Tests in `tests/`.
 - Import-Logik: Fragebögen in `backend/import_service.py`, vCard in `backend/vcf_import_service.py` (nutzt Session-Store, Namensnormalisierung und Haushalts-Matching aus `import_service`).
 - Wohnungsstammdaten: `backend/apartment_seed_data.py` (generiert aus `imported_data/Wohnungen.xlsx`), angelegt über `services.seed_apartments`; die Zuordnung zum Haushalt erfolgt über `services.assign_household`.
-- Tests: `python tests/test_apartments.py` (Wohnungsstammdaten und Zuordnung), `python tests/test_vcf_import.py` (vCard-Import). Beide laufen ohne Server gegen eine In-Memory-Datenbank.
+- Tests: `python tests/test_apartments.py` (Wohnungsstammdaten und Zuordnung), `python tests/test_ranking.py` (Eignung und Rangliste), `python tests/test_vcf_import.py` (vCard-Import). Alle laufen ohne Server gegen eine In-Memory-Datenbank.
 - Pydantic V2: `from_attributes = True` statt `orm_mode`.
 - Relative Imports innerhalb des `backend`-Packages.
 - `backend/__init__.py` muss vorhanden sein.

@@ -250,7 +250,7 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
         disableRowSelectionOnClick
         initialState={{
           sorting: { sortModel: [{ field: 'last_name', sort: 'asc' }] },
-          pagination: { paginationModel: { pageSize: 25 } },
+          pagination: { paginationModel: { pageSize: 100 } },
         }}
         pageSizeOptions={[10, 25, 50, 100]}
         getRowClassName={(params) => params.row.archived ? 'archived-row' : ''}

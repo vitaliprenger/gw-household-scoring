@@ -580,48 +580,25 @@ def get_ranking(
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    categories = (
-        db.query(models.Apartment.size_rooms, models.Apartment.funding_type)
-        .distinct()
-        .order_by(models.Apartment.size_rooms, models.Apartment.funding_type)
-        .all()
-    )
-
-    result = []
-    for size_rooms, funding_type in categories:
-        households = (
-            db.query(models.Household)
-            .join(models.Application)
-            .join(models.Apartment)
-            .filter(
-                models.Apartment.size_rooms == size_rooms,
-                models.Apartment.funding_type == funding_type,
-                models.Household.archived == False,
-            )
-            .order_by(models.Household.total_score.desc())
-            .all()
+    """Rangliste je Wohnungskategorie; die Eignung berechnet ``services.build_ranking``."""
+    return [
+        schemas.RankingGroup(
+            size_rooms=group["size_rooms"],
+            funding_type=group["funding_type"],
+            households=[
+                schemas.RankedHousehold(
+                    rank=rank,
+                    id=household.id,
+                    name=household.name,
+                    member_count=members,
+                    engagement_score=household.engagement_score,
+                    total_score=household.total_score,
+                )
+                for rank, (household, members) in enumerate(group["households"], 1)
+            ],
         )
-
-        ranked = [
-            schemas.RankedHousehold(
-                rank=i,
-                id=h.id,
-                name=h.name,
-                member_count=len(h.people),
-                engagement_score=h.engagement_score,
-                total_score=h.total_score,
-                people=h.people,
-            )
-            for i, h in enumerate(households, 1)
-        ]
-
-        result.append(schemas.RankingGroup(
-            size_rooms=size_rooms,
-            funding_type=funding_type,
-            households=ranked,
-        ))
-
-    return result
+        for group in services.build_ranking(db)
+    ]
 
 @app.get("/scoring/config", response_model=List[schemas.ScoringConfig])
 def get_scoring_config(

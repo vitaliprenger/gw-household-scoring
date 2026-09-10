@@ -56,6 +56,8 @@ const CONFIG_LABELS: Record<string, string> = {
 };
 
 const SIZE_NONE = '__none__';
+/** Filterwert "Alle": der Filter schränkt die Rangliste nicht ein. */
+const FILTER_ALL = '__all__';
 
 const sizeKey = (value: number | null): string =>
   value === null || value === undefined ? SIZE_NONE : String(value);
@@ -68,8 +70,8 @@ function App() {
   const [households, setHouseholds] = useState<Household[]>([]);
   const [configs, setConfigs] = useState<ScoringConfig[]>([]);
   const [rankingGroups, setRankingGroups] = useState<RankingGroup[]>([]);
-  const [selectedSize, setSelectedSize] = useState<string>('');
-  const [selectedFunding, setSelectedFunding] = useState<string>('');
+  const [selectedSize, setSelectedSize] = useState<string>(FILTER_ALL);
+  const [selectedFunding, setSelectedFunding] = useState<string>(FILTER_ALL);
   const [message, setMessage] = useState<{text: string, type: 'success'|'error'} | null>(null);
 
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'));
@@ -94,10 +96,6 @@ function App() {
       try {
         const groups = await getRanking();
         setRankingGroups(groups);
-        if (groups.length > 0 && !selectedSize && !selectedFunding) {
-          setSelectedSize(sizeKey(groups[0].size_rooms));
-          setSelectedFunding(groups[0].funding_type);
-        }
       } catch (e) {
         console.log("Could not load ranking");
       }
@@ -257,9 +255,32 @@ function App() {
           const sizes = [...new Set(rankingGroups.map(g => g.size_rooms))]
             .sort((a, b) => (a ?? Infinity) - (b ?? Infinity));
           const fundingTypes = [...new Set(rankingGroups.map(g => g.funding_type))].sort();
-          const activeGroup = rankingGroups.find(
-            g => sizeKey(g.size_rooms) === selectedSize && g.funding_type === selectedFunding
+
+          // Ein Filter auf "Alle" schränkt nicht ein. Stehen beide Filter auf
+          // "Alle", zeigt die Rangliste jeden nicht archivierten Haushalt --
+          // auch solche, die für keine Wohnungskategorie in Frage kommen.
+          const unfiltered = selectedSize === FILTER_ALL && selectedFunding === FILTER_ALL;
+          const matchingGroups = rankingGroups.filter(
+            g => (selectedSize === FILTER_ALL || sizeKey(g.size_rooms) === selectedSize)
+              && (selectedFunding === FILTER_ALL || g.funding_type === selectedFunding)
           );
+          // Ein Haushalt kommt für mehrere Kategorien in Frage: über die id
+          // entdoppeln und den Rang für die aktuelle Auswahl neu vergeben.
+          const selectedRanked: RankedHousehold[] = unfiltered
+            ? households.filter(h => !h.archived).map(h => ({
+                rank: 0,
+                id: h.id,
+                name: h.name,
+                member_count: h.people.filter(p => !p.archived).length,
+                engagement_score: h.engagement_score,
+                total_score: h.total_score,
+              }))
+            : [...new Map(
+                matchingGroups.flatMap(g => g.households).map(h => [h.id, h])
+              ).values()];
+          const rankingRows: RankedHousehold[] = [...selectedRanked]
+            .sort((a, b) => b.total_score - a.total_score)
+            .map((h, index) => ({ ...h, rank: index + 1 }));
 
           const rankingColumns: GridColDef<RankedHousehold>[] = [
             { field: 'rank', headerName: 'Rang', width: 80, type: 'number' },
@@ -281,6 +302,7 @@ function App() {
                     label="Wohnungsgröße"
                     onChange={(e) => setSelectedSize(e.target.value)}
                   >
+                    <MenuItem value={FILTER_ALL}>Alle</MenuItem>
                     {sizes.map(s => (
                       <MenuItem key={sizeKey(s)} value={sizeKey(s)}>{sizeLabel(s)}</MenuItem>
                     ))}
@@ -293,6 +315,7 @@ function App() {
                     label="Förderungsart"
                     onChange={(e) => setSelectedFunding(e.target.value)}
                   >
+                    <MenuItem value={FILTER_ALL}>Alle</MenuItem>
                     {fundingTypes.map(f => (
                       <MenuItem key={f} value={f}>{f}</MenuItem>
                     ))}
@@ -300,16 +323,16 @@ function App() {
                 </FormControl>
               </Box>
 
-              {activeGroup ? (
+              {rankingRows.length > 0 ? (
                 <DataGrid
-                  rows={activeGroup.households}
+                  rows={rankingRows}
                   columns={rankingColumns}
                   autoHeight
                   density="compact"
                   disableRowSelectionOnClick
                   initialState={{
                     sorting: { sortModel: [{ field: 'rank', sort: 'asc' }] },
-                    pagination: { paginationModel: { pageSize: 25 } },
+                    pagination: { paginationModel: { pageSize: 100 } },
                   }}
                   pageSizeOptions={[10, 25, 50, 100]}
                   localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
@@ -317,9 +340,9 @@ function App() {
               ) : (
                 <Paper sx={{ p: 3, textAlign: 'center' }}>
                   <Typography color="textSecondary">
-                    {rankingGroups.length === 0
-                      ? 'Keine Bewerbungen vorhanden. Bitte erst Wohnungen anlegen und Haushalte zuordnen.'
-                      : 'Keine Ergebnisse für diese Kombination.'}
+                    {unfiltered
+                      ? 'Keine Haushalte vorhanden.'
+                      : 'Kein Haushalt kommt für diese Wohnungskategorie in Frage.'}
                   </Typography>
                 </Paper>
               )}
@@ -399,7 +422,7 @@ function App() {
                 onRowClick={(params) => setDetailHouseholdId(params.row.id)}
                 initialState={{
                   sorting: { sortModel: [{ field: 'total_score', sort: 'desc' }] },
-                  pagination: { paginationModel: { pageSize: 25 } },
+                  pagination: { paginationModel: { pageSize: 100 } },
                 }}
                 pageSizeOptions={[10, 25, 50, 100]}
                 getRowClassName={(params) => params.row.archived ? 'archived-row' : ''}

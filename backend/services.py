@@ -1,8 +1,9 @@
 import pandas as pd
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from . import models, apartment_seed_data
 from datetime import datetime, date
 import io
+import re
 
 def process_excel_upload(file_contents: bytes, db: Session):
     # Read Excel file
@@ -119,6 +120,120 @@ def assign_household(db: Session, apartment: models.Apartment, household_id: int
         household.apartment_unit = apartment.unit_number
     household.updated_at = datetime.utcnow()
     return True
+
+
+# --- Eignung Haushalt <-> Wohnung ---------------------------------------
+
+# Förderstufen: ein Haushalt darf jede Wohnung bewohnen, deren Stufe
+# höchstens seiner eigenen entspricht (A > B > freifinanziert).
+_FUNDING_ORDER = {None: 0, "B": 1, "A": 2}
+
+
+def wbs_level(value: str | None) -> str | None:
+    """Normalisiert Förderungsart bzw. WBS-Status auf ``"A"``, ``"B"`` oder ``None``.
+
+    Erkennt sowohl die Wohnungswerte (``"WBS A"``, ``"freifinanziert"``) als auch
+    die Haushaltswerte aus dem Import (``"WBS Einkommensgruppe A"``, ``"kein WBS"``).
+    ``None`` steht für „freifinanziert / ohne Angabe".
+    """
+    if not value:
+        return None
+    text = str(value).strip().upper()
+    if "WBS" not in text or "KEIN" in text:
+        return None
+    match = re.search(r"\b([AB])\b", text)
+    return match.group(1) if match else None
+
+
+def funding_matches(household_wbs: str | None, apartment_funding: str | None) -> bool:
+    """WBS A darf A/B/freifinanziert, WBS B darf B/freifinanziert, sonst nur freifinanziert."""
+    return (_FUNDING_ORDER[wbs_level(household_wbs)]
+            >= _FUNDING_ORDER[wbs_level(apartment_funding)])
+
+
+def member_count(household: models.Household) -> int:
+    """Anzahl der nicht archivierten Personen im Haushalt."""
+    return sum(1 for p in household.people if not p.archived)
+
+
+def is_eligible(
+    members: int,
+    household_wbs: str | None,
+    size_rooms: int | None,
+    min_occupants: int | None,
+    funding_type: str | None,
+) -> bool:
+    """Kommt ein Haushalt dieser Größe für eine solche Wohnung in Frage?
+
+    - Der Haushalt muss die Mindestanzahl an Bewohnern der Wohnung erfüllen.
+    - Die Wohnung darf nicht weniger Zimmer haben als der Haushalt Mitglieder.
+      Wohnungen ohne Zimmerangabe (Cluster, Ausbau, Atelier, Joker) unterliegen
+      dieser Schranke nicht.
+    - Die Förderbedingung muss erfüllt sein (siehe ``funding_matches``).
+    """
+    if members < (min_occupants or 0):
+        return False
+    if size_rooms is not None and size_rooms < members:
+        return False
+    return funding_matches(household_wbs, funding_type)
+
+
+def apartment_categories(db: Session) -> dict[tuple[int | None, str], int]:
+    """Alle Wohnungskategorien (Zimmerzahl, Förderungsart) mit ihrer
+    niedrigsten Mindestbewohnerzahl."""
+    categories: dict[tuple[int | None, str], int] = {}
+    for size_rooms, funding_type, min_occupants in db.query(
+        models.Apartment.size_rooms,
+        models.Apartment.funding_type,
+        models.Apartment.min_occupants,
+    ).all():
+        key = (size_rooms, funding_type)
+        required = min_occupants or 0
+        if key not in categories or required < categories[key]:
+            categories[key] = required
+    return categories
+
+
+def build_ranking(db: Session) -> list[dict]:
+    """Rangliste je Wohnungskategorie (Zimmerzahl x Förderungsart).
+
+    Haushalte bewerben sich nicht auf einzelne Wohnungen: jeder nicht
+    archivierte Haushalt erscheint automatisch in jeder Kategorie, für die er
+    in Frage kommt (siehe ``is_eligible``). Innerhalb einer Kategorie genügt
+    es, wenn er für **eine** der Wohnungen in Frage kommt — deshalb zählt die
+    niedrigste Mindestbewohnerzahl der Kategorie.
+
+    Liefert je Kategorie ``size_rooms``, ``funding_type`` und die nach Score
+    absteigend sortierten Paare ``(Haushalt, Mitgliederzahl)``.
+    """
+    categories = apartment_categories(db)
+
+    households = (
+        db.query(models.Household)
+        .options(selectinload(models.Household.people))
+        .filter(models.Household.archived == False)
+        .order_by(models.Household.total_score.desc())
+        .all()
+    )
+    # Mitgliederzahl einmal vorberechnen statt je Kategorie
+    scored = [(h, member_count(h)) for h in households]
+
+    groups = []
+    for (size_rooms, funding_type), min_occupants in sorted(
+        categories.items(),
+        key=lambda item: (item[0][0] is None, item[0][0] or 0, item[0][1]),
+    ):
+        groups.append({
+            "size_rooms": size_rooms,
+            "funding_type": funding_type,
+            "households": [
+                (household, members)
+                for household, members in scored
+                if is_eligible(members, household.wbs_status,
+                               size_rooms, min_occupants, funding_type)
+            ],
+        })
+    return groups
 
 
 def _d(y: int, m: int, d: int) -> datetime:
