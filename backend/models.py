@@ -79,7 +79,7 @@ class Apartment(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     unit_number = Column(String, unique=True, index=True)  # z. B. "W.002", "P.108.1"
-    size_rooms = Column(Integer, nullable=True)  # 1 bis 5; None bei Sondertypen
+    size_rooms = Column(Integer, nullable=True)  # ganze Zahl, bei jeder Wohnungsart moeglich; None = ohne Zimmerangabe
     funding_type = Column(String)  # "freifinanziert", "WBS A", "WBS B"
 
     # Wohnungsdaten (Stammdaten, im Frontend editierbar)

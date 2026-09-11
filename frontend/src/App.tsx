@@ -97,7 +97,7 @@ function App() {
   const loadData = async () => {
     try {
       const hh = await getHouseholds(showArchivedHH);
-      setHouseholds(hh.sort((a, b) => b.total_score - a.total_score));
+      setHouseholds(hh.sort((a, b) => a.name.localeCompare(b.name, 'de')));
 
       try {
         const groups = await getRanking();
@@ -415,11 +415,6 @@ function App() {
               field: 'updated_at', headerName: 'Letzte Bearbeitung', width: 160,
               valueFormatter: (value: string | undefined) => formatDateTime(value),
             },
-            {
-              field: 'total_score', headerName: 'Grundpunktzahl', width: 140, type: 'number',
-              description: 'Ohne Wohnraumausnutzung — die kommt je Wohnungsgröße in der Rangliste hinzu.',
-              renderCell: (params: GridRenderCellParams<Household>) => <strong>{params.value?.toFixed(2)}</strong>,
-            },
           ];
 
           let visibleHouseholds = households;
@@ -490,7 +485,7 @@ function App() {
                 disableRowSelectionOnClick
                 onRowClick={(params) => setDetailHouseholdId(params.row.id)}
                 initialState={{
-                  sorting: { sortModel: [{ field: 'total_score', sort: 'desc' }] },
+                  sorting: { sortModel: [{ field: 'name', sort: 'asc' }] },
                   pagination: { paginationModel: { pageSize: 100 } },
                 }}
                 pageSizeOptions={[10, 25, 50, 100]}

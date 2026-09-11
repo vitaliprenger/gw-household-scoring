@@ -31,6 +31,7 @@ from .import_service import (
     import_sessions,
     match_household,
     match_person_in,
+    find_person_by_member_number,
     normalize_member_number,
     normalize_name,
     parse_date,
@@ -844,11 +845,14 @@ def compute_vcf_changes(hh_data: dict, existing: models.Household) -> Optional[s
     import_keys = {
         _name_key(p["first_name"], p["last_name"]) for p in hh_data.get("persons", [])
     }
-    import_numbers = {p["member_number"] for p in hh_data.get("persons", []) if p["member_number"]}
+    import_numbers = {
+        normalize_member_number(p["member_number"])
+        for p in hh_data.get("persons", []) if p["member_number"]
+    }
     for person in existing.people:
         if person.archived:
             continue
-        if person.member_number and person.member_number in import_numbers:
+        if person.member_number and normalize_member_number(person.member_number) in import_numbers:
             continue
         if _name_key(person.first_name, person.last_name) in import_keys:
             continue
@@ -1015,11 +1019,9 @@ class PersonIndex:
         Treffer wuerde zwei verschiedene Menschen verschmelzen. Deshalb zaehlt
         hier nur die Mitgliedsnummer oder ein Name, den genau eine Person traegt.
         """
-        member_number = data.get("member_number")
-        if member_number:
-            for person in self.people:
-                if person.member_number == member_number:
-                    return person
+        found = find_person_by_member_number(self.people, data.get("member_number"))
+        if found is not None:
+            return found
 
         birth = parse_date(data.get("birth_date"))
         key = _name_key(data.get("first_name"), data.get("last_name"))

@@ -34,7 +34,7 @@ flowchart LR
     Database --> SQLite[(housing.db)]
 ```
 
-Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrationen ausgeführt. Beim FastAPI-Startup folgen `scoring.initialize_config`, `services.seed_apartments` und `services.seed_example_data`. Im Browser hängt der Axios-Interceptor aus `frontend/src/api.ts` den Token aus `localStorage` an alle API-Aufrufe.
+Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrationen ausgeführt. Beim FastAPI-Startup folgen `scoring.initialize_config` und `services.seed_apartments`. Im Browser hängt der Axios-Interceptor aus `frontend/src/api.ts` den Token aus `localStorage` an alle API-Aufrufe.
 
 ## Dateien auf Projektebene
 
@@ -54,8 +54,8 @@ Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrati
 | `backend/auth.py` | Ein globaler zufälliger Session-Token; Passwortprüfung gegen `APP_PASSWORD`; FastAPI-Dependency `require_auth`. | `main.login`; alle geschützten Routen über `Depends(auth.require_auth)`. | `OAuth2PasswordBearer`, `secrets.compare_digest`. |
 | `backend/models.py` | SQLAlchemy-ORM für `Household`, `Person`, `Apartment`, `Application`, `ScoringConfig` samt Beziehungen. | `main.py`, `services.py`, `scoring.py`, beide Importservices und DB-nahe Tests. | `database.Base`, SQLAlchemy-Spalten und Beziehungen. |
 | `backend/schemas.py` | Pydantic-Verträge für CRUD, Ranking sowie Analyse-/Commit-Nachrichten der drei Importe. | `main.py`, `import_service.py`, `vcf_import_service.py`; gespiegelt durch `frontend/src/types.ts`. | Pydantic. |
-| `backend/apartment_seed_data.py` | Statische Stammdaten für 136 Wohnungen sowie deren Feldreihenfolge. | `services.seed_apartments`, `tests/test_apartments.py`. | Keine weitere Projektlogik. |
-| `backend/services.py` | Einfacher alter Excel-Direktimport, Wohnungs-Seed, Wohnungs-/Haushaltszuordnung und Beispieldaten. | `main.py`; `tests/test_apartments.py`. | Pandas, ORM-Modelle, `apartment_seed_data`. |
+| `backend/apartment_seed_data.py` | Statische Stammdaten für 131 Wohnungen sowie deren Feldreihenfolge. | `services.seed_apartments`, `tests/test_apartments.py`. | Keine weitere Projektlogik. |
+| `backend/services.py` | Einfacher alter Excel-Direktimport, Wohnungs-Seed, Wohnungs-/Haushaltszuordnung. | `main.py`; `tests/test_apartments.py`. | Pandas, ORM-Modelle, `apartment_seed_data`. |
 | `backend/scoring.py` | Standardgewichte/-ziele, Bewohnerstatistik, Teil-Scores und Persistierung des Gesamt-Scores. | Startup und Scoring-/Config-Routen in `main.py`. | ORM-Modelle und Pandas-Datumsrechnung. |
 | `backend/import_service.py` | In-Memory-Import-Sessions; Parsen, Deduplizieren, Matching, Vorschau und Commit für Haushalts- und Individualbogen. Stellt gemeinsame Namens-/Datums-/Matching-Helfer für vCard bereit. | Fragebogenrouten in `main.py`; `vcf_import_service.py`. | Pandas, ORM-Modelle, Pydantic-Schemas. |
 | `backend/vcf_import_service.py` | vCard-Decoding/Parsing, NOTE-Auswertung, Haushaltsbildung, Vorschau, Matching und Commit. Erster Schritt der Importkette: legt Personen an, Haushalte nur bei Wohnungszuordnung. | vCard-Routen in `main.py`; `tests/test_vcf_import.py`, `tests/test_import_order.py`. | Gemeinsame Helfer (u. a. `match_person_in`) und Session-Store aus `import_service.py`, ORM-Modelle, Schemas. |
@@ -70,9 +70,8 @@ Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrati
 2. `main.py` ruft bei Modulimport `models.Base.metadata.create_all(database.engine)` auf.
 3. `main.py` untersucht bestehende Tabellen und führt fehlende Spalten sowie Datenmigrationen per SQL aus.
 4. FastAPI ruft `startup_event` auf.
-5. `startup_event` öffnet `database.SessionLocal`, ruft `scoring.initialize_config`, `services.seed_apartments` und `services.seed_example_data` auf und schließt die Session.
+5. `startup_event` öffnet `database.SessionLocal`, ruft `scoring.initialize_config` und `services.seed_apartments` auf und schließt die Session.
 6. `seed_apartments` liest `apartment_seed_data.FIELDS/APARTMENTS` und legt nur noch nicht vorhandene Wohnungsnummern an.
-7. `seed_example_data` beendet sich bei einem vorhandenen Haushalt; sonst legt es Haushalte/Personen an, ruft erneut den idempotenten Wohnungs-Seed und für Bewohner `assign_household` auf und erzeugt Bewerbungen.
 
 `get_db` wird von FastAPI für jede DB-Route als Dependency aufgerufen und liefert eine Session. `auth.require_auth` wird ebenfalls als Dependency jeder Route außer `/token` aufgerufen; dieses wiederum lässt `OAuth2PasswordBearer` den Bearer-Token lesen.
 
@@ -140,7 +139,7 @@ Beide Fragebogenimporte **ergänzen ausschließlich** vorhandene Daten; angelegt
 
 `analyze_individual_bogen` folgt demselben Muster über `parse_individual_bogen`, `_deduplicate_individual` und `match_individual_to_person`; letzteres berücksichtigt auch Personen ohne Haushalt. `commit_individual_bogen` ruft für jede Entscheidung mit Zielperson `_update_person_from_individual` auf.
 
-`match_household` und `match_individual_to_person` prüfen zuerst Mitgliedsnummer, dann Name plus Geburtsdatum und zuletzt `SequenceMatcher`-Kandidaten. `match_person_in` ist der gemeinsame Personenabgleich innerhalb einer Kandidatenliste (Mitgliedsnummer → Name → Nachname + Geburtsdatum) und wird vom Haushaltsbogen und vom vCard-Import genutzt. `_cleanup_sessions` wird vor jeder Analyse ausgeführt. Commit löscht die verwendete Session; abgebrochene Sessions bleiben bis zu einer späteren Analyse oder bis zum expliziten DELETE-Endpunkt im Speicher.
+`match_household` und `match_individual_to_person` prüfen zuerst Mitgliedsnummer, dann Name plus Geburtsdatum und zuletzt `SequenceMatcher`-Kandidaten. `match_person_in` ist der gemeinsame Personenabgleich innerhalb einer Kandidatenliste (Mitgliedsnummer → Name → Nachname + Geburtsdatum) und wird vom Haushaltsbogen und vom vCard-Import genutzt. Mitgliedsnummern werden von `normalize_member_number` dreistellig mit führenden Nullen kanonisiert und über `same_member_number` / `find_person_by_member_number` verglichen, sodass `3` und `003` übereinstimmen. `_cleanup_sessions` wird vor jeder Analyse ausgeführt. Commit löscht die verwendete Session; abgebrochene Sessions bleiben bis zu einer späteren Analyse oder bis zum expliziten DELETE-Endpunkt im Speicher.
 
 ### vCard-Import
 
@@ -232,9 +231,10 @@ Tatsächliche direkte Laufzeitnutzung im Quellcode: React/ReactDOM, MUI inklusiv
 
 | Modul | Zweck | Ruft auf |
 |---|---|---|
+| `tests/example_data.py` | Beispieldaten (Bewohner, Bewerber, Bewerbungen) ausschließlich für die Tests; früher Teil von `backend/services.py`. | `services.seed_apartments`, `services.assign_household`; genutzt von `tests/test_apartments.py` und `tests/test_ranking.py`. |
 | `tests/generate_data.py` | Eigenständig gestarteter Generator für den alten Excel-Direktimport. | Pandas schreibt `tests/test_data.xlsx`. |
 | `tests/test_flow.py` | Eigenständig gestarteter HTTP-Integrationstest gegen einen bereits laufenden Server. | `/token`, alten Haushaltsupload, Scoring und Haushaltsliste. |
-| `tests/test_apartments.py` | Eigenständig gestartete In-Memory-Prüfungen für 136 Stammdaten, Seed-Idempotenz, Zuordnung und Beispieldaten. | `models.Base`, `services.seed_apartments`, `services.assign_household`, `services.seed_example_data`. |
+| `tests/test_apartments.py` | Eigenständig gestartete In-Memory-Prüfungen für 131 Stammdaten, Seed-Idempotenz, Zuordnung und Beispieldaten. | `models.Base`, `services.seed_apartments`, `services.assign_household`, `example_data.seed_example_data`. |
 | `tests/test_ranking.py` | Eigenständig gestartete In-Memory-Prüfungen für Eignung Haushalt/Wohnung und die gruppierte Rangliste. | `models.Base`, `services.is_eligible`, `services.build_ranking`, `scoring.calculate_occupancy_score`. |
 | `tests/test_statistics.py` | Eigenständig gestartete In-Memory-Prüfungen der Ist-Statistik: Bezugsmenge, fehlende Angaben, Summen, Zielwerte, Haushaltsgrößen. | `models.Base`, `scoring.calculate_resident_statistics`, `scoring.calculate_resident_stats`. |
 | `tests/test_vcf_import.py` | Eigenständig gestartete Parser-/Haushaltsbildungsprüfungen ohne DB. | Öffentliche Parser- und NOTE-Helfer aus `vcf_import_service.py`. |

@@ -266,7 +266,7 @@ def calculate_occupancy_subscore(members: int, size_rooms: int | None) -> float:
     Sonst gibt es 0 Punkte -- ein Haushalt mit 3 Mitgliedern erhaelt fuer eine
     4-Zimmer-Wohnung also nichts, fuer eine 3-Zimmer-Wohnung die volle Punktzahl.
 
-    Wohnungen ohne Zimmerangabe (Cluster, Ausbau, Atelier, Joker) kennen keine
+    Wohnungen ohne Zimmerangabe (gleich welcher Wohnungsart) kennen keine
     Zimmerschranke; dort ist das Kriterium mit der Mindestbelegung erfuellt, die
     die Eignungspruefung (``services.is_eligible``) bereits sicherstellt.
     """
