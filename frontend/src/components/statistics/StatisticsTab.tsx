@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Card, CardContent, Table, TableBody, TableCell,
-  TableHead, TableRow, ToggleButton, ToggleButtonGroup, Grid, Alert,
+  TableHead, TableRow, ToggleButton, ToggleButtonGroup, Grid, Alert, Button,
 } from '@mui/material';
-import { getResidentStatistics } from '../../api';
-import { ResidentStatistics, StatisticsCategory, StatisticsGroup } from '../../types';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
+import { getResidentStatistics, getResidentMissingData } from '../../api';
+import {
+  ResidentStatistics, StatisticsCategory, StatisticsGroup, StatisticsDimension, PersonMissingData,
+} from '../../types';
 import { zebraTableSx, NO_ZEBRA_ROW_CLASS } from '../common/tableStyles';
+import MissingDataDialog from './MissingDataDialog';
 
 /** Darstellungsform der Ist-Statistik: absolute Zahlen oder Anteile. */
 type Mode = 'absolute' | 'relative';
@@ -25,7 +29,12 @@ const withSign = (value: number, format: (v: number) => string): string =>
 const basisLabel = (category: StatisticsCategory): string =>
   category.basis === 'household' ? 'Haushalte' : 'Personen';
 
-function CategoryTable({ category, mode }: { category: StatisticsCategory; mode: Mode }) {
+function CategoryTable({ category, mode, onReview }: {
+  category: StatisticsCategory;
+  mode: Mode;
+  /** Öffnet die Prüfliste der Personen ohne Angabe zu diesem Merkmal. */
+  onReview: () => void;
+}) {
   const hasTargets = category.groups.some(g => g.target_ratio !== null && g.target_ratio !== undefined);
   const absolute = mode === 'absolute';
 
@@ -48,7 +57,8 @@ function CategoryTable({ category, mode }: { category: StatisticsCategory; mode:
     <Paper sx={{ p: 2, height: '100%' }}>
       <Typography variant="h6" sx={{ mb: 0.5 }}>{category.label}</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-        {formatCount(category.total)} {basisLabel(category)} als Bezugsgröße
+        {formatCount(category.total)} {basisLabel(category)}
+        {category.basis === 'person' ? ' mit Angabe' : ''} als Bezugsgröße
       </Typography>
       <Table size="small" sx={zebraTableSx}>
         <TableHead>
@@ -94,20 +104,49 @@ function CategoryTable({ category, mode }: { category: StatisticsCategory; mode:
           </TableRow>
         </TableBody>
       </Table>
+      {category.excluded_groups.filter(g => g.count > 0).map(g => (
+        <Typography key={g.key} variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+          {formatCount(g.count)} {g.count === 1 ? 'Person' : 'Personen'} {g.label} – nicht berücksichtigt
+        </Typography>
+      ))}
+      {category.unknown_count > 0 && (
+        <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            {formatCount(category.unknown_count)} {category.unknown_count === 1 ? 'Person' : 'Personen'} ohne
+            Angabe – nicht berücksichtigt
+          </Typography>
+          <Button size="small" startIcon={<FactCheckIcon />} onClick={onReview}>Prüfen</Button>
+        </Box>
+      )}
     </Paper>
   );
 }
 
-export default function StatisticsTab() {
+interface StatisticsTabProps {
+  /** Öffnet den Haushaltsdetail-Dialog, um fehlende Angaben zu korrigieren. */
+  onShowHousehold: (householdId: number) => void;
+  /** Ändert sich nach Bearbeitungen im Haushaltsdetail-Dialog und löst ein Neuladen aus. */
+  refreshKey: number;
+}
+
+export default function StatisticsTab({ onShowHousehold, refreshKey }: StatisticsTabProps) {
   const [stats, setStats] = useState<ResidentStatistics | null>(null);
+  const [missing, setMissing] = useState<PersonMissingData[]>([]);
   const [mode, setMode] = useState<Mode>('absolute');
   const [error, setError] = useState(false);
+  /** Offene Prüfliste: ein Merkmal, alle Merkmale (`null`) oder geschlossen (`undefined`). */
+  const [review, setReview] = useState<StatisticsDimension | null | undefined>(undefined);
 
-  useEffect(() => { loadStatistics(); }, []);
+  useEffect(() => { loadStatistics(); }, [refreshKey]);
 
   async function loadStatistics() {
     try {
-      setStats(await getResidentStatistics());
+      const [statistics, missingData] = await Promise.all([
+        getResidentStatistics(),
+        getResidentMissingData(),
+      ]);
+      setStats(statistics);
+      setMissing(missingData);
       setError(false);
     } catch (e) {
       console.error('Failed to load resident statistics', e);
@@ -127,7 +166,9 @@ export default function StatisticsTab() {
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Ist-Verteilung der aktuellen Bewohner — Grundlage sind alle nicht archivierten Personen
         in Haushalten, die einer Wohnung zugeordnet sind. Dieselben Zahlen bestimmen als
-        IST-Verteilung die Durchmischungspunkte der Bewerber-Haushalte.
+        IST-Verteilung die Durchmischungspunkte der Bewerber-Haushalte. Personen ohne Angabe zu
+        einem Merkmal bleiben bei diesem Merkmal außen vor; über „Prüfen“ lassen sie sich einzeln
+        kontrollieren. Die Altersgruppen beziehen sich wie ihre Zielwerte auf Personen ab 20 Jahren.
       </Typography>
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -144,6 +185,25 @@ export default function StatisticsTab() {
             <CardContent>
               <Typography color="text.secondary" gutterBottom>Personen</Typography>
               <Typography variant="h4">{formatCount(stats.person_count)}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary" gutterBottom>Personen mit fehlenden Angaben</Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                <Typography variant="h4">{formatCount(stats.incomplete_person_count)}</Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<FactCheckIcon />}
+                  disabled={stats.incomplete_person_count === 0}
+                  onClick={() => setReview(null)}
+                >
+                  Prüfen
+                </Button>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
@@ -169,10 +229,22 @@ export default function StatisticsTab() {
       <Grid container spacing={2} alignItems="stretch">
         {stats.categories.map(category => (
           <Grid size={{ xs: 12, md: 6 }} key={category.key}>
-            <CategoryTable category={category} mode={mode} />
+            <CategoryTable
+              category={category}
+              mode={mode}
+              onReview={() => setReview(category.key as StatisticsDimension)}
+            />
           </Grid>
         ))}
       </Grid>
+
+      <MissingDataDialog
+        open={review !== undefined}
+        dimension={review ?? null}
+        people={missing}
+        onClose={() => setReview(undefined)}
+        onShowHousehold={onShowHousehold}
+      />
     </Box>
   );
 }

@@ -311,12 +311,52 @@ export interface StatisticsCategory {
     label: string;
     /** Bezugsgröße der Anteile: Personen oder Haushalte. */
     basis: 'person' | 'household';
+    /** Bezugsgröße — nur Datensätze mit Angabe. */
     total: number;
+    /** Datensätze ohne Angabe: ignoriert, weder Ausprägung noch Bezugsgröße. */
+    unknown_count: number;
+    /** Ausprägungen außerhalb der Bezugsgröße, nur nachrichtlich (z. B. „unter 20"). */
+    excluded_groups: StatisticsExcludedGroup[];
     groups: StatisticsGroup[];
+}
+
+export interface StatisticsExcludedGroup {
+    key: string;
+    label: string;
+    count: number;
 }
 
 export interface ResidentStatistics {
     household_count: number;
     person_count: number;
+    /** Personen mit mindestens einer fehlenden Angabe. */
+    incomplete_person_count: number;
     categories: StatisticsCategory[];
+}
+
+/** Personenbezogene Merkmale der Ist-Statistik. */
+export type StatisticsDimension = 'age' | 'gender' | 'occupation' | 'education';
+
+export interface MissingValue {
+    dimension: StatisticsDimension;
+    /** empty = Feld leer, category_0 = Kategorie 0 (bewusst keine Zuordnung), unrecognized = Wert nicht erkannt. */
+    reason: 'empty' | 'category_0' | 'unrecognized';
+    /** Gespeicherter Wert, sofern vorhanden. */
+    raw_value?: string | null;
+    /** Nicht erkannter Wert oder leer trotz Individualbogen-Import. */
+    suspected_import_error: boolean;
+}
+
+/** Bewohner-Person mit fehlenden Angaben — Eintrag der Prüfliste. */
+export interface PersonMissingData {
+    person_id: number;
+    first_name?: string | null;
+    last_name?: string | null;
+    member_number?: string | null;
+    household_id: number;
+    household_name?: string | null;
+    apartment_unit?: string | null;
+    age?: number | null;
+    individual_import_timestamp?: string | null;
+    missing: MissingValue[];
 }

@@ -186,17 +186,46 @@ class StatisticsGroup(BaseModel):
     target_ratio: Optional[float] = None    # Zielwert als Anteil, falls konfiguriert
     target_count: Optional[float] = None    # Zielwert absolut (target_ratio x total)
 
+class StatisticsExcludedGroup(BaseModel):
+    """Auspraegung ausserhalb der Bezugsgroesse, nur nachrichtlich (z. B. "unter 20")."""
+    key: str
+    label: str
+    count: int
+
 class StatisticsCategory(BaseModel):
     key: str
     label: str
     basis: str                              # "person" oder "household"
-    total: int                              # Bezugsgroesse der Anteile
+    total: int                              # Bezugsgroesse der Anteile: nur Datensaetze mit Angabe
+    unknown_count: int = 0                  # ohne Angabe -- ignoriert, weder Gruppe noch Bezugsgroesse
+    excluded_groups: List[StatisticsExcludedGroup] = []  # Angabe, aber ausserhalb der Bezugsgroesse
     groups: List[StatisticsGroup] = []
 
 class ResidentStatistics(BaseModel):
     household_count: int
     person_count: int
+    incomplete_person_count: int = 0        # Personen mit mindestens einer fehlenden Angabe
     categories: List[StatisticsCategory] = []
+
+class MissingValue(BaseModel):
+    """Ein Merkmal, bei dem eine Person als "keine Angabe" gilt."""
+    dimension: str                          # "age", "gender", "occupation", "education"
+    reason: str                             # "empty", "category_0", "unrecognized"
+    raw_value: Optional[str] = None         # gespeicherter Wert, sofern vorhanden
+    suspected_import_error: bool = False    # nicht erkannter Wert oder leer trotz Individualbogen
+
+class PersonMissingData(BaseModel):
+    """Bewohner-Person mit fehlenden Angaben -- Eintrag der Pruefliste."""
+    person_id: int
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    member_number: Optional[str] = None
+    household_id: int
+    household_name: Optional[str] = None
+    apartment_unit: Optional[str] = None
+    age: Optional[int] = None
+    individual_import_timestamp: Optional[datetime] = None
+    missing: List[MissingValue] = []
 
 # --- Import Schemas ---
 class ImportPersonPreview(BaseModel):

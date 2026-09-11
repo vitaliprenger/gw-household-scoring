@@ -625,6 +625,18 @@ def get_resident_statistics(
     """
     return scoring.calculate_resident_statistics(db)
 
+@app.get("/statistics/residents/missing", response_model=List[schemas.PersonMissingData])
+def get_resident_missing_data(
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Bewohner-Personen ohne Angabe zu mindestens einem Merkmal -- zur Kontrolle der Importe.
+
+    Das sind genau die Datensaetze, die die Ist-Statistik beim jeweiligen
+    Merkmal ignoriert; je Merkmal mit Grund und gespeichertem Rohwert.
+    """
+    return scoring.resident_people_missing_data(db)
+
 @app.get("/scoring/config", response_model=List[schemas.ScoringConfig])
 def get_scoring_config(
     db: Session = Depends(get_db),

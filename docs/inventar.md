@@ -103,6 +103,7 @@ Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrati
 | `POST /upload/households/` | `main.upload_households` | `api.uploadHouseholds`; `tests/test_flow.py` | `services.process_excel_upload` |
 | `POST /scoring/calculate` | `main.calculate_scores` | `api.calculateScores`; `tests/test_flow.py` | `scoring.run_scoring` |
 | `GET /statistics/residents` | `main.get_resident_statistics` | `api.getResidentStatistics` | `scoring.calculate_resident_statistics` |
+| `GET /statistics/residents/missing` | `main.get_resident_missing_data` | `api.getResidentMissingData` | `scoring.resident_people_missing_data` |
 | `GET /scoring/config` | `main.get_scoring_config` | `api.getScoringConfig` | ORM-Abfrage |
 | `PUT /scoring/config` | `main.update_scoring_config` | `api.updateScoringConfig` | Aktualisiert vorhandene Config-Zeilen |
 | `POST /import/household-bogen/analyze` | `main.analyze_hh_bogen` | `api.analyzeHHBogen` | `import_service.analyze_household_bogen` |
@@ -178,7 +179,8 @@ Beide Fragebogenimporte **ergänzen ausschließlich** vorhandene Daten; angelegt
 | `components/apartments/ApartmentsTab.tsx` | Wohnungsliste mit Suche, Filtern, Sortierung, CRUD und Belegungszuordnung. | `App.tsx`. | `getApartments`, `unassignApartment`, `deleteApartment`; rendert `ApartmentEditDialog`, `AssignApartmentDialog`, `ConfirmDialog`; meldet Änderungen an `App`. |
 | `components/apartments/ApartmentEditDialog.tsx` | Formular zum Anlegen/Bearbeiten einer Wohnung mit Ganzzahlprüfung für Zimmer. | `ApartmentsTab`. | `createApartment` oder `updateApartment`. |
 | `components/apartments/AssignApartmentDialog.tsx` | Wählt den Bewohnerhaushalt einer Wohnung. | `ApartmentsTab`. | `getHouseholds`, `assignApartment`. |
-| `components/statistics/StatisticsTab.tsx` | Ist-Statistik der aktuellen Bewohner je Merkmal, umschaltbar zwischen absoluten und relativen Zahlen, mit Zielwert und Abweichung. | `App.tsx`. | `getResidentStatistics`; rein anzeigend. |
+| `components/statistics/StatisticsTab.tsx` | Ist-Statistik der aktuellen Bewohner je Merkmal, umschaltbar zwischen absoluten und relativen Zahlen, mit Zielwert und Abweichung; weist je Merkmal die ignorierten Personen ohne Angabe aus. | `App.tsx` (lädt nach Schließen des Haushaltsdialogs über `refreshKey` neu). | `getResidentStatistics`, `getResidentMissingData`; rendert `MissingDataDialog`. |
+| `components/statistics/MissingDataDialog.tsx` | Prüfliste der Bewohner-Personen ohne Angabe mit Grund, Rohwert und Verdacht auf Importfehler; Filter für Verdachtsfälle und Personen unter 20. | `StatisticsTab`. | Öffnet über Callback den Haushaltsdialog. |
 | `components/import/ImportTab.tsx` | Drei Uploadflächen in der verbindlichen Reihenfolge (1. vCard, 2. Individualbogen, 3. Haushaltsbogen); startet Analyse und öffnet passenden Assistenten. | `App.tsx`. | `analyzeHHBogen`, `analyzeIndividualBogen`, `analyzeVcf`; rendert die drei Wizards. |
 | `components/import/HHImportWizard.tsx` | Dreistufige Vorschau/Zuordnung/Commit für Haushaltsbogen. | `ImportTab`. | `commitHHBogen`; rendert `MatchingDialog` und `DataChangeDialog`. |
 | `components/import/IndividualImportWizard.tsx` | Dreistufige Vorschau/Zuordnung/Commit für Individualbogen. | `ImportTab`. | `commitIndividualBogen`; rendert `MatchingDialog`. |
@@ -201,6 +203,8 @@ flowchart TD
     Apartments --> AssignApt[AssignApartmentDialog]
     Apartments --> Detail
     App -->|Tab 4| Statistics[StatisticsTab]
+    Statistics --> Missing[MissingDataDialog]
+    Missing --> Detail
     App -->|Tab 5| Config[Scoring-Konfiguration]
     App -->|Tab 6| ImportTab
     ImportTab --> HH[HHImportWizard]
@@ -236,7 +240,7 @@ Tatsächliche direkte Laufzeitnutzung im Quellcode: React/ReactDOM, MUI inklusiv
 | `tests/test_flow.py` | Eigenständig gestarteter HTTP-Integrationstest gegen einen bereits laufenden Server. | `/token`, alten Haushaltsupload, Scoring und Haushaltsliste. |
 | `tests/test_apartments.py` | Eigenständig gestartete In-Memory-Prüfungen für 131 Stammdaten, Seed-Idempotenz, Zuordnung und Beispieldaten. | `models.Base`, `services.seed_apartments`, `services.assign_household`, `example_data.seed_example_data`. |
 | `tests/test_ranking.py` | Eigenständig gestartete In-Memory-Prüfungen für Eignung Haushalt/Wohnung und die gruppierte Rangliste. | `models.Base`, `services.is_eligible`, `services.build_ranking`, `scoring.calculate_occupancy_score`. |
-| `tests/test_statistics.py` | Eigenständig gestartete In-Memory-Prüfungen der Ist-Statistik: Bezugsmenge, fehlende Angaben, Summen, Zielwerte, Haushaltsgrößen. | `models.Base`, `scoring.calculate_resident_statistics`, `scoring.calculate_resident_stats`. |
+| `tests/test_statistics.py` | Eigenständig gestartete In-Memory-Prüfungen der Ist-Statistik: Bezugsmenge, Ignorieren fehlender Angaben (auch im Scoring), Summen, Zielwerte, Haushaltsgrößen, Prüfliste; Beispiele mit `example_data` und einem Individualbogen-Importfehler. | `models.Base`, `scoring.calculate_resident_statistics`, `scoring.calculate_resident_stats`, `scoring.resident_people_missing_data`, `import_service.analyze_individual_bogen`/`commit_individual_bogen`, `example_data.seed_example_data`. |
 | `tests/test_vcf_import.py` | Eigenständig gestartete Parser-/Haushaltsbildungsprüfungen ohne DB. | Öffentliche Parser- und NOTE-Helfer aus `vcf_import_service.py`. |
 | `tests/test_import_order.py` | Eigenständig gestartete In-Memory-Prüfungen der Importreihenfolge: vCard legt alle Personen an (Haushalt nur bei Wohnungszuordnung), Individual- und Haushaltsbogen ergänzen nur. | `models.Base`, `vcf_import_service.analyze_vcf`/`commit_vcf`, `import_service.commit_individual_bogen`/`commit_household_bogen`, `SAMPLE` aus `tests/test_vcf_import.py`. |
 
