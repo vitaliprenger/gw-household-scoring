@@ -335,6 +335,56 @@ def test_household_bogen_reuses_existing_persons():
 
 
 # ---------------------------------------------------------------------------
+# Mitgliedsnummern mit und ohne führende Nullen
+# ---------------------------------------------------------------------------
+
+def test_member_number_leading_zeros():
+    print("\n== Mitgliedsnummer: 3 = 003, 20 = 020 ==")
+    norm = import_service.normalize_member_number
+    check_equal("3 → 003", norm("3"), "003")
+    check_equal("003 bleibt 003", norm("003"), "003")
+    check_equal("20 → 020", norm("20"), "020")
+    check_equal("Zahl aus Excel (20.0) → 020", norm(20.0), "020")
+    check_equal("0003 → 003", norm("0003"), "003")
+    check_equal("vierstellig unverändert", norm("1234"), "1234")
+    check_equal("leer → None", norm(""), None)
+
+    db = make_session()
+    hh = models.Household(name="Nuller")
+    db.add(hh)
+    db.flush()
+    # Altbestand: ohne bzw. mit führenden Nullen gespeichert
+    drei = models.Person(first_name="Dora", last_name="Drei",
+                         member_number="3", household_id=hh.id)
+    zwanzig = models.Person(first_name="Zeno", last_name="Zwanzig", member_number="020")
+    db.add_all([drei, zwanzig])
+    db.commit()
+
+    # Individualbogen: anderer Name, nur die Nummer passt
+    match = import_service.match_individual_to_person(
+        individual_row(first_name="X", last_name="Y", member_number="003",
+                       birth_date=None), db)
+    check_equal("Individualbogen: 003 findet 3", match.matched_household_id, drei.id)
+    match = import_service.match_individual_to_person(
+        individual_row(first_name="X", last_name="Y", member_number="20",
+                       birth_date=None), db)
+    check_equal("Individualbogen: 20 findet 020", match.matched_household_id, zwanzig.id)
+
+    # Haushaltsbogen: Haushalt und Person über die Nummer
+    raw = {"persons": [{"first_name": "X", "last_name": "Y", "member_number": "003"}]}
+    check_equal("Haushaltsbogen: Haushalt über 003",
+                import_service.match_household(raw, db).matched_household_id, hh.id)
+    check_equal("Haushaltsbogen: Person im Haushalt über 003",
+                import_service.match_person_in(hh.people, raw["persons"][0]), drei)
+
+    # vCard: Abgleich über den gesamten Bestand
+    index = V.PersonIndex(db)
+    check_equal("vCard: 20 findet 020",
+                index.find({"first_name": "X", "last_name": "Y", "member_number": "20"}, None),
+                zwanzig)
+
+
+# ---------------------------------------------------------------------------
 
 def run_tests():
     print("--- Tests zur Import-Reihenfolge ---")
@@ -347,6 +397,7 @@ def run_tests():
         test_individual_never_creates,
         test_household_bogen_never_creates,
         test_household_bogen_reuses_existing_persons,
+        test_member_number_leading_zeros,
     ):
         test()
 

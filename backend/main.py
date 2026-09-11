@@ -162,7 +162,6 @@ def startup_event():
     db = database.SessionLocal()
     scoring.initialize_config(db)
     services.seed_apartments(db)
-    services.seed_example_data(db)
     db.close()
 
 @app.post("/token")

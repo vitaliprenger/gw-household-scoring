@@ -10,11 +10,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend import models, scoring, services
+import example_data
 
 failures: list[str] = []
 
@@ -362,7 +364,7 @@ def test_seed_data_has_no_cluster_or_joker_categories():
 def test_ranking_with_seed_data():
     print("\n== Beispieldaten ==")
     db = make_session()
-    services.seed_example_data(db)
+    example_data.seed_example_data(db)
     groups = services.build_ranking(db)
     check("Kategorien aus den Wohnungsstammdaten", len(groups) > 0)
     total = {e.household.id for g in groups for e in g["households"]}

@@ -63,6 +63,12 @@ def normalize_name(raw: str) -> tuple[str, str]:
 
 
 def normalize_member_number(raw) -> Optional[str]:
+    """Mitgliedsnummer in kanonischer Form: mindestens dreistellig mit fuehrenden Nullen.
+
+    Die Quellen schreiben Nummern mal mit, mal ohne fuehrende Nullen
+    ("3" / "003", "20" / "020"); die vCard nutzt die dreistellige Form.
+    Laengere Nummern bleiben unveraendert ("1234").
+    """
     if raw is None:
         return None
     s = str(raw).strip()
@@ -70,7 +76,27 @@ def normalize_member_number(raw) -> Optional[str]:
         return None
     digits = re.findall(r"\d+", s)
     if digits:
-        return digits[0]
+        return f"{int(digits[0]):03d}"
+    return None
+
+
+def same_member_number(a, b) -> bool:
+    """True, wenn beide Werte dieselbe Mitgliedsnummer bezeichnen (3 == 003).
+
+    Normalisiert beide Seiten, damit auch vor der Vereinheitlichung
+    gespeicherte Nummern ohne fuehrende Nullen wiedergefunden werden.
+    """
+    na = normalize_member_number(a)
+    return na is not None and na == normalize_member_number(b)
+
+
+def find_person_by_member_number(people, member_number):
+    """Erste Person aus ``people`` mit derselben Mitgliedsnummer, sonst None."""
+    if not normalize_member_number(member_number):
+        return None
+    for person in people:
+        if same_member_number(person.member_number, member_number):
+            return person
     return None
 
 
@@ -334,11 +360,9 @@ def match_person_in(people, data: dict, loose: bool = True):
     Haushalts sinnvoll, ueber den gesamten Datenbestand hinweg dagegen zu
     unscharf.
     """
-    member_number = data.get("member_number")
-    if member_number:
-        for person in people:
-            if person.member_number and person.member_number == member_number:
-                return person
+    found = find_person_by_member_number(people, data.get("member_number"))
+    if found is not None:
+        return found
 
     key = person_name_key(data.get("first_name"), data.get("last_name"))
     if key != "|":
@@ -373,15 +397,10 @@ def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
     # Always compute fuzzy candidates so users can re-assign even exact matches
     candidates = _fuzzy_match(persons, all_households)
 
-    # Step 1: Exact match on member number
+    # Step 1: Exact match on member number ("3" und "003" sind dieselbe Nummer)
+    numbered = db.query(models.Person).filter(models.Person.member_number.isnot(None)).all()
     for p in persons:
-        if not p.get("member_number"):
-            continue
-        matched_person = (
-            db.query(models.Person)
-            .filter(models.Person.member_number == p["member_number"])
-            .first()
-        )
+        matched_person = find_person_by_member_number(numbered, p.get("member_number"))
         if matched_person and matched_person.household_id:
             hh = db.query(models.Household).get(matched_person.household_id)
             if hh:
@@ -461,7 +480,7 @@ def _fuzzy_match(persons: list[dict], all_households: list[models.Household]) ->
 
         member_nrs = [p.member_number for p in hh.people if p.member_number]
         for p in persons:
-            if p.get("member_number") and p["member_number"] in member_nrs:
+            if any(same_member_number(p.get("member_number"), nr) for nr in member_nrs):
                 score = max(score, 0.8)
 
         candidates.append(schemas.FuzzyCandidate(
@@ -893,13 +912,9 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
     candidates = [c for c in candidates if c.score >= 0.7]
     candidates.sort(key=lambda c: c.score, reverse=True)
 
-    # Step 1: exact member number
+    # Step 1: exact member number ("3" und "003" sind dieselbe Nummer)
     if member_nr:
-        matched = (
-            db.query(models.Person)
-            .filter(models.Person.member_number == member_nr)
-            .first()
-        )
+        matched = find_person_by_member_number(all_persons, member_nr)
         if matched:
             hh = db.query(models.Household).get(matched.household_id) if matched.household_id else None
             _ensure_person_candidate(candidates, matched, hh)

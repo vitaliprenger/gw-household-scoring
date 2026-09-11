@@ -10,11 +10,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend import models, services, apartment_seed_data
+import example_data
 
 failures: list[str] = []
 
@@ -43,7 +45,7 @@ def test_seed_data():
     print("\n== Stammdaten ==")
     rows = apartment_seed_data.APARTMENTS
     fields = apartment_seed_data.FIELDS
-    check("136 Wohnungen hinterlegt", len(rows) == 136, f"({len(rows)})")
+    check("131 Wohnungen hinterlegt", len(rows) == 131, f"({len(rows)})")
     check("alle Zeilen vollständig", all(len(r) == len(fields) for r in rows))
 
     units = [dict(zip(fields, r))["unit_number"] for r in rows]
@@ -68,15 +70,20 @@ def test_seed_data():
     check("keine Wohnungsart 'C-Riegel'", "C-Riegel" not in categories)
     check("keine Wohnungsart 'Gartencluster'", "Gartencluster" not in categories)
     check("keine Wohnungsart 'Wohngemeinschaft'", "Wohngemeinschaft" not in categories)
-    check("36 Clusterwohnungen", sum(
-        1 for r in records if r["apartment_category"] == "Clusterwohnung") == 36,
+    check("31 Clusterwohnungen", sum(
+        1 for r in records if r["apartment_category"] == "Clusterwohnung") == 31,
         str(sum(1 for r in records if r["apartment_category"] == "Clusterwohnung")))
 
     standard = [r for r in records if r["apartment_category"] == "Standard Wohnungstypen"]
     check("Standardwohnungen haben Zimmerzahl", all(r["size_rooms"] for r in standard))
-    check("Sondertypen ohne Zimmerzahl", all(
-        r["size_rooms"] is None for r in records
-        if r["apartment_category"] != "Standard Wohnungstypen"
+    # Alle Wohnungsarten dürfen eine Zimmerzahl haben (bei Cluster und Joker
+    # ist sie für die Vergabe irrelevant)
+    check("Zimmerzahl, falls angegeben, ganze Zahl", all(
+        r["size_rooms"] is None or isinstance(r["size_rooms"], int) for r in records
+    ))
+    check("Ausbau- und Atelierwohnungen mit Zimmerzahl", all(
+        r["size_rooms"] for r in records
+        if r["apartment_category"] in ("Ausbauwohnung", "Atelierwohnung")
     ))
     check("Zimmerzahl ist eine ganze Zahl", all(
         isinstance(r["size_rooms"], int) for r in standard))
@@ -107,7 +114,7 @@ def test_seed_data():
 
     riegel = next(r for r in records if r["unit_number"] == "R.201.1")
     check("R.201.1 (C-Riegel): Clusterwohnung", riegel["apartment_category"] == "Clusterwohnung")
-    check("R.201.1: ohne Zimmerzahl", riegel["size_rooms"] is None)
+    check("R.201.1: 2 Zimmer", riegel["size_rooms"] == 2)
 
     wpg = next(r for r in records if r["unit_number"] == "W.008.1")
     check("W.008.1: WPG-A wird WBS A", wpg["funding_type"] == "WBS A")
@@ -122,8 +129,8 @@ def test_seed_is_idempotent():
     print("\n== Seed ==")
     db = make_session()
     created = services.seed_apartments(db)
-    check("136 Wohnungen angelegt", created == 136, f"({created})")
-    check("136 in der Datenbank", db.query(models.Apartment).count() == 136)
+    check("131 Wohnungen angelegt", created == 131, f"({created})")
+    check("131 in der Datenbank", db.query(models.Apartment).count() == 131)
 
     apt = by_unit(db, "P.108.1")
     check("P.108.1 Clusterwohnung", apt.apartment_category == "Clusterwohnung")
@@ -138,7 +145,7 @@ def test_seed_is_idempotent():
     again = services.seed_apartments(db)
     check("zweiter Seed legt nichts an", again == 0, f"({again})")
     check("Bearbeitung bleibt erhalten", by_unit(db, "P.108.1").area_rent == 99.0)
-    check("weiterhin 136 Wohnungen", db.query(models.Apartment).count() == 136)
+    check("weiterhin 131 Wohnungen", db.query(models.Apartment).count() == 131)
     db.close()
 
 
@@ -200,7 +207,7 @@ def test_example_data_links_residents():
     print("\n== Beispieldaten ==")
     db = make_session()
     services.seed_apartments(db)
-    services.seed_example_data(db)
+    example_data.seed_example_data(db)
 
     residents = db.query(models.Household).filter(models.Household.is_resident == True).all()  # noqa: E712
     check("5 Bewohner-Haushalte", len(residents) == 5, f"({len(residents)})")
