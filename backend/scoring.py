@@ -5,8 +5,10 @@ import numpy as np
 
 AGE_GROUPS = ["20_29", "30_39", "40_49", "50_59", "60_69", "70_79", "80_89", "over_89"]
 
-# "unter 20" ist keine Zielgruppe der Durchmischung (§3 Abs. 1a), gehoert aber
-# in die Ist-Statistik: die Bevoelkerungsanteile beziehen sich auf ab 20 Jahre.
+# "unter 20" ist keine Zielgruppe der Durchmischung (§3 Abs. 1a): die
+# Bevoelkerungsanteile beziehen sich auf ab 20 Jahre. Gezaehlt wird die Gruppe
+# trotzdem; die Ist-Statistik weist sie ausserhalb der Bezugsgroesse aus
+# (``EXCLUDED_GROUPS``).
 AGE_GROUPS_ALL = ["under_20"] + AGE_GROUPS
 
 AGE_LABELS = {
@@ -29,10 +31,14 @@ GENDER_LABELS = {
     "d": "divers",
 }
 
-# Personen ohne gepflegte Angabe zaehlen in keiner fachlichen Gruppe mit,
-# werden in der Ist-Statistik aber ausgewiesen.
+# Personen ohne gepflegte Angabe zaehlen in keiner fachlichen Gruppe mit und
+# bleiben bei den Anteilen des Merkmals aussen vor (s. ``basis_totals``).
 UNKNOWN_GROUP = "unknown"
-UNKNOWN_LABEL = "keine Angabe"
+
+# Warum eine Person bei einem Merkmal ohne Angabe ist -- fuer die Pruefliste.
+MISSING_EMPTY = "empty"                # Feld leer
+MISSING_CATEGORY_0 = "category_0"      # Kategorie 0: bewusst keine Zuordnung
+MISSING_UNRECOGNIZED = "unrecognized"  # Wert vorhanden, aber keiner Gruppe zuzuordnen
 
 OCCUPATION_GROUPS = [str(i) for i in range(1, 11)]
 
@@ -61,6 +67,34 @@ EDUCATION_LABELS = {
     "7": "Master, Uni-Diplom, Magister, Staatsexamen, Betriebswirt, Strategischer Professional",
     "8": "Promotion",
 }
+
+# Personenbezogene Merkmale der Durchmischung und ihre fachlichen Gruppen --
+# die Auspraegungen, aus denen sich die Bezugsgroesse der Anteile ergibt.
+DIMENSION_GROUPS = {
+    "age": AGE_GROUPS,
+    "gender": GENDER_GROUPS,
+    "occupation": OCCUPATION_GROUPS,
+    "education": EDUCATION_GROUPS,
+}
+
+# Auspraegungen, die zwar eine Angabe sind, aber ausserhalb der Bezugsgroesse
+# bleiben: die Zielwerte der Altersstruktur beziehen sich auf die Bevoelkerung
+# ab 20 Jahren, Personen unter 20 wuerden die Altersanteile sonst verzerren.
+EXCLUDED_GROUPS = {
+    "age": {"under_20": AGE_LABELS["under_20"]},
+}
+
+# Personenfeld, aus dem ein Merkmal gelesen wird.
+DIMENSION_FIELDS = {
+    "age": "birth_date",
+    "gender": "gender",
+    "occupation": "occupation_type",
+    "education": "education_level",
+}
+
+# Merkmale, die der Individualbogen liefert: bleiben sie trotz Import leer,
+# ist beim Import vermutlich etwas schiefgegangen.
+INDIVIDUAL_BOGEN_DIMENSIONS = ("gender", "occupation", "education")
 
 DEFAULT_CONFIG = {
     "weight_diversity_age":            {"value": 2.0, "description": "Gewicht: Durchmischung – Altersstruktur (§3 Abs. 1a)"},
@@ -159,6 +193,48 @@ def person_education_group(person: models.Person) -> str:
     """Bildungsstufe 1--8; Kategorie 0 und Leereintrag gelten als keine Angabe."""
     edu = (person.education_level or "").strip()
     return edu if edu in EDUCATION_GROUPS else UNKNOWN_GROUP
+
+
+PERSON_GROUP = {
+    "age": person_age_group,
+    "gender": person_gender_group,
+    "occupation": person_occupation_group,
+    "education": person_education_group,
+}
+
+
+def missing_value(person: models.Person, dimension: str) -> dict | None:
+    """Warum eine Person bei einem Merkmal als "keine Angabe" gilt; ``None``, wenn sie mitzaehlt.
+
+    Unterschieden werden ein leeres Feld, die Kategorie 0 (bewusst keine
+    Zuordnung, z. B. Schueler*in oder "Keine Antwort") und ein gespeicherter,
+    aber keiner Gruppe zuzuordnender Wert. Letzteres entsteht typischerweise,
+    wenn ein Import einen Wert nicht uebersetzen konnte und ihn roh uebernommen
+    hat -- ebenso verdaechtig ist ein leeres Feld trotz Individualbogen-Import.
+    """
+    if PERSON_GROUP[dimension](person) != UNKNOWN_GROUP:
+        return None
+
+    raw = getattr(person, DIMENSION_FIELDS[dimension])
+    text = "" if raw is None else str(raw).strip()
+    if not text:
+        reason = MISSING_EMPTY
+    elif text == "0" and dimension in ("occupation", "education"):
+        reason = MISSING_CATEGORY_0
+    else:
+        reason = MISSING_UNRECOGNIZED
+
+    suspected = reason == MISSING_UNRECOGNIZED or (
+        reason == MISSING_EMPTY
+        and dimension in INDIVIDUAL_BOGEN_DIMENSIONS
+        and person.individual_import_timestamp is not None
+    )
+    return {
+        "dimension": dimension,
+        "reason": reason,
+        "raw_value": text or None,
+        "suspected_import_error": suspected,
+    }
 
 
 def count_people(people) -> dict:
@@ -284,21 +360,38 @@ def calculate_occupancy_score(members: int, size_rooms: int | None, config: dict
 def calculate_engagement_score(household: models.Household) -> float:
     return max(0.0, min(1.0, household.engagement_score or 0.0))
 
+def basis_totals(counts: dict, total: int) -> dict:
+    """Bezugsgroesse der Anteile je Merkmal: Personen in einer der ``DIMENSION_GROUPS``.
+
+    Datensaetze ohne Angabe werden ignoriert: sie gehoeren zu keiner Gruppe und
+    wuerden als Teil der Bezugsgroesse jede Gruppe kleiner erscheinen lassen,
+    als sie ist. Ebenso bleiben die ``EXCLUDED_GROUPS`` (Personen unter 20)
+    aussen vor, damit die Anteile zu den Zielwerten passen.
+    """
+    return {
+        dim: total
+        - counts[f"{dim}_{UNKNOWN_GROUP}"]
+        - sum(counts[f"{dim}_{g}"] for g in EXCLUDED_GROUPS.get(dim, {}))
+        for dim in DIMENSION_GROUPS
+    }
+
+
 def calculate_resident_stats(db: Session) -> dict:
     """IST-Verteilung der aktuellen Bewohner als Anteile je Merkmalsauspraegung.
 
-    Bezugsgroesse ist die Zahl aller Bewohner-Personen -- auch derer ohne Angabe
-    zum Merkmal. Die Anteile sind die Vergleichswerte fuer die Zielwerte der
-    Durchmischung (§3 Abs. 1).
+    Bezugsgroesse ist je Merkmal die Zahl der Bewohner-Personen mit Angabe,
+    bei den Altersgruppen nur ab 20 Jahren (``basis_totals``). Die Anteile sind
+    die Vergleichswerte fuer die Zielwerte der Durchmischung (§3 Abs. 1).
     """
     people = resident_people(db)
     counts = count_people(people)
-    total = len(people)
+    basis = basis_totals(counts, len(people))
 
-    if total == 0:
-        return {f"ratio_{k}": 0.0 for k in counts}
-
-    return {f"ratio_{k}": v / total for k, v in counts.items()}
+    return {
+        f"ratio_{dim}_{g}": counts[f"{dim}_{g}"] / basis[dim] if basis[dim] else 0.0
+        for dim, groups in DIMENSION_GROUPS.items()
+        for g in groups
+    }
 
 
 def _statistics_groups(dimension: str, groups, labels: dict, counts: dict,
@@ -306,8 +399,7 @@ def _statistics_groups(dimension: str, groups, labels: dict, counts: dict,
     """Eine Merkmalsauspraegung je Zeile: absolute Zahl, Anteil und Zielwert.
 
     Ohne ``target_prefix`` (oder ohne hinterlegten Zielwert) bleiben die
-    Soll-Felder leer -- z. B. bei "unter 20" und "keine Angabe", fuer die es
-    keinen Zielwert der Durchmischung gibt.
+    Soll-Felder leer.
     """
     entries = []
     for group in groups:
@@ -328,8 +420,11 @@ def calculate_resident_statistics(db: Session) -> dict:
     """Ist-Statistik der aktuellen Bewohner -- absolut und relativ.
 
     Grundlage sind dieselben Personen, aus denen die IST-Verteilung der
-    Durchmischung entsteht (``resident_people``). Je Merkmal wird der Zielwert
-    aus der Bewertungskonfiguration mitgeliefert, damit Ist und Soll direkt
+    Durchmischung entsteht (``resident_people``). Je Merkmal zaehlen nur die
+    Personen mit Angabe, bei den Altersgruppen nur ab 20 Jahren. Wie viele ohne
+    Angabe ignoriert wurden, steht in ``unknown_count``; die Personen unter 20
+    stehen nachrichtlich in ``excluded_groups``. Der Zielwert aus der
+    Bewertungskonfiguration wird mitgeliefert, damit Ist und Soll direkt
     vergleichbar sind.
     """
     config = get_config_dict(db)
@@ -340,61 +435,45 @@ def calculate_resident_statistics(db: Session) -> dict:
 
     person_total = len(people)
     household_total = len(households)
+    basis = basis_totals(counts, person_total)
 
     numbered = lambda labels: {k: f"{k} – {v}" for k, v in labels.items()}
-    unknown_label = {UNKNOWN_GROUP: UNKNOWN_LABEL}
+
+    def person_category(dim: str, label: str, groups: list) -> dict:
+        return {
+            "key": dim,
+            "label": label,
+            "basis": "person",
+            "total": basis[dim],
+            "unknown_count": counts[f"{dim}_{UNKNOWN_GROUP}"],
+            "excluded_groups": [
+                {"key": g, "label": g_label, "count": counts[f"{dim}_{g}"]}
+                for g, g_label in EXCLUDED_GROUPS.get(dim, {}).items()
+            ],
+            "groups": groups,
+        }
 
     categories = [
-        {
-            "key": "age",
-            "label": "Altersgruppen",
-            "basis": "person",
-            "total": person_total,
-            # Zielwerte gelten erst ab 20 Jahren: "unter 20" bleibt ohne Soll.
-            "groups": (
-                _statistics_groups("age", ["under_20"], AGE_LABELS, counts, person_total, config)
-                + _statistics_groups("age", AGE_GROUPS, AGE_LABELS, counts, person_total,
-                                     config, "target_age")
-                + _statistics_groups("age", [UNKNOWN_GROUP], unknown_label, counts,
-                                     person_total, config)
-            ),
-        },
-        {
-            "key": "gender",
-            "label": "Geschlecht",
-            "basis": "person",
-            "total": person_total,
-            "groups": (
-                _statistics_groups("gender", GENDER_GROUPS, GENDER_LABELS, counts,
-                                   person_total, config, "target_gender")
-                + _statistics_groups("gender", [UNKNOWN_GROUP], unknown_label, counts,
-                                     person_total, config)
-            ),
-        },
-        {
-            "key": "occupation",
-            "label": "Haupttätigkeit",
-            "basis": "person",
-            "total": person_total,
-            "groups": (
-                _statistics_groups("occupation", OCCUPATION_GROUPS, numbered(OCCUPATION_LABELS),
-                                   counts, person_total, config, "target_occupation")
-                + _statistics_groups("occupation", [UNKNOWN_GROUP], unknown_label, counts,
-                                     person_total, config)
-            ),
-        },
-        {
-            "key": "education",
-            "label": "Bildungsabschluss",
-            "basis": "person",
-            "total": person_total,
-            "groups": (
-                _statistics_groups("education", EDUCATION_GROUPS, numbered(EDUCATION_LABELS),
-                                   counts, person_total, config, "target_education")
-                + _statistics_groups("education", [UNKNOWN_GROUP], unknown_label, counts,
-                                     person_total, config)
-            ),
-        },
+        person_category(
+            "age", "Altersgruppen",
+            _statistics_groups("age", AGE_GROUPS, AGE_LABELS, counts, basis["age"],
+                               config, "target_age"),
+        ),
+        person_category(
+            "gender", "Geschlecht",
+            _statistics_groups("gender", GENDER_GROUPS, GENDER_LABELS, counts,
+                               basis["gender"], config, "target_gender"),
+        ),
+        person_category(
+            "occupation", "Haupttätigkeit",
+            _statistics_groups("occupation", OCCUPATION_GROUPS, numbered(OCCUPATION_LABELS),
+                               counts, basis["occupation"], config, "target_occupation"),
+        ),
+        person_category(
+            "education", "Bildungsabschluss",
+            _statistics_groups("education", EDUCATION_GROUPS, numbered(EDUCATION_LABELS),
+                               counts, basis["education"], config, "target_education"),
+        ),
     ]
 
     # Haushaltsgroesse: Bezugsgroesse sind die Haushalte, nicht die Personen.
@@ -408,6 +487,8 @@ def calculate_resident_statistics(db: Session) -> dict:
         "label": "Haushaltsgröße",
         "basis": "household",
         "total": household_total,
+        "unknown_count": 0,
+        "excluded_groups": [],
         "groups": [
             {
                 "key": str(size),
@@ -424,8 +505,47 @@ def calculate_resident_statistics(db: Session) -> dict:
     return {
         "household_count": household_total,
         "person_count": person_total,
+        "incomplete_person_count": sum(
+            1 for p in people if any(missing_value(p, dim) for dim in DIMENSION_GROUPS)
+        ),
         "categories": categories,
     }
+
+
+def resident_people_missing_data(db: Session) -> list:
+    """Bewohner-Personen, die bei mindestens einem Merkmal ohne Angabe sind.
+
+    Das sind genau die Datensaetze, die ``calculate_resident_statistics`` beim
+    jeweiligen Merkmal ignoriert. Die Liste dient der Kontrolle der Importe:
+    je Merkmal stehen Grund und gespeicherter Rohwert dabei (``missing_value``).
+    """
+    entries = []
+    for h in resident_households(db):
+        unit = h.apartment.unit_number if h.apartment else h.apartment_unit
+        for p in h.people:
+            if p.archived:
+                continue
+            missing = [m for dim in DIMENSION_GROUPS if (m := missing_value(p, dim))]
+            if not missing:
+                continue
+            age = person_age(p)
+            entries.append({
+                "person_id": p.id,
+                "first_name": p.first_name,
+                "last_name": p.last_name,
+                "member_number": p.member_number,
+                "household_id": h.id,
+                "household_name": h.name,
+                "apartment_unit": unit,
+                "age": int(age) if age is not None else None,
+                "individual_import_timestamp": p.individual_import_timestamp,
+                "missing": missing,
+            })
+
+    entries.sort(key=lambda e: ((e["household_name"] or "").lower(),
+                                (e["last_name"] or "").lower(),
+                                (e["first_name"] or "").lower()))
+    return entries
 
 
 def run_scoring(db: Session):

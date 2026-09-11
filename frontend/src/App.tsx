@@ -83,6 +83,8 @@ function App() {
   const [password, setPassword] = useState("");
 
   const [detailHouseholdId, setDetailHouseholdId] = useState<number | null>(null);
+  // Die Ist-Statistik lädt nach dem Schließen des Haushaltsdialogs neu (Korrekturen aus der Prüfliste).
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0);
   const [showArchivedHH, setShowArchivedHH] = useState(false);
   const [filterNoApartment, setFilterNoApartment] = useState(false);
   const [createHHOpen, setCreateHHOpen] = useState(false);
@@ -515,7 +517,10 @@ function App() {
         )}
 
         {tabValue === 4 && (
-          <StatisticsTab />
+          <StatisticsTab
+            onShowHousehold={(id) => setDetailHouseholdId(id)}
+            refreshKey={statsRefreshKey}
+          />
         )}
 
         {tabValue === 5 && (() => {
@@ -588,7 +593,10 @@ function App() {
       <HouseholdDetailDialog
         open={detailHouseholdId !== null}
         householdId={detailHouseholdId}
-        onClose={() => setDetailHouseholdId(null)}
+        onClose={() => {
+          setDetailHouseholdId(null);
+          setStatsRefreshKey((k) => k + 1);
+        }}
         onSaved={loadData}
       />
 
