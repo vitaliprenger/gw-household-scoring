@@ -179,7 +179,9 @@ Beide Fragebogenimporte **ergänzen ausschließlich** vorhandene Daten; angelegt
 | `components/apartments/ApartmentsTab.tsx` | Wohnungsliste mit Suche, Filtern, Sortierung, CRUD und Belegungszuordnung. | `App.tsx`. | `getApartments`, `unassignApartment`, `deleteApartment`; rendert `ApartmentEditDialog`, `AssignApartmentDialog`, `ConfirmDialog`; meldet Änderungen an `App`. |
 | `components/apartments/ApartmentEditDialog.tsx` | Formular zum Anlegen/Bearbeiten einer Wohnung mit Ganzzahlprüfung für Zimmer. | `ApartmentsTab`. | `createApartment` oder `updateApartment`. |
 | `components/apartments/AssignApartmentDialog.tsx` | Wählt den Bewohnerhaushalt einer Wohnung. | `ApartmentsTab`. | `getHouseholds`, `assignApartment`. |
-| `components/statistics/StatisticsTab.tsx` | Ist-Statistik der aktuellen Bewohner je Merkmal, umschaltbar zwischen absoluten und relativen Zahlen, mit Zielwert und Abweichung; weist je Merkmal die ignorierten Personen ohne Angabe aus. | `App.tsx` (lädt nach Schließen des Haushaltsdialogs über `refreshKey` neu). | `getResidentStatistics`, `getResidentMissingData`; rendert `MissingDataDialog`. |
+| `components/statistics/StatisticsTab.tsx` | Ist-Statistik der aktuellen Bewohner je Merkmal, umschaltbar zwischen absoluten und relativen Zahlen, mit Zielwert und Abweichung; weist je Merkmal die ignorierten Personen ohne Angabe aus. | `App.tsx` (lädt nach Schließen des Haushaltsdialogs über `refreshKey` neu). | `getResidentStatistics`, `getResidentMissingData`; rendert `TargetDistributionChart` und `MissingDataDialog`. |
+| `components/statistics/TargetDistributionChart.tsx` | Waagerechtes Balkendiagramm Ist vs. Zielwert eines Merkmals (Balken = Ist, senkrechte Marke = Ziel), absolut oder relativ; Tooltip mit Ist, Ziel und Abweichung. | `StatisticsTab` (alle Merkmale mit Zielwert: Altersgruppen, Geschlecht, Haupttätigkeit, Bildungsabschluss). | `BarChart`, `useXScale`, `useYScale` aus `@mui/x-charts`. |
+| `components/statistics/format.ts` | Darstellungsform (`Mode`) und Formatierer der Ist-Statistik: Anzahl, Anteil, Zielwert und Abweichung mit Vorzeichen. | `StatisticsTab`, `TargetDistributionChart`. | Keine Laufzeitaufrufe. |
 | `components/statistics/MissingDataDialog.tsx` | Prüfliste der Bewohner-Personen ohne Angabe mit Grund, Rohwert und Verdacht auf Importfehler; Filter für Verdachtsfälle und Personen unter 20. | `StatisticsTab`. | Öffnet über Callback den Haushaltsdialog. |
 | `components/import/ImportTab.tsx` | Drei Uploadflächen in der verbindlichen Reihenfolge (1. vCard, 2. Individualbogen, 3. Haushaltsbogen); startet Analyse und öffnet passenden Assistenten. | `App.tsx`. | `analyzeHHBogen`, `analyzeIndividualBogen`, `analyzeVcf`; rendert die drei Wizards. |
 | `components/import/HHImportWizard.tsx` | Dreistufige Vorschau/Zuordnung/Commit für Haushaltsbogen. | `ImportTab`. | `commitHHBogen`; rendert `MatchingDialog` und `DataChangeDialog`. |
@@ -223,13 +225,13 @@ flowchart TD
 
 | Datei | Zweck und Beziehung |
 |---|---|
-| `frontend/package.json` | Definiert `vite`, `tsc` und `vite preview`; Laufzeitpakete React, MUI/Emotion und Axios sowie zwei unten als ungenutzt markierte Pakete. |
+| `frontend/package.json` | Definiert `vite`, `tsc` und `vite preview`; Laufzeitpakete React, MUI/Emotion (inkl. MUI X Data Grid und MUI X Charts) und Axios sowie zwei unten als ungenutzt markierte Pakete. |
 | `frontend/package-lock.json` | npm-Lockfile Version 3; fixiert den vollständigen transitiven Abhängigkeitsgraphen. Es wird von npm ausgewertet, nicht von Anwendungscode importiert. |
 | `frontend/tsconfig.json` | Strikter TypeScript-/Bundler-Modus für `src`, JSX-Transformation und Referenz auf `tsconfig.node.json`. |
 | `frontend/tsconfig.node.json` | TypeScript-Projekt für `vite.config.ts`. |
 | `frontend/vite.config.ts` | Aktiviert das React-Plugin, Port 3000 und einen `/api`-Proxy auf Port 8000. `api.ts` verwendet jedoch eine absolute Backend-URL und damit nicht diesen Proxy. |
 
-Tatsächliche direkte Laufzeitnutzung im Quellcode: React/ReactDOM, MUI inklusive Icons, Emotion indirekt als MUI-Styling-Engine und Axios. Vite, TypeScript, React-Plugin und Typ-Pakete werden durch Build bzw. Compiler verwendet.
+Tatsächliche direkte Laufzeitnutzung im Quellcode: React/ReactDOM, MUI inklusive Icons, MUI X Charts (nur `TargetDistributionChart`), Emotion indirekt als MUI-Styling-Engine und Axios. Vite, TypeScript, React-Plugin und Typ-Pakete werden durch Build bzw. Compiler verwendet.
 
 ## Tests und Hilfsskripte
 
