@@ -6,52 +6,26 @@ import {
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import { getResidentStatistics, getResidentMissingData } from '../../api';
 import {
-  ResidentStatistics, StatisticsCategory, StatisticsGroup, StatisticsDimension, PersonMissingData,
+  ResidentStatistics, StatisticsCategory, StatisticsDimension, PersonMissingData,
 } from '../../types';
 import { zebraTableSx, NO_ZEBRA_ROW_CLASS } from '../common/tableStyles';
 import MissingDataDialog from './MissingDataDialog';
-
-/** Darstellungsform der Ist-Statistik: absolute Zahlen oder Anteile. */
-type Mode = 'absolute' | 'relative';
-
-const formatCount = (value: number): string => value.toLocaleString('de-DE');
-
-const formatDecimal = (value: number): string =>
-  value.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-
-const formatPercent = (value: number): string =>
-  (value * 100).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' %';
-
-/** Abweichung mit Vorzeichen — negativ heißt: unter dem Zielwert. */
-const withSign = (value: number, format: (v: number) => string): string =>
-  (value > 0 ? '+' : '') + format(value);
+import TargetDistributionChart from './TargetDistributionChart';
+import {
+  Mode, formatCount, formatPercent, formatValue, formatTarget, formatDeviation, hasTarget,
+} from './format';
 
 const basisLabel = (category: StatisticsCategory): string =>
   category.basis === 'household' ? 'Haushalte' : 'Personen';
 
-function CategoryTable({ category, mode, onReview }: {
+function CategoryCard({ category, mode, onReview }: {
   category: StatisticsCategory;
   mode: Mode;
   /** Öffnet die Prüfliste der Personen ohne Angabe zu diesem Merkmal. */
   onReview: () => void;
 }) {
-  const hasTargets = category.groups.some(g => g.target_ratio !== null && g.target_ratio !== undefined);
+  const hasTargets = category.groups.some(hasTarget);
   const absolute = mode === 'absolute';
-
-  const valueOf = (g: StatisticsGroup): string =>
-    absolute ? formatCount(g.count) : formatPercent(g.ratio);
-
-  const targetOf = (g: StatisticsGroup): string => {
-    if (g.target_ratio === null || g.target_ratio === undefined) return '—';
-    return absolute ? formatDecimal(g.target_count ?? 0) : formatPercent(g.target_ratio);
-  };
-
-  const deviationOf = (g: StatisticsGroup): string => {
-    if (g.target_ratio === null || g.target_ratio === undefined) return '—';
-    return absolute
-      ? withSign(g.count - (g.target_count ?? 0), formatDecimal)
-      : withSign(g.ratio - g.target_ratio, formatPercent);
-  };
 
   return (
     <Paper sx={{ p: 2, height: '100%' }}>
@@ -60,6 +34,9 @@ function CategoryTable({ category, mode, onReview }: {
         {formatCount(category.total)} {basisLabel(category)}
         {category.basis === 'person' ? ' mit Angabe' : ''} als Bezugsgröße
       </Typography>
+      {hasTargets && category.total > 0 && (
+        <TargetDistributionChart category={category} mode={mode} />
+      )}
       <Table size="small" sx={zebraTableSx}>
         <TableHead>
           <TableRow>
@@ -77,11 +54,11 @@ function CategoryTable({ category, mode, onReview }: {
           {category.groups.map(group => (
             <TableRow key={group.key}>
               <TableCell>{group.label}</TableCell>
-              <TableCell align="right">{valueOf(group)}</TableCell>
+              <TableCell align="right">{formatValue(group, mode)}</TableCell>
               {hasTargets && (
                 <>
-                  <TableCell align="right" sx={{ color: 'text.secondary' }}>{targetOf(group)}</TableCell>
-                  <TableCell align="right" sx={{ color: 'text.secondary' }}>{deviationOf(group)}</TableCell>
+                  <TableCell align="right" sx={{ color: 'text.secondary' }}>{formatTarget(group, mode)}</TableCell>
+                  <TableCell align="right" sx={{ color: 'text.secondary' }}>{formatDeviation(group, mode)}</TableCell>
                 </>
               )}
             </TableRow>
@@ -229,7 +206,7 @@ export default function StatisticsTab({ onShowHousehold, refreshKey }: Statistic
       <Grid container spacing={2} alignItems="stretch">
         {stats.categories.map(category => (
           <Grid size={{ xs: 12, md: 6 }} key={category.key}>
-            <CategoryTable
+            <CategoryCard
               category={category}
               mode={mode}
               onReview={() => setReview(category.key as StatisticsDimension)}
