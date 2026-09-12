@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from backend import models
 from backend.services import seed_apartments, assign_household
+from backend.wishes import parse_wish
 
 
 def _d(y: int, m: int, d: int) -> datetime:
@@ -88,8 +89,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.2,
             "is_resident": False,
             "wbs_status": "WBS A",
-            "desired_apartment_size": "1,5",
-            "desired_apartment_type": ["Standard Wohnungstypen"],
+            "wish": "1,5 A",
             "people": [
                 ("Simon", "Kruse", _d(1988, 11, 29), "m", "1", "7", None,
                  "Behinderung (GdB 40 mit Gleichstellung)", "637", _d(2024, 5, 1)),
@@ -100,8 +100,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.5,
             "is_resident": False,
             "wbs_status": "kein WBS",
-            "desired_apartment_size": "3,5",
-            "desired_apartment_type": ["Standard Wohnungstypen"],
+            "wish": "3,5 frei",
             "people": [
                 ("Anja", "Venjakob", _d(1977, 6, 23), "f", "2", "7", None, None, "628", _d(2023, 1, 1)),
                 ("Jörg", "Höbing", _d(1974, 6, 17), "m", "2", "7", None, None, "627", _d(2023, 1, 1)),
@@ -112,8 +111,6 @@ def seed_example_data(db: Session):
             "engagement_score": 0.7,
             "is_resident": False,
             "wbs_status": "kein WBS",
-            # "desired_apartment_size": "3,5",
-            "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
                 ("Reinhilde", "Tenk", _d(1954, 11, 10), "f", "5", "6", None, "Osteoporose", "26", _d(2017, 6, 1)),
             ],
@@ -123,8 +120,6 @@ def seed_example_data(db: Session):
             "engagement_score": 0.5,
             "is_resident": False,
             "wbs_status": "kein WBS",
-            # "desired_apartment_size": "2,5",
-            "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
                 ("Thomas", "Tenk", _d(1958, 8, 17), "m", "4", "4", None, None, "27", _d(2017, 6, 1)),
             ],
@@ -135,7 +130,6 @@ def seed_example_data(db: Session):
             "is_resident": False,
             "wbs_status": "WBS A",
             "financial_status": "kann Anteile nicht übernehmen",
-            "desired_apartment_type": ["Standard Wohnungstypen"],
             "people": [
                 ("Kerstin", "Nolte", _d(1986, 5, 20), "f", "2", "6", None, None, "135", _d(2019, 6, 1)),
                 ("Emmi", "Nolte", _d(2018, 1, 8), "f", "0", "0", None, None, None, None),
@@ -147,8 +141,7 @@ def seed_example_data(db: Session):
             "engagement_score": 0.6,
             "is_resident": False,
             "wbs_status": "WBS A",
-            "desired_apartment_size": "3,5",
-            "desired_apartment_type": ["Standard Wohnungstypen"],
+            "wish": "3,5 A",
             "pets_count": 1,
             "pets_info": "Hund",
             "people": [
@@ -168,8 +161,6 @@ def seed_example_data(db: Session):
             engagement_score=hh_data["engagement_score"],
             is_resident=hh_data["is_resident"],
             wbs_status=hh_data.get("wbs_status"),
-            desired_apartment_size=hh_data.get("desired_apartment_size"),
-            desired_apartment_type=hh_data.get("desired_apartment_type"),
             financial_status=hh_data.get("financial_status"),
             pets_count=hh_data.get("pets_count", 0),
             pets_info=hh_data.get("pets_info"),
@@ -206,27 +197,39 @@ def seed_example_data(db: Session):
         if apt is not None:
             assign_household(db, apt, hh.id)
 
-    # Beispiel-Bewerbungen auf echte Wohnungen (siehe seed_apartments)
-    applicant_hhs = [h for h in all_households if not h.is_resident]
-    example_applications = [
-        (0, ["P.104", "P.204"]),          # Kruse (1 Pers.)   → 1,5 Zimmer
-        (1, ["P.106", "P.206"]),          # Venjakob/Höbing   → 3,5 Zimmer
-        (2, ["P.106", "P.206"]),          # R. Tenk           → 3,5 Zimmer
-        (3, ["P.211", "W.212"]),          # Nolte (3 Pers.)   → 4,5 / 5,5 Zimmer
-        (4, ["P.208", "P.106"]),          # Rocha (2 Pers.)   → 3,5 Zimmer
+    # -- Bewerbungen -------------------------------------------------------
+    # Ohne offene Bewerbung steht ein Haushalt in keiner Rangliste. Jeder
+    # Bewerber erhält deshalb eine Wartepool-Bewerbung; der Wunsch wird aus der
+    # Schreibweise der gepflegten Liste geparst ("3,5 A").
+    by_name = {hh.name: hh for hh in all_households}
+    for hh_data in applicants:
+        wish_list, _ = parse_wish(hh_data.get("wish"))
+        db.add(models.Application(
+            household_id=by_name[hh_data["name"]].id,
+            kind="wartepool",
+            status="offen",
+            requested_at=hh_data.get("requested_at", _d(2024, 1, 15)),
+            wishes=wish_list,
+            created_at=_d(2024, 1, 15),
+        ))
+
+    # Zwei Bewohner-Haushalte wollen wechseln, einer möchte ein Joker-Zimmer.
+    # Hier entscheidet nicht das Scoring, sondern das Datum des Wunsches.
+    resident_applications = [
+        ("Elke Stücke",      "wechselwunsch", "2,5 A",  _d(2023, 5, 4),  "Wohnung zu groß"),
+        ("Christa Köller",   "wechselwunsch", "2,5 A",  _d(2024, 9, 17), None),
+        ("Sebastian Danek",  "joker",         "Joker",  _d(2024, 3, 1),  None),
     ]
-    apartments_by_unit = {
-        apt.unit_number: apt
-        for apt in db.query(models.Apartment).all()
-    }
-    for hh_idx, units in example_applications:
-        for unit in units:
-            apt = apartments_by_unit.get(unit)
-            if apt is None:
-                continue
-            db.add(models.Application(
-                household_id=applicant_hhs[hh_idx].id,
-                apartment_id=apt.id,
-            ))
+    for name, kind, wish, requested, note in resident_applications:
+        wish_list, _ = parse_wish(wish)
+        db.add(models.Application(
+            household_id=by_name[name].id,
+            kind=kind,
+            status="offen",
+            requested_at=requested,
+            wishes=wish_list,
+            note=note,
+            created_at=requested,
+        ))
 
     db.commit()

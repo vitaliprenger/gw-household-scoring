@@ -12,6 +12,7 @@ import {
 } from '../../types';
 import { commitIndividualBogen } from '../../api';
 import MatchingDialog from './MatchingDialog';
+import { isCertainMatch, isUncertainMatch } from './matching';
 
 interface IndividualImportWizardProps {
     open: boolean;
@@ -27,22 +28,26 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
     const [decisions, setDecisions] = useState<Record<string, IndividualDecision>>(() => {
         const init: Record<string, IndividualDecision> = {};
         for (const ind of analysis.individuals) {
-            const mt = ind.match_result.type;
             const inactive = ind.already_imported || ind.is_older;
             let action: 'update' | 'skip';
             if (inactive) {
                 action = 'skip';
-            } else if (mt === 'exact_member_nr' || mt === 'exact_name_dob' || mt === 'fuzzy') {
+            } else if (isCertainMatch(ind.match_result)) {
                 action = 'update';
             } else {
-                // Der Individualbogen legt keine Personen an; ohne Treffer
-                // bleibt nur das Überspringen.
+                // Nur ein eindeutiger Treffer wird automatisch zugeordnet (siehe
+                // matching.ts): ein unscharfer Namenstreffer bliebe sonst
+                // unbemerkt und schriebe die Angaben der falschen Person zu.
+                // Der Individualbogen legt keine Personen an, deshalb ist
+                // "Überspringen" die unschuldige Vorbelegung.
                 action = 'skip';
             }
             init[ind.temp_id] = {
                 temp_id: ind.temp_id,
                 action,
-                target_person_id: ind.match_result.matched_household_id ?? undefined,
+                target_person_id: isCertainMatch(ind.match_result)
+                    ? ind.match_result.matched_household_id ?? undefined
+                    : undefined,
                 confirm_data_removals: false,
             };
         }
@@ -53,6 +58,12 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
     const [committing, setCommitting] = useState(false);
     const [commitResult, setCommitResult] = useState<IndividualCommitResponse | null>(null);
     const [error, setError] = useState('');
+
+    // Datensätze, deren Treffer nur ein Vorschlag ist und die deshalb nicht
+    // vorausgewählt wurden (siehe matching.ts).
+    const uncertainCount = analysis.individuals.filter(
+        (ind) => !ind.already_imported && !ind.is_older && isUncertainMatch(ind.match_result),
+    ).length;
 
     function updateDecision(tempId: string, patch: Partial<IndividualDecision>) {
         setDecisions((prev) => ({
@@ -94,6 +105,16 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                         Es sind noch keine Personen vorhanden. Bitte zuerst die
                         Mitgliederliste (vCard) importieren — der Individualbogen
                         ergänzt nur bestehende Personen.
+                    </Alert>
+                )}
+
+                {uncertainCount > 0 && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                        <strong>{uncertainCount} Datensatz/Datensätze mit nur ähnlichem Treffer.</strong>{' '}
+                        Nur ein eindeutiger Treffer wird automatisch zugeordnet —
+                        Mitgliedsnummer, exakter Name oder Wohnungsnummer. Ein nur ähnlicher
+                        Name steht auf „Überspringen"; der Vorschlag lässt sich über den
+                        Treffer-Chip prüfen und übernehmen.
                     </Alert>
                 )}
 
@@ -189,6 +210,12 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                             value={dec?.action ?? 'skip'}
                                                             onChange={(e) => updateDecision(ind.temp_id, {
                                                                 action: e.target.value as 'update' | 'skip',
+                                                                // Wählt jemand "Aktualisieren", gilt der Vorschlag
+                                                                // des Matchings -- vorausgewählt war er nicht.
+                                                                target_person_id: e.target.value === 'update'
+                                                                    ? dec?.target_person_id
+                                                                        ?? ind.match_result.matched_household_id ?? undefined
+                                                                    : undefined,
                                                             })}
                                                         >
                                                             {(dec?.target_person_id || ind.match_result.matched_household_id) && (

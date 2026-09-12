@@ -218,11 +218,19 @@ def test_example_data_links_residents():
 
     applicants = db.query(models.Household).filter(models.Household.is_resident == False).all()  # noqa: E712
     check("Bewerber ohne Wohnung", all(h.apartment is None for h in applicants))
-    check("Bewerbungen angelegt", db.query(models.Application).count() == 10,
-          f"({db.query(models.Application).count()})")
-    check("Bewerbungen zeigen auf echte Wohnungen", all(
-        a.apartment is not None for a in db.query(models.Application).all()
-    ))
+    # Sechs Wartepool-Bewerbungen, zwei Wechselwünsche, eine Joker-Bewerbung
+    applications = db.query(models.Application).all()
+    check("Bewerbungen angelegt", len(applications) == 9, f"({len(applications)})")
+    check("jeder Bewerber hat eine offene Wartepool-Bewerbung",
+          {h.id for h in applicants} == {
+              a.household_id for a in applications
+              if a.kind == "wartepool" and a.status == "offen"
+          })
+    check("Bewohner-Bewerbungen sind Wechselwunsch oder Joker",
+          {a.kind for a in applications if a.household.is_resident}
+          == {"wechselwunsch", "joker"})
+    check("offene Bewerbungen tragen noch keine Wohnung",
+          all(a.fulfilled_apartment_id is None for a in applications))
     check("keine Wohnung doppelt belegt", len({
         a.household_id for a in db.query(models.Apartment).filter(
             models.Apartment.household_id.isnot(None)).all()

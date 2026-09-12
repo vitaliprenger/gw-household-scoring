@@ -1,6 +1,6 @@
 import pandas as pd
 from sqlalchemy.orm import Session, selectinload
-from . import models, apartment_seed_data, scoring
+from . import models, apartment_seed_data, scoring, wishes as wishes_mod
 from datetime import datetime, date
 from typing import NamedTuple
 import io
@@ -120,7 +120,68 @@ def assign_household(db: Session, apartment: models.Apartment, household_id: int
     if not household.apartment_unit:
         household.apartment_unit = apartment.unit_number
     household.updated_at = datetime.utcnow()
+    close_open_applications(db, household_id, apartment)
     return True
+
+
+# --- Bewerbungen -------------------------------------------------------------
+
+def open_applications(
+    db: Session,
+    household_id: int | None = None,
+    kind: str | None = None,
+) -> list[models.Application]:
+    """Offene, nicht archivierte Bewerbungen."""
+    query = db.query(models.Application).filter(
+        models.Application.status == "offen",
+        models.Application.archived == False,
+    )
+    if household_id is not None:
+        query = query.filter(models.Application.household_id == household_id)
+    if kind is not None:
+        query = query.filter(models.Application.kind == kind)
+    return query.all()
+
+
+def close_open_applications(
+    db: Session,
+    household_id: int,
+    apartment: models.Apartment,
+) -> int:
+    """Schließt beim Einzug alle offenen Bewerbungen des Haushalts ab.
+
+    Damit entsteht die Spalte "neue Wohnung" der gepflegten Liste von selbst:
+    Status und Wohnung werden nicht getippt, sondern aus der Zuordnung
+    abgeleitet. Wird die Zuordnung später wieder gelöst, bleibt die erfüllte
+    Bewerbung als Historie bestehen.
+    """
+    now = datetime.utcnow()
+    closed = 0
+    for application in open_applications(db, household_id=household_id):
+        application.status = "erfuellt"
+        application.fulfilled_apartment_id = apartment.id
+        application.fulfilled_at = now
+        application.updated_at = now
+        closed += 1
+    return closed
+
+
+def application_wishes(application: models.Application) -> list[dict]:
+    """Die Wünsche einer Bewerbung in kanonischer Form."""
+    return wishes_mod.normalize_wishes(application.wishes or [])
+
+
+def wishes_match_category(
+    application: models.Application,
+    size_rooms: int | None,
+    funding_type: str | None,
+    apartment_category: str | None = None,
+) -> bool:
+    """Wünscht sich die Bewerbung diese Wohnungskategorie ausdrücklich?"""
+    return any(
+        wishes_mod.wish_matches(wish, size_rooms, funding_type, apartment_category)
+        for wish in application_wishes(application)
+    )
 
 
 # --- Eignung Haushalt <-> Wohnung ---------------------------------------
@@ -218,6 +279,73 @@ def apartment_categories(db: Session) -> dict[tuple[int | None, str], int]:
     return categories
 
 
+def apartment_category_options(db: Session) -> list[dict]:
+    """Wählbare Wunschkategorien, abgeleitet aus den Wohnungsstammdaten.
+
+    Das ist die Auswahlliste der Bewerbungspflege: Sie entsteht aus den
+    tatsächlich vorhandenen Wohnungen und kann deshalb nicht von den
+    Stammdaten abweichen — anders als eine getippte Angabe. Ausbau- und
+    Atelierwohnungen laufen als Standardwohnungen mit; Clusterwohnungen und
+    Joker-Zimmer behalten ihre Wohnungsart, weil sie ausdrücklich gewünscht
+    werden müssen.
+    """
+    counts: dict[tuple, int] = {}
+    for size_rooms, funding_type, category in db.query(
+        models.Apartment.size_rooms,
+        models.Apartment.funding_type,
+        models.Apartment.apartment_category,
+    ).all():
+        key_category = (category or "").strip()
+        if key_category not in NON_SCORED_CATEGORIES:
+            key_category = None
+        key = (size_rooms, funding_type, key_category)
+        counts[key] = counts.get(key, 0) + 1
+
+    def sort_key(key: tuple) -> tuple:
+        size_rooms, funding_type, category = key
+        return (
+            0 if category is None else (1 if category == wishes_mod.CATEGORY_CLUSTER else 2),
+            size_rooms is None,
+            size_rooms or 0,
+            funding_type or "",
+        )
+
+    options = []
+    for key in sorted(counts, key=sort_key):
+        size_rooms, funding_type, category = key
+        options.append({
+            "size_rooms": size_rooms,
+            "funding_type": funding_type,
+            "apartment_category": category,
+            "label": wishes_mod.wish_label({
+                "size_rooms": size_rooms,
+                "funding_type": funding_type,
+                "apartment_category": category,
+            }),
+            "apartment_count": counts[key],
+        })
+
+    # Die gepflegte Liste notiert Cluster und Joker oft ohne Zimmerzahl
+    # ("Cluster", "Cluster B", "Joker"). Diese Sammel-Wünsche gehören deshalb
+    # ebenfalls in die Auswahl.
+    for category in (wishes_mod.CATEGORY_CLUSTER, wishes_mod.CATEGORY_JOKER):
+        keys = [k for k in counts if k[2] == category]
+        # Gibt es die Art nur in einer Ausprägung, wäre der Sammel-Wunsch ein Duplikat.
+        if len(keys) < 2:
+            continue
+        total = sum(counts[k] for k in keys)
+        options.append({
+            "size_rooms": None,
+            "funding_type": None,
+            "apartment_category": category,
+            "label": wishes_mod.wish_label({
+                "size_rooms": None, "funding_type": None, "apartment_category": category,
+            }),
+            "apartment_count": total,
+        })
+    return options
+
+
 class RankedEntry(NamedTuple):
     """Ein Haushalt in einer Wohnungskategorie samt der dort erreichten Punkte."""
 
@@ -226,52 +354,112 @@ class RankedEntry(NamedTuple):
     base_score: float        # haushaltseigene Kriterien (``Household.total_score``)
     occupancy_score: float   # gewichtete Wohnraumausnutzung dieser Zimmerzahl
     total_score: float       # base_score + occupancy_score
+    application: models.Application
+    by_wish_only: bool       # nur über den ausdrücklichen Wunsch in dieser Kategorie
+
+
+class PriorityEntry(NamedTuple):
+    """Ein Wechselwunsch in einer Wohnungskategorie -- Vorrang nach Datum."""
+
+    household: models.Household
+    members: int
+    application: models.Application
+
+
+def _requested_sort_key(application: models.Application):
+    """Älterer Wunsch zuerst; Bewerbungen ohne Datum ans Ende."""
+    return (application.requested_at is None, application.requested_at or datetime.max)
+
+
+def open_applications_with_households(db: Session, kind: str) -> list[models.Application]:
+    """Offene Bewerbungen einer Art samt Haushalt und Personen, ohne archivierte."""
+    return [
+        application
+        for application in (
+            db.query(models.Application)
+            .options(
+                selectinload(models.Application.household)
+                .selectinload(models.Household.people)
+            )
+            .filter(models.Application.status == "offen")
+            .filter(models.Application.archived == False)
+            .filter(models.Application.kind == kind)
+            .all()
+        )
+        if application.household is not None and not application.household.archived
+    ]
 
 
 def build_ranking(db: Session) -> list[dict]:
     """Rangliste je Wohnungskategorie (Zimmerzahl x Förderungsart).
 
-    Haushalte bewerben sich nicht auf einzelne Wohnungen: jeder nicht
-    archivierte Haushalt ohne Wohnung erscheint automatisch in jeder Kategorie,
-    für die er in Frage kommt (siehe ``is_eligible``). Bestehende Bewohner
-    (``is_resident``) suchen keine Wohnung und bleiben deshalb aus der
-    Rangliste heraus. Innerhalb einer Kategorie genügt
-    es, wenn er für **eine** der Wohnungen in Frage kommt — deshalb zählt die
-    niedrigste Mindestbewohnerzahl der Kategorie.
+    Bezugsmenge sind die Haushalte mit **offener Bewerbung**; ohne Bewerbung
+    steht ein Haushalt in keiner Kategorie.
+
+    Je Kategorie entstehen zwei Blöcke:
+
+    **Vorrang** — offene Bewerbungen der Art ``wechselwunsch``. Das sind
+    bestehende Bewohner-Haushalte; sie werden vorrangig berücksichtigt und
+    nach dem Zeitpunkt des Wunsches (``requested_at``) gereiht, nicht per
+    Scoring. Sie erscheinen **nur** in den ausdrücklich gewünschten
+    Kategorien.
+
+    **Rangliste** — offene Bewerbungen der Art ``wartepool``: Haushalte, die
+    noch nicht im Projekt wohnen. Sie erscheinen in jeder Kategorie, für die
+    sie in Frage kommen (``is_eligible``; innerhalb einer Kategorie genügt
+    eine passende Wohnung, deshalb zählt die niedrigste Mindestbewohnerzahl)
+    **und** zusätzlich in jeder Kategorie, die sie ausdrücklich wünschen.
+    Letztere tragen ``by_wish_only``: die Eignungsprüfung würde sie
+    ausschließen, aber die Angaben zum Haushalt (z. B. die Mitgliederzahl)
+    sind möglicherweise unvollständig — die Entscheidung bleibt bei der
+    Belegungskommission.
 
     Clusterwohnungen und Joker-Zimmer werden nicht per Scoring vergeben und
-    bilden deshalb keine Kategorie (siehe ``apartment_categories``).
+    bilden deshalb keine Kategorie (siehe ``apartment_categories``); Joker
+    läuft als eigene Warteliste (``build_joker_waitlist``).
 
     Der Score ist **nicht** pauschal: zur Grundpunktzahl aus
     ``scoring.run_scoring`` kommt je Kategorie die Wohnraumausnutzung hinzu
-    (siehe ``scoring.calculate_occupancy_subscore``). Derselbe Haushalt steht
+    (siehe ``scoring.calculate_occupancy_score``). Derselbe Haushalt steht
     in einer Kategorie, die er ausfüllt, deshalb höher als in einer größeren.
-
-    Liefert je Kategorie ``size_rooms``, ``funding_type`` und die nach dem
-    Gesamtscore der Kategorie absteigend sortierten ``RankedEntry``.
     """
     categories = apartment_categories(db)
     config = scoring.get_config_dict(db)
 
-    households = (
-        db.query(models.Household)
-        .options(selectinload(models.Household.people))
-        .filter(models.Household.archived == False)
-        .filter(models.Household.is_resident == False)
-        .all()
-    )
-    # Mitgliederzahl einmal vorberechnen statt je Kategorie
-    scored = [(h, member_count(h)) for h in households]
+    # Wartepool: Bewohner suchen keine Wohnung und bleiben draußen.
+    pool = [
+        (application, member_count(application.household))
+        for application in open_applications_with_households(db, "wartepool")
+        if not application.household.is_resident
+    ]
+    changes = [
+        (application, member_count(application.household))
+        for application in open_applications_with_households(db, "wechselwunsch")
+    ]
 
     groups = []
     for (size_rooms, funding_type), min_occupants in sorted(
         categories.items(),
         key=lambda item: (item[0][0] is None, item[0][0] or 0, item[0][1]),
     ):
+        priority = [
+            PriorityEntry(
+                household=application.household,
+                members=members,
+                application=application,
+            )
+            for application, members in changes
+            if wishes_match_category(application, size_rooms, funding_type)
+        ]
+        priority.sort(key=lambda e: _requested_sort_key(e.application))
+
         entries = []
-        for household, members in scored:
-            if not is_eligible(members, household.wbs_status,
-                               size_rooms, min_occupants, funding_type):
+        for application, members in pool:
+            household = application.household
+            eligible = is_eligible(members, household.wbs_status,
+                                   size_rooms, min_occupants, funding_type)
+            wished = wishes_match_category(application, size_rooms, funding_type)
+            if not eligible and not wished:
                 continue
             base = household.total_score or 0.0
             occupancy = scoring.calculate_occupancy_score(members, size_rooms, config)
@@ -281,11 +469,33 @@ def build_ranking(db: Session) -> list[dict]:
                 base_score=base,
                 occupancy_score=occupancy,
                 total_score=base + occupancy,
+                application=application,
+                by_wish_only=not eligible,
             ))
         entries.sort(key=lambda e: e.total_score, reverse=True)
         groups.append({
             "size_rooms": size_rooms,
             "funding_type": funding_type,
+            "priority": priority,
             "households": entries,
         })
     return groups
+
+
+def build_joker_waitlist(db: Session) -> list[PriorityEntry]:
+    """Bewerbungen auf ein Joker-Zimmer, nach dem Zeitpunkt des Wunsches gereiht.
+
+    Joker-Zimmer können nur von bestehenden Haushalten angemietet werden und
+    bilden keine Wohnungskategorie. Die Vergabe folgt wie beim Wechselwunsch
+    der Reihenfolge, in der der Wunsch geäußert wurde.
+    """
+    entries = [
+        PriorityEntry(
+            household=application.household,
+            members=member_count(application.household),
+            application=application,
+        )
+        for application in open_applications_with_households(db, "joker")
+    ]
+    entries.sort(key=lambda e: _requested_sort_key(e.application))
+    return entries

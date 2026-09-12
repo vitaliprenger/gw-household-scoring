@@ -262,8 +262,8 @@ def household_row(**overrides) -> dict:
         "financial_status": "knapp",
         "declared_member_count": 4,
         "wheelchair_accessible": False,
-        "desired_apartment_type": ["Standard Wohnungstypen"],
-        "desired_apartment_size": "4 Zimmer",
+        "wishes": [{"size_rooms": 4, "funding_type": None, "apartment_category": None}],
+        "unparsed_wishes": [],
         "pets_count": 1,
         "pets_info": "Katze",
         "persons": [
@@ -305,7 +305,11 @@ def test_household_bogen_never_creates():
 
     hh = db.query(models.Household).first()
     check_equal("WBS-Status ergänzt", hh.wbs_status, "WBS A")
-    check_equal("Wohnungswunsch ergänzt", hh.desired_apartment_size, "4 Zimmer")
+    # Der Wohnungswunsch landet in der Wartepool-Bewerbung, nicht am Haushalt.
+    application = import_service.open_wartepool_application(hh, db)
+    check("Wartepool-Bewerbung angelegt", application is not None)
+    check_equal("Wohnungswunsch ergänzt", application.wishes,
+                [{"size_rooms": 4, "funding_type": None, "apartment_category": None}])
     check_equal("Haustiere ergänzt", hh.pets_count, 1)
 
 

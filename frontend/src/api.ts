@@ -17,6 +17,12 @@ import {
     VcfCommitResponse,
     ResidentStatistics,
     PersonMissingData,
+    Application,
+    ApartmentCategory,
+    JokerWaitEntry,
+    ApplicationAnalysisResponse,
+    ApplicationCommitRequest,
+    ApplicationCommitResponse,
 } from './types';
 
 const API_URL = 'http://127.0.0.1:8000';
@@ -146,6 +152,40 @@ export const unassignApartment = async (apartmentId: number) => {
     return response.data;
 };
 
+export const getApartmentCategories = async () => {
+    const response = await api.get<ApartmentCategory[]>('/apartments/categories');
+    return response.data;
+};
+
+// --- Bewerbungen ---
+
+export const getApplications = async (params: {
+    kind?: string; status?: string; household_id?: number; include_archived?: boolean;
+} = {}) => {
+    const response = await api.get<Application[]>('/applications/', { params });
+    return response.data;
+};
+
+export const createApplication = async (data: Partial<Application>) => {
+    const response = await api.post<Application>('/applications/', data);
+    return response.data;
+};
+
+export const updateApplication = async (id: number, data: Partial<Application>) => {
+    const response = await api.put<Application>(`/applications/${id}`, data);
+    return response.data;
+};
+
+export const deleteApplication = async (id: number) => {
+    const response = await api.delete(`/applications/${id}`);
+    return response.data;
+};
+
+export const getJokerWaitlist = async () => {
+    const response = await api.get<JokerWaitEntry[]>('/applications/joker');
+    return response.data;
+};
+
 export const getScoringConfig = async () => {
     const response = await api.get<ScoringConfig[]>('/scoring/config');
     return response.data;
@@ -226,5 +266,21 @@ export const analyzeVcf = async (file: File): Promise<VcfAnalysisResponse> => {
 
 export const commitVcf = async (request: VcfCommitRequest): Promise<VcfCommitResponse> => {
     const response = await api.post<VcfCommitResponse>('/import/vcf/commit', request);
+    return response.data;
+};
+
+export const analyzeApplicationList = async (file: File): Promise<ApplicationAnalysisResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post<ApplicationAnalysisResponse>('/import/applications/analyze', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+};
+
+export const commitApplicationList = async (
+    request: ApplicationCommitRequest,
+): Promise<ApplicationCommitResponse> => {
+    const response = await api.post<ApplicationCommitResponse>('/import/applications/commit', request);
     return response.data;
 };

@@ -52,10 +52,13 @@ Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrati
 | `backend/__init__.py` | Leerer Package-Marker für relative Imports und `backend.*`-Importe. | Python-Imports, Uvicorn und Tests implizit. | Nichts. |
 | `backend/database.py` | Definiert SQLite-URL, SQLAlchemy-Engine, `SessionLocal` und deklarative `Base`. | `models.py`, `main.py`; indirekt alle DB-nutzenden Module. | SQLAlchemy. |
 | `backend/auth.py` | Ein globaler zufälliger Session-Token; Passwortprüfung gegen `APP_PASSWORD`; FastAPI-Dependency `require_auth`. | `main.login`; alle geschützten Routen über `Depends(auth.require_auth)`. | `OAuth2PasswordBearer`, `secrets.compare_digest`. |
-| `backend/models.py` | SQLAlchemy-ORM für `Household`, `Person`, `Apartment`, `Application`, `ScoringConfig` samt Beziehungen. | `main.py`, `services.py`, `scoring.py`, beide Importservices und DB-nahe Tests. | `database.Base`, SQLAlchemy-Spalten und Beziehungen. |
-| `backend/schemas.py` | Pydantic-Verträge für CRUD, Ranking sowie Analyse-/Commit-Nachrichten der drei Importe. | `main.py`, `import_service.py`, `vcf_import_service.py`; gespiegelt durch `frontend/src/types.ts`. | Pydantic. |
+| `backend/models.py` | SQLAlchemy-ORM für `Household`, `Person`, `Apartment`, `Application` (Bewerbung mit Art, Wunsch, Status und Historie), `ScoringConfig` samt Beziehungen. | `main.py`, `services.py`, `scoring.py`, beide Importservices und DB-nahe Tests. | `database.Base`, SQLAlchemy-Spalten und Beziehungen. |
+| `backend/schemas.py` | Pydantic-Verträge für CRUD, Bewerbungen, Ranking sowie Analyse-/Commit-Nachrichten der vier Importe. | `main.py`, `import_service.py`, `vcf_import_service.py`, `application_import_service.py`; gespiegelt durch `frontend/src/types.ts`. | Pydantic. |
+| `frontend/src/components/import/matching.ts` | Zuordnungsregel der Import-Assistenten: `isCertainMatch`, `isUncertainMatch` und der Aktionswert `UNDECIDED` für Zeilen ohne Entscheidung. | Alle vier Import-Assistenten. | `MatchResult.is_certain` aus dem Backend. |
+| `backend/wishes.py` | Wohnungswünsche: Parser für die Schreibweise der gepflegten Liste („2,5 A"), Anzeige-Labels, Abgleich gegen Wohnungskategorien. | `services.py`, `import_service.py`, `application_import_service.py`, `main.py` (Startmigration), Tests. | Nur Standardbibliothek. |
+| `backend/application_import_service.py` | Import der gepflegten Bewerbungsliste (.xlsx): Spaltenerkennung, Zeilen-Parser, Haushalts-Matching über Wohnungsnummer/Person/Name, Commit inkl. Anlegen von Haushalten. | `main.py`, `tests/test_application_import.py`. | `import_service` (Session-Store, Matching), `wishes`, `services`, Pandas. |
 | `backend/apartment_seed_data.py` | Statische Stammdaten für 131 Wohnungen sowie deren Feldreihenfolge. | `services.seed_apartments`, `tests/test_apartments.py`. | Keine weitere Projektlogik. |
-| `backend/services.py` | Einfacher alter Excel-Direktimport, Wohnungs-Seed, Wohnungs-/Haushaltszuordnung. | `main.py`; `tests/test_apartments.py`. | Pandas, ORM-Modelle, `apartment_seed_data`. |
+| `backend/services.py` | Einfacher alter Excel-Direktimport, Wohnungs-Seed, Wohnungs-/Haushaltszuordnung, Bewerbungsregeln (offene Bewerbungen, Abschluss beim Einzug), Wunschkategorien, Rangliste und Joker-Warteliste. | `main.py`; `tests/test_apartments.py`. | Pandas, ORM-Modelle, `apartment_seed_data`. |
 | `backend/scoring.py` | Standardgewichte/-ziele, Bewohnerstatistik, Teil-Scores und Persistierung des Gesamt-Scores. | Startup und Scoring-/Config-Routen in `main.py`. | ORM-Modelle und Pandas-Datumsrechnung. |
 | `backend/import_service.py` | In-Memory-Import-Sessions; Parsen, Deduplizieren, Matching, Vorschau und Commit für Haushalts- und Individualbogen. Stellt gemeinsame Namens-/Datums-/Matching-Helfer für vCard bereit. | Fragebogenrouten in `main.py`; `vcf_import_service.py`. | Pandas, ORM-Modelle, Pydantic-Schemas. |
 | `backend/vcf_import_service.py` | vCard-Decoding/Parsing, NOTE-Auswertung, Haushaltsbildung, Vorschau, Matching und Commit. Erster Schritt der Importkette: legt Personen an, Haushalte nur bei Wohnungszuordnung. | vCard-Routen in `main.py`; `tests/test_vcf_import.py`, `tests/test_import_order.py`. | Gemeinsame Helfer (u. a. `match_person_in`) und Session-Store aus `import_service.py`, ORM-Modelle, Schemas. |
@@ -94,12 +97,19 @@ Beim Import von `backend.main` werden Tabellen angelegt und SQLite-Schemamigrati
 | `GET /apartments/` | `main.read_apartments` | `api.getApartments` | ORM-Abfrage, ergänzt `household_name` |
 | `POST /apartments/` | `main.create_apartment` | `api.createApartment` | Erzeugt Wohnung |
 | `PUT /apartments/{id}` | `main.update_apartment` | `api.updateApartment` | Pydantic-Patch auf Wohnung |
-| `DELETE /apartments/{id}` | `main.delete_apartment` | `api.deleteApartment` | Löscht zuerst Bewerbungen, dann Wohnung |
+| `DELETE /apartments/{id}` | `main.delete_apartment` | `api.deleteApartment` | Löst den Wohnungsverweis erfüllter Bewerbungen, löscht dann die Wohnung |
+| `GET /apartments/categories` | `main.read_apartment_categories` | `api.getApartmentCategories` | `services.apartment_category_options` — Auswahlliste der Wunschkategorien |
 | `POST /apartments/{id}/assign/{household_id}` | `main.assign_apartment` | `api.assignApartment` | `services.assign_household` |
 | `DELETE /apartments/{id}/assign` | `main.unassign_apartment` | `api.unassignApartment` | `services.assign_household(..., None)` |
-| `GET /applications/` | `main.read_applications` | Kein Client im Repository gefunden; extern per HTTP möglich, Nutzung **unklar**. | ORM-Abfrage |
-| `POST /applications/` | `main.create_application` | Kein Client im Repository gefunden; extern per HTTP möglich, Nutzung **unklar**. | Erzeugt Bewerbung |
-| `GET /ranking/` | `main.get_ranking` | `api.getRanking` | Gruppiert Apartments nach Zimmerzahl/Förderung, verbindet Bewerbungen und sortiert Haushalte nach Score |
+| `GET /applications/` | `main.read_applications` | `api.getApplications`; `ApplicationsTab`, `HouseholdDetailDialog`, `App` | Gefilterte ORM-Abfrage, angereichert um Haushaltsangaben |
+| `POST /applications/` | `main.create_application` | `api.createApplication`; `ApplicationEditDialog` | Erzeugt Bewerbung; 409 bei zweiter offener Bewerbung derselben Art |
+| `PUT /applications/{id}` | `main.update_application` | `api.updateApplication`; `ApplicationEditDialog` | Pydantic-Patch; normalisiert Wünsche, pflegt `fulfilled_at` |
+| `DELETE /applications/{id}` | `main.delete_application` | `api.deleteApplication`; `ApplicationsTab` | Löscht Bewerbung endgültig |
+| `PATCH /applications/{id}/archive` | `main.toggle_archive_application` | Kein Client im Repository gefunden; extern per HTTP möglich, Nutzung **unklar**. | Schaltet `archived` um |
+| `GET /applications/joker` | `main.read_joker_waitlist` | `api.getJokerWaitlist`; `ApplicationsTab` | `services.build_joker_waitlist` |
+| `POST /import/applications/analyze` | `main.analyze_application_list` | `api.analyzeApplicationList`; `ImportTab` | `application_import_service.analyze_application_list` |
+| `POST /import/applications/commit` | `main.commit_application_list` | `api.commitApplicationList`; `ApplicationImportWizard` | `application_import_service.commit_application_list` |
+| `GET /ranking/` | `main.get_ranking` | `api.getRanking` | `services.build_ranking`: je Kategorie ein Vorrang-Block (Wechselwünsche nach Datum) und die Wartepool-Rangliste nach Score |
 | `POST /upload/households/` | `main.upload_households` | `api.uploadHouseholds`; `tests/test_flow.py` | `services.process_excel_upload` |
 | `POST /scoring/calculate` | `main.calculate_scores` | `api.calculateScores`; `tests/test_flow.py` | `scoring.run_scoring` |
 | `GET /statistics/residents` | `main.get_resident_statistics` | `api.getResidentStatistics` | `scoring.calculate_resident_statistics` |
@@ -261,7 +271,6 @@ Die Dateien verwenden eigene `if __name__ == "__main__"`-Runner und kein pytest-
 - `backend/schemas.py`/`import_service.py`: `IndividualDecision.confirm_data_removals` wird im Frontend immer mitgesendet, im Backend aber nie gelesen.
 - `backend/schemas.py`/`import_service.py`: `HouseholdDecision.confirm_data_removals` wird im Frontend zur Freigabe des Buttons verwendet, im Backend-Commit selbst jedoch nicht geprüft.
 - `backend/scoring.py`: `weight_occupancy` wird angelegt und im Frontend editierbar angezeigt, aber `run_scoring` berechnet keinen Belegungs-Teilscore und liest das Gewicht nicht.
-- `backend/models.py`: `Application.status` wird gespeichert und ausgegeben, aber innerhalb des Repositorys weder geändert noch für Ranking/Filter ausgewertet.
 - `frontend/package.json`: Für `@tanstack/react-query` und `react-router-dom` wurde kein Import im Frontend-Quellcode gefunden.
 - `backend/requirements.txt`: Für `python-jose[cryptography]` und `passlib[bcrypt]` wurde kein Import im Backend oder in den Tests gefunden.
 
@@ -273,7 +282,7 @@ Die Dateien verwenden eigene `if __name__ == "__main__"`-Runner und kein pytest-
 
 ### Kein interner Client, aber extern aufrufbar
 
-Für `POST /households/`, `GET /applications/`, `POST /applications/`, `GET /import/session/{id}` und `DELETE /import/session/{id}` gibt es keinen Aufruf aus `frontend/src` oder den Tests. Da FastAPI diese Handler als HTTP-Endpunkte registriert, sind sie nicht als toter Code einzustufen. Ob andere Clients sie nutzen, ist **unklar**.
+Für `POST /households/`, `PATCH /applications/{id}/archive`, `GET /import/session/{id}` und `DELETE /import/session/{id}` gibt es keinen Aufruf aus `frontend/src` oder den Tests. Da FastAPI diese Handler als HTTP-Endpunkte registriert, sind sie nicht als toter Code einzustufen. Ob andere Clients sie nutzen, ist **unklar**.
 
 Für die übrigen FastAPI-Handler zeigt eine reine Symbolsuche ebenfalls nur die Definition; ihr Aufrufer ist das FastAPI-Routing, nicht ein direkter Python-Aufruf. Gleiches gilt für React-Komponenten: Der vollständige Importgraph enthält für jede Datei unter `frontend/src/components` mindestens einen Aufrufer. Es wurde keine unreferenzierte Frontend-Quelldatei und kein unreferenzierter exportierter Frontend-Typ gefunden.
 

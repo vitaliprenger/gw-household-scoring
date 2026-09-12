@@ -8,6 +8,7 @@ Nutzt eine eigene In-Memory-SQLite-Datenbank; die Anwendungsdatenbank
 """
 import os
 import sys
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -16,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend import models, scoring, services
+from backend.wishes import parse_wish
 import example_data
 
 failures: list[str] = []
@@ -36,7 +38,13 @@ def make_session():
 
 
 def add_household(db, name, members, wbs=None, score=0.0, archived=False,
-                  archived_members=0, is_resident=False):
+                  archived_members=0, is_resident=False,
+                  application="wartepool", wish=None, requested_at=None):
+    """Haushalt mit Personen und -- sofern ``application`` gesetzt -- Bewerbung.
+
+    Ohne offene Bewerbung steht ein Haushalt in keiner Rangliste; die Tests
+    legen sie deshalb standardmäßig mit an.
+    """
     hh = models.Household(name=name, wbs_status=wbs, total_score=score, archived=archived,
                           is_resident=is_resident)
     db.add(hh)
@@ -48,8 +56,24 @@ def add_household(db, name, members, wbs=None, score=0.0, archived=False,
             last_name=name,
             archived=i >= members,
         ))
+    if application:
+        add_application(db, hh, kind=application, wish=wish, requested_at=requested_at)
     db.flush()
     return hh
+
+
+def add_application(db, hh, kind="wartepool", wish=None, requested_at=None, status="offen"):
+    wish_list, _ = parse_wish(wish)
+    application = models.Application(
+        household_id=hh.id,
+        kind=kind,
+        status=status,
+        wishes=wish_list,
+        requested_at=requested_at,
+    )
+    db.add(application)
+    db.flush()
+    return application
 
 
 def add_apartment(db, unit, size_rooms, funding, min_occupants, category=None):
@@ -74,6 +98,10 @@ def group_of(groups, size_rooms, funding):
 
 def names(group):
     return [e.household.name for e in group["households"]]
+
+
+def priority_names(group):
+    return [e.household.name for e in group["priority"]]
 
 
 def entry(group, name):
@@ -211,6 +239,130 @@ def test_ranking_excludes_residents():
     g = group_of(groups, 3, "freifinanziert")
     check("bestehende Bewohner fehlen in der Rangliste",
           names(g) == ["Bewerber"], str(names(g)))
+    db.close()
+
+
+def test_ranking_requires_open_application():
+    print("\n== Bewerbung als Voraussetzung ==")
+    db = make_session()
+    add_apartment(db, "A.1", 3, "freifinanziert", 1)
+    add_household(db, "MitBewerbung", 2, score=10.0)
+    add_household(db, "OhneBewerbung", 2, score=99.0, application=None)
+    zurueck = add_household(db, "Zurueckgezogen", 2, score=98.0)
+    zurueck.applications[0].status = "zurueckgezogen"
+    erfuellt = add_household(db, "Erfuellt", 2, score=97.0)
+    erfuellt.applications[0].status = "erfuellt"
+    db.commit()
+
+    g = group_of(services.build_ranking(db), 3, "freifinanziert")
+    check("nur Haushalte mit offener Bewerbung",
+          names(g) == ["MitBewerbung"], str(names(g)))
+    db.close()
+
+
+def test_wish_extends_categories():
+    print("\n== Wunsch erweitert die Kategorien ==")
+    db = make_session()
+    add_apartment(db, "A.4", 4, "freifinanziert", 3)
+    add_apartment(db, "A.2", 2, "freifinanziert", 1)
+    # Ein Einpersonenhaushalt erfuellt die Mindestbelegung der 4,5er nicht --
+    # wuenscht sie aber ausdruecklich (moeglicherweise unvollstaendige Angaben).
+    add_household(db, "Wuenscht", 1, score=10.0, wish="4,5 frei")
+    add_household(db, "Geeignet", 3, score=5.0)
+    db.commit()
+
+    groups = services.build_ranking(db)
+    g4 = group_of(groups, 4, "freifinanziert")
+    check("gewuenschte Kategorie trotz fehlender Eignung",
+          sorted(names(g4)) == ["Geeignet", "Wuenscht"], str(names(g4)))
+    check("Wunsch-Eintrag ist als solcher gekennzeichnet",
+          entry(g4, "Wuenscht").by_wish_only is True)
+    check("geeigneter Haushalt ist nicht als Wunsch-Eintrag markiert",
+          entry(g4, "Geeignet").by_wish_only is False)
+
+    g2 = group_of(groups, 2, "freifinanziert")
+    check("Eignung gilt weiterhin ohne Wunsch",
+          "Wuenscht" in names(g2) and entry(g2, "Wuenscht").by_wish_only is False,
+          str(names(g2)))
+    db.close()
+
+
+def test_priority_wechselwunsch():
+    print("\n== Vorrang: Wechselwunsch ==")
+    db = make_session()
+    add_apartment(db, "A.2", 2, "WBS A", 1)
+    add_apartment(db, "A.3", 3, "WBS A", 1)
+    add_household(db, "Frueher", 1, wbs="WBS A", is_resident=True,
+                  application="wechselwunsch", wish="2,5 A",
+                  requested_at=datetime(2023, 5, 4))
+    add_household(db, "Spaeter", 1, wbs="WBS A", is_resident=True,
+                  application="wechselwunsch", wish="2,5 A",
+                  requested_at=datetime(2024, 9, 17))
+    add_household(db, "Bewerber", 1, wbs="WBS A", score=99.0)
+    db.commit()
+
+    groups = services.build_ranking(db)
+    g2 = group_of(groups, 2, "WBS A")
+    check("aelterer Wechselwunsch steht vorn",
+          priority_names(g2) == ["Frueher", "Spaeter"], str(priority_names(g2)))
+    check("Wechselwunsch steht nicht in der Score-Rangliste",
+          names(g2) == ["Bewerber"], str(names(g2)))
+
+    g3 = group_of(groups, 3, "WBS A")
+    check("Wechselwunsch erscheint nur in der gewuenschten Kategorie",
+          priority_names(g3) == [], str(priority_names(g3)))
+    db.close()
+
+
+def test_joker_waitlist():
+    print("\n== Joker-Warteliste ==")
+    db = make_session()
+    add_apartment(db, "J.1", 1, "freifinanziert", 1, "Joker")
+    add_apartment(db, "A.3", 3, "freifinanziert", 1)
+    add_household(db, "Zuerst", 2, is_resident=True, application="joker", wish="Joker",
+                  requested_at=datetime(2024, 3, 1))
+    add_household(db, "Danach", 2, is_resident=True, application="joker", wish="Joker",
+                  requested_at=datetime(2025, 1, 9))
+    db.commit()
+
+    waitlist = services.build_joker_waitlist(db)
+    check("Joker-Bewerbungen nach Datum gereiht",
+          [e.household.name for e in waitlist] == ["Zuerst", "Danach"],
+          str([e.household.name for e in waitlist]))
+
+    groups = services.build_ranking(db)
+    check("Joker bildet keine Kategorie",
+          group_of(groups, 1, "freifinanziert") is None)
+    check("Joker-Bewerbung taucht in keiner Rangliste auf",
+          all(not names(g) and not priority_names(g) for g in groups),
+          str([(names(g), priority_names(g)) for g in groups]))
+    db.close()
+
+
+def test_closing_applications_on_move_in():
+    print("\n== Einzug schliesst Bewerbungen ==")
+    db = make_session()
+    apt = add_apartment(db, "A.3", 3, "freifinanziert", 1)
+    hh = add_household(db, "Bewerber", 2, score=10.0)
+    db.commit()
+
+    services.assign_household(db, apt, hh.id)
+    db.commit()
+
+    application = hh.applications[0]
+    check("Status auf erfuellt gesetzt", application.status == "erfuellt", application.status)
+    check("Wohnung als 'neue Wohnung' vermerkt",
+          application.fulfilled_apartment_id == apt.id)
+    check("Zeitpunkt der Erfuellung gesetzt", application.fulfilled_at is not None)
+
+    g = group_of(services.build_ranking(db), 3, "freifinanziert")
+    check("Haushalt verschwindet aus der Rangliste", names(g) == [], str(names(g)))
+
+    # Das Loesen der Zuordnung ist kein Zuruecknehmen: die Historie bleibt.
+    services.assign_household(db, apt, None)
+    db.commit()
+    check("erfuellte Bewerbung bleibt Historie",
+          application.status == "erfuellt" and application.fulfilled_apartment_id == apt.id)
     db.close()
 
 
@@ -400,6 +552,11 @@ if __name__ == "__main__":
     test_ranking_groups()
     test_ranking_excludes_archived()
     test_ranking_excludes_residents()
+    test_ranking_requires_open_application()
+    test_wish_extends_categories()
+    test_priority_wechselwunsch()
+    test_joker_waitlist()
+    test_closing_applications_on_move_in()
     test_no_duplicate_rows()
     test_occupancy_subscore()
     test_occupancy_weight()

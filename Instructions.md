@@ -47,11 +47,82 @@ Ein Haushalt erhält **kein pauschales Scoring**, sondern **ein Scoring je in Fr
 
 **Gesamt-Score einer Kategorie** = Grundpunktzahl + Wohnraumausnutzung dieser Zimmerzahl.
 
+### Bewerbungen
+
+Eine **Bewerbung** (`Application`) verbindet einen Haushalt mit einem oder mehreren
+Wohnungswünschen. Sie richtet sich **nicht** auf eine konkrete Wohnung: die konkrete Wohnung
+entsteht erst bei der Erfüllung.
+
+**Drei Bewerbungsarten** (`kind`):
+
+| Art | Wer | Vergabe |
+|-----|-----|---------|
+| `wartepool` | Haushalte, die **noch nicht** im Wohnprojekt wohnen | per **Scoring** (Rangliste je Wohnungskategorie) |
+| `wechselwunsch` | bestehende **Bewohner**-Haushalte | **vorrangig**, nach dem Zeitpunkt des Wunsches (`requested_at`) |
+| `joker` | bestehende Haushalte (Joker-Zimmer können nur von ihnen angemietet werden) | nach dem Zeitpunkt des Wunsches; eigene Warteliste, keine Wohnungskategorie |
+
+**Der Wunsch ist kein Freitext.** Er wird als Liste von **Wohnungskategorien** gespeichert
+(`Application.wishes`, JSON-Array, validiert über `schemas.ApplicationWish`):
+
+```
+{"size_rooms": 2, "funding_type": "WBS A", "apartment_category": null}
+```
+
+- Das entspricht genau dem Schlüssel, den `services.apartment_categories` aus den
+  Wohnungsstammdaten ableitet. Die Auswahlliste des Frontends entsteht aus den **tatsächlich
+  vorhandenen Wohnungen** (`GET /apartments/categories`, `services.apartment_category_options`) —
+  ein Wunsch kann deshalb nicht von den Stammdaten abweichen.
+- `null` heißt in jedem Feld „egal": so lässt sich auch „WBS B, Größe egal" abbilden.
+- Das halbe Zimmer entfällt wie überall im Modell (`3,5` → `size_rooms = 3`); die **Anzeige**
+  nutzt die Schreibweise der Liste („3,5 A", `wishes.wish_label`).
+- **Ausbau- und Atelierwohnungen zählen als Standardwohnungen** und erzeugen keine eigene
+  Wohnungsart im Wunsch. Clusterwohnungen und Joker-Zimmer müssen **ausdrücklich** gewünscht
+  werden (`wishes.wish_matches`).
+
+**Status und Historie** (`status`): `offen`, `erfuellt`, `zurueckgezogen`. Erfüllte und
+zurückgezogene Bewerbungen bleiben erhalten — so ist rückwirkend einsehbar, welche Bewerbungen es
+gab und warum sie endeten (`status_note`). Je Haushalt und Bewerbungsart darf es nur **eine offene**
+Bewerbung geben (HTTP 409); die Historie entsteht über den Status, nicht über Dubletten.
+
+**Erfüllung entsteht automatisch**: Zieht ein Haushalt in eine Wohnung ein
+(`services.assign_household`), werden alle seine offenen Bewerbungen auf `erfuellt` gesetzt und
+mit der Wohnung verknüpft (`fulfilled_apartment_id`, `fulfilled_at`) — siehe
+`services.close_open_applications`. Das **Lösen** der Zuordnung nimmt das nicht zurück: die
+erfüllte Bewerbung bleibt Historie, eine neue entsteht nicht. Wird die **Wohnung gelöscht**,
+verliert die Bewerbung nur den Verweis auf die Wohnung.
+
+**Abweichung von der Regelvergabe**: Gründe, aus denen im Einzelfall von der Regel abgewichen
+werden sollte, werden über das Kennzeichen `special_case` (Ja/Nein) mit Begründung
+(`special_case_note`) festgehalten. In Bewerbungsübersicht und Rangliste erscheint dazu ein
+Warnzeichen mit der Begründung als Tooltip. Der allgemeine Kommentar der gepflegten Liste steht in
+`note`.
+
+**Nicht gespeichert** werden „Aktueller Typ" und „Aktuelle Wohnung" der gepflegten Liste: beides
+ergibt sich aus der Wohnungszuordnung des Haushalts (`Household.assigned_apartment_unit`).
+
+#### Zuordnung zu Wohnungstypen
+
+- **Wartepool**: Ein Haushalt erscheint in jeder Kategorie, für die er **in Frage kommt**
+  (`services.is_eligible`, siehe „Wer kommt für eine Wohnung in Frage?") **und zusätzlich** in
+  jeder Kategorie, die er **ausdrücklich wünscht**. Letztere tragen `by_wish_only` und werden in
+  der Rangliste als „nur auf Wunsch" gekennzeichnet: die Eignungsprüfung würde sie ausschließen,
+  aber die Angaben zum Haushalt (etwa die Mitgliederzahl) sind möglicherweise unvollständig — die
+  Entscheidung bleibt bei der Belegungskommission. Sie werden regulär mitgescort und mitgerankt.
+- **Wechselwunsch**: Der Haushalt erscheint **nur** in den ausdrücklich gewünschten Kategorien.
+  Eine Eignungs-Automatik gibt es hier nicht, weil Bewohner-Haushalte sonst gar nicht in der
+  Rangliste stehen.
+- **Joker**: bildet keine Wohnungskategorie und erscheint in keiner Rangliste, sondern als eigene
+  Warteliste (`services.build_joker_waitlist`, `GET /applications/joker`).
+
 ### Ranking
 
+- Bezugsmenge sind ausschließlich Haushalte mit **offener Bewerbung**. Ohne Bewerbung steht ein
+  Haushalt in keiner Rangliste.
+- Je Wohnungskategorie entstehen zwei Blöcke: der **Vorrang-Block** (Wechselwünsche, nach
+  `requested_at` aufsteigend, ohne Score) steht **vor** der score-basierten **Wartepool-Rangliste**.
 - Das **Ranking** (Rangvergabe) erfolgt **pro Wohnungskategorie** (Kombination aus Wohnungsgröße und Förderungsart), nicht über alle Haushalte hinweg.
 - Innerhalb jeder Kategorie werden die Haushalte nach ihrem **Gesamt-Score dieser Kategorie** (Grundpunktzahl + Wohnraumausnutzung der Zimmerzahl) absteigend sortiert und erhalten einen Rang (1, 2, 3, …). Derselbe Haushalt kann in unterschiedlichen Kategorien unterschiedliche Scores und damit unterschiedliche Ränge haben.
-- Ein Haushalt **bewirbt sich nicht auf einzelne Wohnungen**: er erscheint automatisch in jeder Kategorie, für die er in Frage kommt, und damit in der Regel in mehreren Kategorien.
+- Ein Haushalt **bewirbt sich nicht auf einzelne Wohnungen**: er erscheint mit seiner Bewerbung in jeder Kategorie, für die er in Frage kommt oder die er wünscht, und damit in der Regel in mehreren Kategorien.
 
 #### Nicht per Scoring vergebene Wohnungen
 
@@ -79,9 +150,9 @@ Implementiert in `services.is_eligible` / `services.build_ranking`; getestet mit
 - **Größe**: 1 bis 5 Zimmer, als **ganze Zahl**. Das halbe Zimmer der Bauplanung entfällt: aus „3,5 Zimmer" wird `size_rooms = 3`.
 - **Klein**: Standardwohnungen, die für ihre Zimmerzahl klein ausfallen, tragen das Kennzeichen `is_small`. Das betrifft die sechs Wohnungen, die in der Bauplanung „Mini WG" hießen (P.101, P.102, P.201, P.202, P.301, P.302) — sie sind gewöhnliche 3-Zimmer-Wohnungen am unteren Rand ihrer Größenklasse, keine eigene Wohnungsart.
 - **Förderungsart**: „freifinanziert", „WBS A", „WBS B".
-- **Wohnungsart** (Mehrfachauswahl): „Standard Wohnungstypen", „Clusterwohnung", „Ausbauwohnung", „Atelierwohnung". Ein Haushalt kann sich auf mehrere Wohnungsarten gleichzeitig bewerben. Die Auswahl wird als Liste gespeichert (JSON-Array im Feld `desired_apartment_type`). „Gartencluster", „C-Riegel" und die Wohngemeinschaften (WPG) sind **keine** eigenen Wohnungsarten, sondern Clusterwohnungen. In den Wohnungsstammdaten kommt zusätzlich „Joker" vor; darauf bewerben sich Haushalte nicht.
+- **Wohnungsart** (Mehrfachauswahl): „Standard Wohnungstypen", „Clusterwohnung", „Ausbauwohnung", „Atelierwohnung". „Gartencluster", „C-Riegel" und die Wohngemeinschaften (WPG) sind **keine** eigenen Wohnungsarten, sondern Clusterwohnungen. In den Wohnungsstammdaten kommt zusätzlich „Joker" vor. Der **Wunsch eines Haushalts** wird nicht mehr am Haushalt geführt, sondern strukturiert an seiner Bewerbung (siehe „Bewerbungen"); Ausbau- und Atelierwohnungen zählen dort als Standardwohnungen.
 - Wohngemeinschaften (WG) werden **nicht** vergeben.
-- Haushalte bewerben sich **nicht** auf konkrete Wohnungen; sie werden automatisch in allen Kategorien geführt, für die sie in Frage kommen (siehe „Ranking").
+- Haushalte bewerben sich **nicht** auf konkrete Wohnungen; sie werden über ihre Bewerbung in allen Kategorien geführt, für die sie in Frage kommen oder die sie wünschen (siehe „Bewerbungen" und „Ranking").
 - **Gruppiertes Ranking**: Haushalte werden **nicht** über alle Haushalte hinweg gerankt, sondern **pro Wohnungskategorie** (Kombination aus Wohnungsgröße und Förderungsart). Beispiel: Alle Haushalte, die für „3 Zimmer / WBS A" in Frage kommen, erhalten einen eigenen Rang innerhalb dieser Gruppe. Ausbau- und Atelierwohnungen mit Zimmerzahl laufen in der Gruppe ihrer Zimmerzahl; Wohnungen ohne Zimmerangabe bilden eine eigene Gruppe „ohne Zimmerangabe". Clusterwohnungen und Joker-Zimmer bilden überhaupt keine Kategorie, weil sie nicht per Scoring vergeben werden (s. „Nicht per Scoring vergebene Wohnungen").
 
 ### Wohnungsstammdaten
@@ -115,7 +186,7 @@ Die Spalte `Etage` aus der Quelldatei wird bewusst **nicht** übernommen; der Ro
 - `is_resident` ist **nicht direkt editierbar**; es wird ausschließlich über die Wohnungszuordnung gesteuert: Zuordnung setzt `is_resident=True`, Lösen setzt `is_resident=False`.
 - Die Zuordnung erfolgt **manuell im Tab „Wohnungen"** oder **automatisch durch den vCard-Import** (wenn die Wohnungsnummer einer existierenden Wohnung entspricht).
 - Das **Lösen** einer Zuordnung ist kein Löschen: Wohnung und Haushalt bleiben unverändert erhalten.
-- Das **Löschen** einer Wohnung entfernt auch die Bewerbungen auf diese Wohnung.
+- Das **Löschen** einer Wohnung entfernt keine Bewerbungen: erfüllte Bewerbungen verlieren nur den Verweis auf die Wohnung.
 
 ### Ist-Belegung (aktuelle Bewohner)
 
@@ -160,7 +231,8 @@ Die aggregierte Belegung wird als eigene Seite ausgewiesen (Tab „Ist-Statistik
 - **Haushalt löschen** (`DELETE /households/{id}`): Endgültiges Löschen. Kaskadiert: alle zugehörigen Personen und Bewerbungen werden mitgelöscht. Eine bestehende Wohnungszuordnung wird gelöst (Wohnung bleibt bestehen).
 - **Person löschen** (`DELETE /people/{id}`): Nur möglich, wenn die Person **keinem Haushalt zugeordnet** ist (`household_id IS NULL`). Andernfalls wird HTTP 409 zurückgegeben. Person muss zuerst aus dem Haushalt entfernt werden.
 - **Alle Personen ohne Haushalt löschen** (`DELETE /people/unassigned`): Löscht sämtliche Personen ohne Haushaltszuordnung in einem Schritt. Archivierte Personen werden nur mitgelöscht, wenn `include_archived=true` übergeben wird — der Aufruf löscht also genau die Personen, die im Personen-Tab mit dem Filter „Nur ohne Haushalt" sichtbar sind. Zugeordnete Personen bleiben unberührt. Antwort: Anzahl der gelöschten Personen.
-- **Wohnung löschen** (`DELETE /apartments/{id}`): Nur möglich, wenn **kein Haushalt** der Wohnung zugeordnet ist (`household_id IS NULL`). Andernfalls wird HTTP 409 zurückgegeben. Zuordnung muss zuerst gelöst werden. Bewerbungen auf die Wohnung werden mitgelöscht.
+- **Wohnung löschen** (`DELETE /apartments/{id}`): Nur möglich, wenn **kein Haushalt** der Wohnung zugeordnet ist (`household_id IS NULL`). Andernfalls wird HTTP 409 zurückgegeben. Zuordnung muss zuerst gelöst werden. Bewerbungen, die mit dieser Wohnung erfüllt wurden, bleiben als Historie erhalten und verlieren nur den Verweis auf die Wohnung.
+- **Bewerbung löschen** (`DELETE /applications/{id}`): Endgültiges Löschen. Soll eine Bewerbung nur nicht mehr gelten, ist der Status „zurückgezogen" der richtige Weg — dann bleibt sie als Historie erhalten.
 - Im Frontend wird der Löschen-Button für Personen nur bei Personen ohne Haushalt angezeigt. Bei Wohnungen wird die Fehlermeldung des Backends angezeigt.
 
 ### Zuordnung von Personen zu Haushalten
@@ -176,15 +248,74 @@ Die aggregierte Belegung wird als eigene Seite ausgewiesen (Tab „Ist-Statistik
 
 #### Reihenfolge der Importe
 
-Die drei Importe bauen aufeinander auf und müssen in dieser Reihenfolge ausgeführt werden. **Nur der vCard-Import legt Daten an**; die beiden Fragebogen-Importe ergänzen ausschließlich, was bereits existiert. Damit hängt die Vollständigkeit der Stammdaten an einer einzigen Quelle und die Fragebögen können keine konkurrierenden Dubletten erzeugen.
+Die vier Importe bauen aufeinander auf und müssen in dieser Reihenfolge ausgeführt werden. Die
+beiden **Fragebogen-Importe ergänzen ausschließlich**, was bereits existiert; sie legen weder
+Personen noch Haushalte an. Damit hängt die Vollständigkeit der Personenstammdaten an einer
+einzigen Quelle und die Fragebögen können keine konkurrierenden Dubletten erzeugen.
 
 | # | Import | Legt an | Ergänzt |
 |---|--------|---------|---------|
 | 1 | **vCard-Mitgliederliste** (.vcf) | alle enthaltenen Personen; Haushalte **nur** bei erkannter Wohnungszuordnung | vorhandene Personen und Haushalte |
 | 2 | **Individualbogen** (.xlsx) | – | vorhandene Personen (auch solche ohne Haushalt) |
-| 3 | **Haushaltsbogen** (.xlsx) | – | vorhandene Haushalte |
+| 3 | **Haushaltsbogen** (.xlsx) | Wartepool-**Bewerbung**, falls der Haushalt noch keine offene hat | vorhandene Haushalte |
+| 4 | **Bewerbungsliste** (.xlsx) | Bewerbungen **und Haushalte** | vorhandene Bewerbungen |
+
+Der **Bewerbungslisten-Import darf Haushalte anlegen** — bewusst abweichend vom Grundsatz „nur die
+vCard legt an". Wartepool-Bewerber wohnen noch nicht im Projekt, der vCard-Import legt für sie
+deshalb keinen Haushalt an (er tut das nur bei erkannter Wohnungsnummer). Ohne diese Ausnahme
+bliebe der halbe Wartepool außerhalb des Tools. Vorhandene **Personen ohne Haushalt** werden im
+Assistenten zur Zuordnung vorgeschlagen, damit keine Dubletten zu den vCard-Personen entstehen.
 
 Die Assistenten von Individual- und Haushaltsbogen bieten deshalb nur noch „Aktualisieren" und „Überspringen" an; Datensätze ohne zuordenbares Ziel werden als `skipped_no_match` ausgewiesen. Fehlen die Basisdaten komplett (keine Personen bzw. keine Haushalte in der Datenbank), weist der jeweilige Assistent im Analyse-Schritt darauf hin, dass zuerst die vCard-Datei zu importieren ist.
+
+#### Zuordnungssicherheit
+
+**Nur ein eindeutiger Treffer wird automatisch zugeordnet.** Ein nur *ähnlicher* Treffer bleibt ein
+Vorschlag, über den ein Mensch entscheidet. Die Grenze zieht `schemas.MatchResult.is_certain`; das
+Feld wird zentral aus `matched_household_id` und der **Treffer-Art** berechnet und kann von keiner
+der vier Treffer-Quellen übergangen werden (auch nicht durch einen mitgelieferten Wert).
+
+Als **eindeutig** gelten (`schemas.CERTAIN_MATCH_TYPES`):
+
+| Treffer-Art | Bedeutung | Wo |
+|-------------|-----------|-----|
+| `exact_member_nr` | eindeutige **Mitgliedsnummer** | alle Importe (`import_service.match_household`, `match_individual_to_person`) |
+| `exact_name_dob` | **exakt übereinstimmender Personenname** — mit bestätigendem Geburtsdatum (`confidence` 1.0) oder ohne (0.9) | alle Importe |
+| `exact_household_name` | **Haushaltsname stimmt genau überein** und kommt im Bestand nur einmal vor | Bewerbungsliste (`application_import_service._match_by_household_name`) |
+| `apartment_unit` | der Namenstreffer **wohnt zusätzlich** in der Wohnung, die die Zeile nennt — die Wohnung bestätigt ihn | Bewerbungsliste |
+
+**Nicht eindeutig** sind der unscharfe Namenstreffer (`fuzzy`, `confidence` ab 0.7), die bloße
+Ähnlichkeit des Haushaltsnamens (`household_name`) und `apartment_occupant` (s. u.). Alle bleiben
+im Assistenten sichtbar und über den Treffer-Chip auswählbar — nur vorausgewählt werden sie nie.
+
+**Der Name benennt den Bewerber, die Wohnung bestätigt ihn nur.** Die Reihenfolge in
+`application_import_service._match_row` ist deshalb: erst der Name, dann die Wohnungsnummer. Die
+Spalte „Aktuelle Wohnung" hält den Stand **zum Zeitpunkt der Bewerbung** fest; bei einer erfüllten
+Zeile ist der Haushalt längst ausgezogen und in der genannten Wohnung wohnt jemand anderes. Wer
+heute dort wohnt, ist dann gerade **nicht** der Bewerber. Passt der Name zu keinem Haushalt, wird
+der heutige Bewohner nur als **Hinweis** ausgewiesen (`apartment_occupant`) — etwa wenn jemand
+unter anderem Namen geführt wird —, aber nie automatisch zugeordnet.
+
+Aus demselben Grund prüft die Warnung „Wohnung weicht ab" bei einer **erfüllten** Zeile gegen
+„neue Wohnung" statt gegen „Aktuelle Wohnung"; sonst wäre jeder vollzogene Wechsel eine Abweichung.
+
+Maßgeblich ist bewusst die **Treffer-Art und nicht der Prozentwert**: Ein unscharfer Namensvergleich
+(`SequenceMatcher`) erreicht mühelos 0.9 und mehr, eine reine Zahlenschwelle würde ihn deshalb zu
+einem eindeutigen Treffer machen.
+
+Was statt der Zuordnung vorbelegt wird, hängt davon ab, ob die Alternative selbst Daten erzeugt:
+
+- **Individualbogen und Haushaltsbogen** legen nichts an. Dort ist „Überspringen" die unschuldige
+  Vorbelegung; ein Hinweis über der Tabelle nennt die Zahl der unsicheren Treffer.
+- **vCard und Bewerbungsliste** würden stattdessen einen Haushalt anlegen — das wäre bei einem
+  unsicheren Treffer eine Dublette. Solche Zeilen stehen deshalb auf **„Bitte entscheiden"**, und
+  der Import ist gesperrt, solange noch eine offen ist. Über dem Assistenten steht die Zahl der
+  offenen Entscheidungen samt den Sammelaktionen „Alle neu anlegen" und „Alle überspringen".
+
+Zusätzlich behandeln **alle Commit-Endpunkte jede unbekannte Aktion wie „Überspringen"**: Eine
+unentschiedene Zeile kann auch dann nichts bewirken, wenn sie doch abgeschickt wird. Im Frontend
+steht die Regel in `frontend/src/components/import/matching.ts`; getestet in
+`tests/test_matching.py`.
 
 #### Mitgliedsnummern
 
@@ -199,7 +330,75 @@ Die Quellen schreiben Mitgliedsnummern mal mit, mal ohne führende Nullen. Beim 
 - Erwartete Spalten: `Household Name`, `Member Since`, `Engagement Score`, `First Name`, `Last Name`, `Birth Date`, `Gender`, `Occupation`, `Education`, `Cultural Background`, `Special Needs`. `Member Since` wird pro Person gespeichert (bei altem Format ohne personenbezogenes Datum wird der Wert der ersten Zeile für alle Personen des Haushalts übernommen).
 - Mehrere Zeilen mit gleichem `Household Name` werden zu einem Haushalt gruppiert.
 - **Individualbogen** (`import_service.commit_individual_bogen`): ergänzt Geschlecht, Haupttätigkeit, Bildungsabschluss, kulturellen Hintergrund und besondere Lebenslage bei einer zugeordneten Person. Die Zuordnung berücksichtigt **alle** Personen — auch die vom vCard-Import angelegten Personen **ohne Haushalt**. Eine Mitgliedsnummer wird nur gesetzt, wenn die Person noch keine hat. Neue Personen entstehen nicht.
-- **Haushaltsbogen** (`import_service.commit_household_bogen`): ergänzt WBS-Status, Wohnungswunsch, Haustiere, Rollstuhlgerechtigkeit und finanzielle Rahmenbedingungen eines bestehenden Haushalts. Neue Haushalte entstehen nicht. Personen des Fragebogens werden über `import_service.match_person_in` (Mitgliedsnummer → Name → Nachname + Geburtsdatum) im Haushalt wiedergefunden, damit abweichende Schreibweisen keine Dubletten zu den bereits per vCard angelegten Personen erzeugen; nur wirklich unbekannte Personen werden dem Haushalt hinzugefügt. Geburtsdatum und Mitgliedsnummer werden dabei nur **gefüllt**, nicht überschrieben — führende Quelle ist die vCard.
+- **Haushaltsbogen** (`import_service.commit_household_bogen`): ergänzt WBS-Status, Haustiere, Rollstuhlgerechtigkeit und finanzielle Rahmenbedingungen eines bestehenden Haushalts. Der **Wohnungswunsch** wird nicht mehr am Haushalt gespeichert, sondern in dessen offene Wartepool-Bewerbung geschrieben (`import_service._apply_wishes_from_bogen`); existiert keine, wird sie angelegt. Neue **Haushalte** entstehen weiterhin nicht. Neue Haushalte entstehen nicht. Personen des Fragebogens werden über `import_service.match_person_in` (Mitgliedsnummer → Name → Nachname + Geburtsdatum) im Haushalt wiedergefunden, damit abweichende Schreibweisen keine Dubletten zu den bereits per vCard angelegten Personen erzeugen; nur wirklich unbekannte Personen werden dem Haushalt hinzugefügt. Geburtsdatum und Mitgliedsnummer werden dabei nur **gefüllt**, nicht überschrieben — führende Quelle ist die vCard.
+
+#### Bewerbungslisten-Import (.xlsx)
+
+Quelle ist die außerhalb des Tools gepflegte Bewerbungstabelle. Erwartete Spalten:
+`Haushalt`, `Typ`, `Aktueller Typ`, `Aktuelle Wohnung`, `(Wechsel-)Wunsch`, `Mail / Info von`,
+`Status`, `neue Wohnung`, `Kommentar`. Implementiert in `backend/application_import_service.py`,
+zweistufig wie die übrigen Importe (`analyze` → Assistent → `commit`).
+
+**Die Kopfzeile wird tolerant gelesen** (`_norm_header`): Für den Vergleich zählt nur die
+Buchstaben- und Ziffernfolge, Leerzeichen und Satzzeichen fallen weg. Die gepflegte Liste schreibt
+ihre Kopfzeile nicht buchstabengetreu — „(Wechsel-) Wunsch" mit Leerzeichen nach dem Bindestrich,
+„Mail / Info vom" statt „von". Eine nicht erkannte Spalte fällt **stillschweigend** aus dem Import;
+genau so blieb der Wunsch anfangs leer.
+
+**Eine Zeile = eine Bewerbung.** Derselbe Haushalt darf mehrfach vorkommen (etwa Wechselwunsch
+*und* Joker); das Modell unterscheidet sie über `kind`.
+
+| Spalte | Ziel |
+|--------|------|
+| `Haushalt` | Zuordnung zum Haushalt (Namen werden zerlegt, siehe unten); bei „Haushalt neu anlegen" auch der Name |
+| `Typ` | `Application.kind` (`parse_kind`) |
+| `Aktueller Typ`, `Aktuelle Wohnung` | **nicht gespeichert**; im Assistenten nur zum Abgleich, Abweichung als Warnung |
+| `(Wechsel-)Wunsch` | `Application.wishes` (`wishes.parse_wish`) |
+| `Mail / Info von` | `Application.requested_at` |
+| `Status` | `Application.status` (`parse_status`, verkraftet den Zeilenumbruch in „zurück-gezogen") |
+| `neue Wohnung` | `Application.fulfilled_apartment_id`, sofern der Status „erfüllt" ist |
+| `Kommentar` | `Application.note` — das Kennzeichen `special_case` setzt der Import **nicht** selbst, das entscheidet ein Mensch |
+
+**Zuordnung zum Haushalt** (`_match_row`): zuerst über die Namen der Spalte „Haushalt"
+(`import_service.match_household`, ersatzweise der Haushaltsname), danach bestätigt die
+Wohnungsnummer den Treffer — sie identifiziert ihn nicht (siehe „Zuordnungssicherheit").
+Die Spalte „Haushalt" wird dafür in einzelne Personennamen zerlegt (`split_person_names`):
+„Christine (Tine) und Simon Langkamp" → „Christine Langkamp", „Simon Langkamp"; ein Vorname ohne
+Nachnamen erbt den Nachnamen des letzten vollständigen Namens der Zelle.
+
+**Wunsch-Parser** (`backend/wishes.py`): „2,5 A" → Zimmerzahl 2 + WBS A · „3,5 frei" →
+freifinanziert · „B" → WBS B, Größe egal · „Cluster B" → Clusterwohnung + WBS B · „Joker" →
+Joker · „1,5 B Ausbau / Atelier" → ein Wunsch (Ausbau und Atelier zählen als Standard) ·
+„3,5 A/B" → zwei Wünsche (eine reine Förderangabe erbt die zuletzt genannte Zimmerzahl derselben
+Zelle) · „Ausb", „att", „kl"/„3,5k" sind Abkürzungen der Liste für Ausbau, Atelier und die kleine
+Bauvariante und tragen keine eigene Angabe · Wohnungsnummern wie „2,5 A - W.006" sind Hinweise und
+kein Wunsch. **Teilstücke, aus denen sich gar nichts ableiten lässt, werden nicht stillschweigend
+übernommen**, sondern im Assistenten je Zeile als „nicht erkannt" ausgewiesen — dazu gehört auch
+ein Teilstück, das **nur** aus einer Wohnungsnummer besteht („W.213"): ein Wunsch, den das Modell
+nicht kennt, und deshalb nichts, was verschwinden darf.
+
+**Aktionen je Zeile**: „Bewerbung aktualisieren" (die Zeile ist bereits als Bewerbung vorhanden),
+„Bewerbung anlegen" (bestehender Haushalt), „Haushalt neu anlegen" (samt Auswahl der vorhandenen
+Personen ohne Haushalt) und „Überspringen".
+
+**Erneuter Import derselben Liste** (`_find_existing_application`): Die Liste wird weiter außerhalb
+gepflegt und wiederholt eingelesen. Eine Zeile gilt als bereits vorhanden, wenn es eine nicht
+archivierte Bewerbung mit **gleichem Haushalt, gleicher Art und gleichem Zeitpunkt des Wunsches**
+gibt (fehlt der Zeitpunkt auf beiden Seiten, gilt das ebenso). Der **Status** entscheidet dabei nur
+als Feinheit: zuerst zählt die Bewerbung mit demselben Status, erst danach dieselbe Kennung mit
+abweichendem Status — sonst gälte eine Zeile, die in der Liste von „offen" auf „erfüllt" gewandert
+ist, als neue Bewerbung. Greift das alles nicht, wird auf die offene Bewerbung derselben Art
+zurückgefallen (so findet die Zeile auch die Bewerbung, die der Haushaltsbogen angelegt hat). Würde
+nur eine *offene* Bewerbung als vorhanden gelten, erzeugte jeder erneute Import für jede erfüllte
+oder zurückgezogene Zeile eine Dublette.
+
+**Eine vorhandene Bewerbung gehört zu höchstens einer Zeile** (`claimed`): Zwei gleichartige Zeilen
+desselben Haushalts **ohne** Datum würden sonst dieselbe Bewerbung überschreiben und sich
+gegenseitig auslöschen; die zweite Zeile wird stattdessen zu einer zweiten Bewerbung — was sie ja
+auch ist. Belegt wird nur, was ohne Rückfrage aktualisiert wird: eine Zeile mit unsicherem Treffer
+entscheidet ein Mensch und nimmt der nächsten Zeile nichts vorweg. Zwei Zeilen desselben Haushalts
+mit **unterschiedlichem** Datum bleiben ohnehin zwei Bewerbungen — die Liste führt Wechselwünsche
+über die Jahre.
 
 #### vCard-Import (Mitgliederliste, .vcf)
 
@@ -333,9 +532,14 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 | DELETE | `/apartments/{id}` | Wohnung löschen (inkl. Bewerbungen darauf) | Auth |
 | POST | `/apartments/{id}/assign/{household_id}` | Wohnung dem Haushalt zuordnen, der darin wohnt | Auth |
 | DELETE | `/apartments/{id}/assign` | Zuordnung lösen (Wohnung bleibt bestehen) | Auth |
-| GET | `/applications/` | Alle Bewerbungen | Auth |
-| POST | `/applications/` | Bewerbung anlegen (Haushalt → Wohnung) | Auth |
-| GET | `/ranking/` | Gruppiertes Ranking: alle geeigneten Haushalte pro (Größe, Förderungsart), nach dem Gesamt-Score der Kategorie sortiert. Je Haushalt werden `base_score` (Grundpunktzahl), `occupancy_score` (Wohnraumausnutzung dieser Zimmerzahl) und `total_score` (Summe) geliefert | Auth |
+| GET | `/applications/` | Bewerbungen, optional gefiltert nach `kind`, `status`, `household_id`, `include_archived` | Auth |
+| POST | `/applications/` | Bewerbung anlegen (409 bei zweiter offener Bewerbung derselben Art) | Auth |
+| PUT | `/applications/{id}` | Bewerbung bearbeiten (Wunsch, Status, Datum, Kennzeichen, Kommentar) | Auth |
+| DELETE | `/applications/{id}` | Bewerbung endgültig löschen | Auth |
+| PATCH | `/applications/{id}/archive` | Bewerbung archivieren/wiederherstellen | Auth |
+| GET | `/applications/joker` | Joker-Warteliste, nach dem Zeitpunkt des Wunsches gereiht | Auth |
+| GET | `/apartments/categories` | Wählbare Wunschkategorien, abgeleitet aus den Wohnungsstammdaten | Auth |
+| GET | `/ranking/` | Gruppiertes Ranking je (Größe, Förderungsart). `priority` enthält die Wechselwünsche dieser Kategorie (nach Datum), `households` die Wartepool-Rangliste (nach Gesamt-Score) mit `base_score`, `occupancy_score`, `total_score` sowie `by_wish_only`, `special_case` und `special_case_note` | Auth |
 | PATCH | `/households/{id}/archive` | Haushalt archivieren/wiederherstellen (inkl. Personen) | Auth |
 | POST | `/people/` | Person eigenständig anlegen (ohne Haushalt) | Auth |
 | DELETE | `/people/{id}` | Person löschen (nur ohne Haushaltszuordnung; 409 wenn zugeordnet) | Auth |
@@ -347,6 +551,8 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 | DELETE | `/people/{id}/assign` | Person aus ihrem Haushalt entfernen (Person bleibt bestehen) | Auth |
 | PATCH | `/people/{id}/archive` | Person archivieren/wiederherstellen | Auth |
 | POST | `/upload/households/` | Excel-Import | Auth |
+| POST | `/import/applications/analyze` | Bewerbungsliste analysieren, Vorschau + Match-Vorschläge | Auth |
+| POST | `/import/applications/commit` | Bestätigte Entscheidungen der Bewerbungsliste übernehmen | Auth |
 | POST | `/import/vcf/analyze` | vCard-Datei analysieren, Vorschau + Match-Vorschläge | Auth |
 | POST | `/import/vcf/commit` | Bestätigte vCard-Entscheidungen übernehmen | Auth |
 | POST | `/scoring/calculate` | Scoring neu berechnen | Auth |
@@ -366,23 +572,30 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 
 ```
 Household (1) ──< Person (N)
-Household (N) ──< Application (N) >── Apartment (1)
+Household (1) ──< Application (N)        # Bewerbungen; Wunsch als Kategorien, nicht als Wohnung
+Application (N) ──> Apartment (0..1)     # erfüllte Bewerbung: "neue Wohnung"
 Household (0..1) ──── Apartment (0..1)   # Ist-Belegung: Haushalt wohnt in Wohnung
 ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 ```
 
+`Application`: `kind` (`wartepool` | `wechselwunsch` | `joker`), `requested_at`, `wishes` (JSON),
+`status` (`offen` | `erfuellt` | `zurueckgezogen`), `status_note`, `special_case`,
+`special_case_note`, `note`, `fulfilled_apartment_id`, `fulfilled_at`, `created_at`,
+`updated_at`, `archived`.
+
 ### Frontend-Anforderungen
 
-- **Ranking-Tab**: Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart) und den Spalten Rang, Haushaltsname, Mitglieder, **Grundpunktzahl**, **Wohnraumausnutzung** und **Gesamtpunktzahl**. Beide Filter stehen **standardmäßig auf „Alle“** und schränken dann nicht ein: die Rangliste zeigt zunächst **alle nicht archivierten Haushalte, die keine Wohnung bewohnen** — auch solche, die für keine Wohnungskategorie in Frage kommen. **Bestehende Bewohner (`is_resident=True`) erscheinen nie in der Rangliste**: sie suchen keine Wohnung und dienen nur als Referenzdaten der Durchmischung. Wird die Wohnungszuordnung eines Haushalts gelöst, taucht er wieder in der Rangliste auf. Ohne Filter gibt es keine Zimmerzahl und damit keine Wohnraumausnutzung: die Spalte zeigt „—“, die Gesamtpunktzahl entspricht der Grundpunktzahl. Wird ein Filter gesetzt, zeigt die Tabelle die Haushalte, die für die passenden Kategorien in Frage kommen; da derselbe Haushalt je Kategorie einen anderen Score hat, wird beim Entdoppeln über die Haushalts-id die **Kategorie mit dem höchsten Gesamtscore** behalten. Der **Rang wird immer für die aktuelle Auswahl neu vergeben** (1, 2, 3, …).
+- **Ranking-Tab**: Über der Rangliste steht der Block **„Vorrang — Wechselwunsch"** mit den Spalten Rang, Haushaltsname, Mitglieder, Aktuelle Wohnung und Wunsch seit — gereiht nach dem Zeitpunkt des Wunsches, ohne Punkte. Darunter die **Wartepool**-Rangliste mit zwei Dropdown-Filtern (Wohnungsgröße und Förderungsart) und den Spalten Rang, Haushaltsname, Mitglieder, **Grundpunktzahl**, **Wohnraumausnutzung** und **Gesamtpunktzahl**. Haushalte, die nur über ihren ausdrücklichen Wunsch in der Kategorie stehen, tragen den Chip **„nur auf Wunsch"**; Bewerbungen mit gesetztem Sonderfall-Kennzeichen ein Warnzeichen mit der Begründung als Tooltip. Beide Filter stehen **standardmäßig auf „Alle“** und schränken dann nicht ein: die Rangliste zeigt zunächst **alle nicht archivierten Haushalte mit offener Wartepool-Bewerbung, die keine Wohnung bewohnen** — auch solche, die für keine Wohnungskategorie in Frage kommen. Ohne offene Bewerbung erscheint ein Haushalt in keiner Rangliste. **Bestehende Bewohner (`is_resident=True`) erscheinen nie in der Rangliste**: sie suchen keine Wohnung und dienen nur als Referenzdaten der Durchmischung. Wird die Wohnungszuordnung eines Haushalts gelöst, taucht er wieder in der Rangliste auf. Ohne Filter gibt es keine Zimmerzahl und damit keine Wohnraumausnutzung: die Spalte zeigt „—“, die Gesamtpunktzahl entspricht der Grundpunktzahl. Wird ein Filter gesetzt, zeigt die Tabelle die Haushalte, die für die passenden Kategorien in Frage kommen; da derselbe Haushalt je Kategorie einen anderen Score hat, wird beim Entdoppeln über die Haushalts-id die **Kategorie mit dem höchsten Gesamtscore** behalten. Der **Rang wird immer für die aktuelle Auswahl neu vergeben** (1, 2, 3, …).
+- **Bewerbungen-Tab**: Tabelle aller Bewerbungen mit Freitextsuche (Haushalt, Wunsch, Kommentar, Sonderfall-Begründung, aktuelle Wohnung) und den Filtern „Typ" und „Status" (Standard: „offen"). Spalten: Haushalt (Link in den Haushaltsdetail-Dialog, mit Sonderfall-Warnzeichen), Typ, Wunsch (Chips), Wunsch seit, Status, Kommentar sowie Bearbeiten und Löschen. **Aktuelle und neue Wohnung sind keine Spalten**: die aktuelle Wohnung steht am Haushalt (ein Klick auf den Namen), die neue entsteht beim Einzug von selbst. Beides bleibt als Daten erhalten — die aktuelle Wohnung wird weiterhin von der Freitextsuche erfasst. Rechtsbündig „Bewerbung anlegen". Unter der Tabelle die **Joker-Warteliste**, nach dem Zeitpunkt des Wunsches gereiht. Im **Bearbeiten-Dialog** wird der Wunsch ausschließlich über eine **Mehrfachauswahl aus den vorhandenen Wohnungskategorien** gepflegt (kein Freitextfeld); beim Anlegen sind Bewerbungsart (Bewohner → Wechselwunsch, sonst Wartepool) und Datum vorbelegt. Das Löschen wird bestätigt und weist darauf hin, dass der Status „zurückgezogen" die Bewerbung als Historie erhält.
 - **Haushalte-Tab**: Der Haushalts-Score wird hier **nicht** angezeigt: die Grundpunktzahl allein ist ohne die Wohnraumausnutzung der jeweiligen Wohnungsgröße nicht aussagekräftig; Punktzahlen und Ränge stehen deshalb ausschließlich in der Rangliste. Tabelle aller Haushalte mit Freitextsuche (Haushaltsname, Wohnungsnummer, WBS-Status und Namen der Haushaltsmitglieder) sowie den Filtern „Nur ohne Wohnung“ und „Archivierte anzeigen“. Der Button „Haushalt anlegen“ steht — wie im Wohnungen-Tab — rechtsbündig in der Filterzeile. Über der Tabelle wird die Zahl der sichtbaren von allen Haushalten angezeigt. Standardsortierung ist der Haushaltsname (aufsteigend). Ein Klick auf eine Zeile öffnet den Haushaltsdetail-Dialog.
 - **Personen-Tab**: Tabelle aller Personen mit Suche, Sortierung und den Filtern „Nur ohne Haushalt" und „Archivierte anzeigen". Pro Zeile: Haushalt zuordnen (bei Personen ohne Haushalt), aus Haushalt entfernen (bei zugeordneten Personen), Archivieren/Wiederherstellen sowie Löschen (nur bei Personen ohne Haushalt). Über der Tabelle steht zusätzlich „Alle ohne Haushalt löschen (N)"; die Aktion wird mit Anzahl bestätigt und löscht — je nach Schalter „Archivierte anzeigen" — auch archivierte Personen ohne Haushalt.
-- **Haushaltsdetail-Dialog**: Zeigt Haushaltsdaten (einschließlich zugeordnete Wohnung, sofern vorhanden) und Personenkarten. Der Score erscheint als „Grundpunktzahl (ohne Wohnraumausnutzung)“. Der **Haushaltsname ist editierbar**: im Bearbeiten-Modus wird die Dialogüberschrift zum Eingabefeld „Haushaltsname“. Ein leerer Name wird abgelehnt (Speichern deaktiviert, Backend antwortet mit HTTP 400); führende und nachfolgende Leerzeichen werden entfernt. Der Bewohnerstatus (`is_resident`) wird als Nur-Lese-Feld angezeigt und ergibt sich implizit aus der Wohnungszuordnung. Erlaubt „Person hinzufügen" (Auswahl aus Personen ohne Haushalt) und das Entfernen einzelner Personen aus dem Haushalt.
+- **Haushaltsdetail-Dialog**: Zeigt Haushaltsdaten (einschließlich zugeordnete Wohnung, sofern vorhanden), einen Abschnitt **„Bewerbungen"** und Personenkarten. Die Felder „Gewünschte Wohnungsgröße" und „Wohnungsart" gibt es hier nicht mehr — der Wunsch wird in der Bewerbung gepflegt. Der Abschnitt „Bewerbungen" listet alle Bewerbungen des Haushalts (Typ, Status, Wunsch-Chips, Sonderfall-Warnzeichen, Datum, erfüllte Wohnung) und erlaubt Anlegen und Bearbeiten, ohne den Dialog zu verlassen. Der Score erscheint als „Grundpunktzahl (ohne Wohnraumausnutzung)“. Der **Haushaltsname ist editierbar**: im Bearbeiten-Modus wird die Dialogüberschrift zum Eingabefeld „Haushaltsname“. Ein leerer Name wird abgelehnt (Speichern deaktiviert, Backend antwortet mit HTTP 400); führende und nachfolgende Leerzeichen werden entfernt. Der Bewohnerstatus (`is_resident`) wird als Nur-Lese-Feld angezeigt und ergibt sich implizit aus der Wohnungszuordnung. Erlaubt „Person hinzufügen" (Auswahl aus Personen ohne Haushalt) und das Entfernen einzelner Personen aus dem Haushalt.
 - **Wohnungen-Tab**: Tabelle aller Wohnungen (Wohnungsnummer, Zimmer, Kennzeichen „klein", Wohnungsart, Förderungsart, qm mietwirksam, mind. Bewohner, bewohnt von) mit Suche über Wohnungsnummer, Wohnungsart und Haushalt, sortierbaren Spalten und den Filtern „Wohnungsart", „Förderungsart" und „Nur belegte". Pro Zeile: bearbeiten, Haushalt zuordnen bzw. Zuordnung lösen, Wohnung löschen. Über der Tabelle „Wohnung anlegen". Der zugeordnete Haushalt ist als Link in die Haushaltsdetailansicht ausgeführt. Im Bearbeiten-Dialog wird eine Zimmerzahl mit Nachkommastelle abgelehnt.
-- **Import-Tab**: Drei Upload-Bereiche (Haushaltsbogen, Individualbogen, vCard-Mitgliederliste). Jeder öffnet einen Assistenten mit den Schritten Analyse → Zuordnung → Zusammenfassung. Im vCard-Assistenten ist jeder Haushalt aufklappbar; dort sind alle Personen mit Rolle (Mitglied/Partner*in/Kind) und Herkunft (Kontakt/Notiz) sichtbar und einzeln abwählbar.
+- **Import-Tab**: Vier Upload-Bereiche (vCard-Mitgliederliste, Individualbogen, Haushaltsbogen, Bewerbungsliste). Jeder öffnet einen Assistenten mit den Schritten Analyse → Zuordnung → Zusammenfassung. Im vCard-Assistenten ist jeder Haushalt aufklappbar; dort sind alle Personen mit Rolle (Mitglied/Partner*in/Kind) und Herkunft (Kontakt/Notiz) sichtbar und einzeln abwählbar. Der Bewerbungslisten-Assistent zeigt je Zeile die geparsten Wunsch-Chips, nicht erkannte Wunschangaben, Warnungen zu abweichenden oder unbekannten Wohnungsnummern sowie die Aktion; bei „Haushalt neu anlegen" zusätzlich Haushaltsname und die auswählbaren Personen ohne Haushalt. In **allen vier Assistenten** wird eine Zuordnung nur bei einem eindeutigen Treffer vorausgewählt (siehe „Zuordnungssicherheit"); nur ähnliche Treffer erscheinen als orangefarbener Chip mit dem Ähnlichkeitsgrad im Tooltip.
 - **Ist-Statistik-Tab**: Auswertung der aktuellen Belegung. Kopfzeile mit der Zahl der Bewohner-Haushalte, der Personen und der Personen mit fehlenden Angaben (Button „Prüfen" öffnet die Prüfliste über alle Merkmale), darunter ein Umschalter „Absolute Zahlen" / „Relative Zahlen". Je Merkmal (Altersgruppen, Geschlecht, Haupttätigkeit, Bildungsabschluss, Haushaltsgröße) eine Tabelle mit den Spalten Ausprägung, Anzahl bzw. Anteil, Zielwert und Abweichung sowie einer Summenzeile. Als Bezugsgröße steht über der Tabelle die Zahl der Personen mit Angabe; darunter „N Personen ohne Angabe – nicht berücksichtigt" mit dem Button „Prüfen" (Prüfliste für dieses Merkmal). Unter der Tabelle der Altersgruppen steht zusätzlich „N Personen unter 20 – nicht berücksichtigt" (ohne „Prüfen", denn das ist keine fehlende Angabe). Merkmale ohne Zielwert zeigen nur Ausprägung und Wert. Bei allen Merkmalen mit Zielwert — **Altersgruppen, Geschlecht, Haupttätigkeit und Bildungsabschluss** — steht zwischen Bezugsgröße und Tabelle ein **waagerechtes Balkendiagramm** (MUI X Charts, `TargetDistributionChart`): je Ausprägung ein Balken für den Ist-Wert und eine senkrechte Marke für den Zielwert, darüber eine Legende „Ist" / „Zielwert". Das Diagramm folgt dem Umschalter (Anzahl bzw. Anteil in %); seine Form bleibt dabei gleich, weil der absolute Zielwert Zielanteil × Bezugsgröße ist. Lange Ausprägungen werden an der Achse gekürzt; der Tooltip nennt die vollständige Ausprägung, Ist, Ziel und Abweichung. Die Tabelle bleibt als vollständige Zahlenansicht erhalten. Ist die Bezugsgröße 0, entfällt das Diagramm.
 - **Prüfliste (Dialog im Ist-Statistik-Tab)**: Tabelle mit Name, Mitgliedsnummer, Haushalt (Link in den Haushaltsdetail-Dialog), Wohnung, Alter, Datum des Individualbogen-Imports und der fehlenden Angabe samt Grund („leer", „leer trotz Individualbogen", „0 – keine Zuordnung", „„Wert" nicht erkannt"). Verdachtsfälle auf Importfehler stehen oben und sind orange markiert. Schalter „Nur Verdacht auf Importfehler" und „Personen unter 20 ausblenden" (Kinder haben meist legitim keinen Beruf und Bildungsabschluss). Nach dem Schließen des Haushaltsdetail-Dialogs werden Statistik und Prüfliste neu geladen.
 - **Config-Tab**: Editierbare Karten für alle Gewichte und Zielwerte (nur für eingeloggte Admins sichtbar).
-- **Tabellen**: Alle Datentabellen (Ranking, Haushalte, Personen, Wohnungen) zeigen standardmäßig **100 Zeilen pro Seite**; wählbar sind 10, 25, 50 und 100. Alle Tabellen sind **abwechselnd eingefärbt (Zebrastreifen)**: jede zweite Zeile erhält einen leicht abgesetzten Hintergrund. Die Streifen richten sich nach der Position in der aktuellen Seite und bleiben daher nach Sortieren, Filtern und Blättern korrekt; der Hover-Effekt bleibt auf allen Zeilen sichtbar. In den Tabellen der Ist-Statistik bleibt die Summenzeile ungestreift.
+- **Tabellen**: Alle Datentabellen (Ranking, Bewerbungen, Haushalte, Personen, Wohnungen) zeigen standardmäßig **100 Zeilen pro Seite**; wählbar sind 10, 25, 50 und 100. Alle Tabellen sind **abwechselnd eingefärbt (Zebrastreifen)**: jede zweite Zeile erhält einen leicht abgesetzten Hintergrund. Die Streifen richten sich nach der Position in der aktuellen Seite und bleiben daher nach Sortieren, Filtern und Blättern korrekt; der Hover-Effekt bleibt auf allen Zeilen sichtbar. In den Tabellen der Ist-Statistik bleibt die Summenzeile ungestreift.
 - **Kopfzeile (AppBar)**: Der Button „Punkte neu berechnen" steht in der Kopfzeile der Seite und ist damit aus jedem Tab erreichbar. Einen eigenen „Aktionen"-Tab gibt es nicht mehr; der frühere Alt-Upload „Excel-Daten hochladen" entfällt, Excel-Dateien werden ausschließlich über den Datenimport-Tab eingelesen.
 - Login/Logout über AppBar.
 
@@ -391,9 +604,10 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 ## Konventionen
 
 - Backend-Code in `backend/`, Frontend in `frontend/`, Tests in `tests/`.
-- Import-Logik: Fragebögen in `backend/import_service.py`, vCard in `backend/vcf_import_service.py` (nutzt Session-Store, Namensnormalisierung und Haushalts-Matching aus `import_service`).
+- Import-Logik: Fragebögen in `backend/import_service.py`, vCard in `backend/vcf_import_service.py`, Bewerbungsliste in `backend/application_import_service.py` (beide nutzen Session-Store, Namensnormalisierung und Haushalts-Matching aus `import_service`).
+- Wohnungswünsche: `backend/wishes.py` — Parsen, Anzeigen und Abgleichen der Wunschkategorien. Hängt bewusst nur an der Standardbibliothek und wird von Ranking, beiden Importen und der Startmigration benutzt. Das Frontend spiegelt die Anzeige in `frontend/src/components/applications/wishes.ts`.
 - Wohnungsstammdaten: `backend/apartment_seed_data.py` (generiert aus `imported_data/Wohnungen.xlsx`), angelegt über `services.seed_apartments`; die Zuordnung zum Haushalt erfolgt über `services.assign_household`.
-- Tests: `python tests/test_apartments.py` (Wohnungsstammdaten und Zuordnung), `python tests/test_ranking.py` (Eignung und Rangliste), `python tests/test_statistics.py` (Ist-Statistik der Bewohner und Prüfliste „ohne Angabe", u. a. mit den Beispieldaten und einem Individualbogen-Importfehler), `python tests/test_vcf_import.py` (vCard-Import). Alle laufen ohne Server gegen eine In-Memory-Datenbank.
+- Tests: `python tests/test_apartments.py` (Wohnungsstammdaten und Zuordnung), `python tests/test_ranking.py` (Eignung, Rangliste, Vorrang und Bewerbungspflicht), `python tests/test_applications.py` (Wunsch-Parser, Statusregeln, Auswahlkategorien), `python tests/test_application_import.py` (Bewerbungslisten-Import), `python tests/test_statistics.py` (Ist-Statistik der Bewohner und Prüfliste „ohne Angabe", u. a. mit den Beispieldaten und einem Individualbogen-Importfehler), `python tests/test_import_order.py` (Reihenfolge der Importe), `python tests/test_matching.py` (Zuordnungssicherheit der Importe), `python tests/test_vcf_import.py` (vCard-Import). Alle laufen ohne Server gegen eine In-Memory-Datenbank.
 - Pydantic V2: `from_attributes = True` statt `orm_mode`.
 - Relative Imports innerhalb des `backend`-Packages.
 - `backend/__init__.py` muss vorhanden sein.
