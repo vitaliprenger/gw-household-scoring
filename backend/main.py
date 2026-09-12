@@ -5,7 +5,10 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from datetime import datetime
-from . import models, schemas, database, services, scoring, auth, import_service, vcf_import_service
+from . import (
+    models, schemas, database, services, scoring, auth, wishes,
+    import_service, vcf_import_service, application_import_service,
+)
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -16,8 +19,8 @@ with database.engine.connect() as conn:
         "wbs_status": "ALTER TABLE households ADD COLUMN wbs_status TEXT",
         "pets_count": "ALTER TABLE households ADD COLUMN pets_count INTEGER DEFAULT 0",
         "pets_info": "ALTER TABLE households ADD COLUMN pets_info TEXT",
-        "desired_apartment_size": "ALTER TABLE households ADD COLUMN desired_apartment_size TEXT",
-        "desired_apartment_type": "ALTER TABLE households ADD COLUMN desired_apartment_type TEXT",
+        # desired_apartment_size/-type werden nicht mehr angelegt: der Wunsch liegt
+        # an der Bewerbung. Bestehende Spalten werden weiter unten migriert und entfernt.
         "wheelchair_accessible": "ALTER TABLE households ADD COLUMN wheelchair_accessible BOOLEAN DEFAULT 0",
         "financial_status": "ALTER TABLE households ADD COLUMN financial_status TEXT",
         "import_source": "ALTER TABLE households ADD COLUMN import_source TEXT",
@@ -101,41 +104,158 @@ with database.engine.connect() as conn:
         conn.execute(text("UPDATE people SET special_needs = NULL WHERE special_needs = 0"))
         conn.execute(text("UPDATE people SET special_needs = 'Ja' WHERE special_needs = 1"))
 
-    # Migrate desired_apartment_type from plain string to JSON array
-    rows = conn.execute(text(
-        "SELECT id, desired_apartment_type FROM households "
-        "WHERE desired_apartment_type IS NOT NULL AND desired_apartment_type != ''"
-    )).fetchall()
     import json as _json
-    for r in rows:
-        val = r[1]
-        try:
-            parsed = _json.loads(val)
-            if isinstance(parsed, list):
-                continue
-        except (ValueError, TypeError):
-            pass
-        arr = _json.dumps([val])
-        conn.execute(text("UPDATE households SET desired_apartment_type = :v WHERE id = :id"), {"v": arr, "id": r[0]})
 
-    # "Gartencluster" ist keine eigene Wohnungsart mehr, sondern eine Clusterwohnung
-    rows = conn.execute(text(
-        "SELECT id, desired_apartment_type FROM households "
-        "WHERE desired_apartment_type LIKE '%Gartencluster%'"
-    )).fetchall()
-    for r in rows:
-        try:
-            types = _json.loads(r[1])
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(types, list):
-            continue
-        replaced = ["Clusterwohnung" if t == "Gartencluster" else t for t in types]
-        deduped = list(dict.fromkeys(replaced))
-        conn.execute(
-            text("UPDATE households SET desired_apartment_type = :v WHERE id = :id"),
-            {"v": _json.dumps(deduped), "id": r[0]},
+    # Der alte Wohnungswunsch am Haushalt wird nur noch aufbereitet, damit ihn die
+    # Übernahme in die Bewerbung (weiter unten) sauber lesen kann. Bei einer neuen
+    # Datenbank gibt es die Spalten nicht mehr.
+    if "desired_apartment_type" in hh_columns:
+        # Migrate desired_apartment_type from plain string to JSON array
+        rows = conn.execute(text(
+            "SELECT id, desired_apartment_type FROM households "
+            "WHERE desired_apartment_type IS NOT NULL AND desired_apartment_type != ''"
+        )).fetchall()
+        for r in rows:
+            val = r[1]
+            try:
+                parsed = _json.loads(val)
+                if isinstance(parsed, list):
+                    continue
+            except (ValueError, TypeError):
+                pass
+            arr = _json.dumps([val])
+            conn.execute(
+                text("UPDATE households SET desired_apartment_type = :v WHERE id = :id"),
+                {"v": arr, "id": r[0]},
+            )
+
+        # "Gartencluster" ist keine eigene Wohnungsart mehr, sondern eine Clusterwohnung
+        rows = conn.execute(text(
+            "SELECT id, desired_apartment_type FROM households "
+            "WHERE desired_apartment_type LIKE '%Gartencluster%'"
+        )).fetchall()
+        for r in rows:
+            try:
+                types = _json.loads(r[1])
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(types, list):
+                continue
+            replaced = ["Clusterwohnung" if t == "Gartencluster" else t for t in types]
+            deduped = list(dict.fromkeys(replaced))
+            conn.execute(
+                text("UPDATE households SET desired_apartment_type = :v WHERE id = :id"),
+                {"v": _json.dumps(deduped), "id": r[0]},
+            )
+
+    # --- Bewerbungen: vom Wohnungs-Link zum eigenständigen Objekt ---
+    app_columns = {c["name"] for c in inspect(database.engine).get_columns("applications")}
+    application_migrations = {
+        "kind": "ALTER TABLE applications ADD COLUMN kind TEXT DEFAULT 'wartepool'",
+        "requested_at": "ALTER TABLE applications ADD COLUMN requested_at DATETIME",
+        "wishes": "ALTER TABLE applications ADD COLUMN wishes TEXT",
+        "status": "ALTER TABLE applications ADD COLUMN status TEXT DEFAULT 'offen'",
+        "status_note": "ALTER TABLE applications ADD COLUMN status_note TEXT",
+        "special_case": "ALTER TABLE applications ADD COLUMN special_case BOOLEAN DEFAULT 0",
+        "special_case_note": "ALTER TABLE applications ADD COLUMN special_case_note TEXT",
+        "note": "ALTER TABLE applications ADD COLUMN note TEXT",
+        "fulfilled_apartment_id":
+            "ALTER TABLE applications ADD COLUMN fulfilled_apartment_id INTEGER"
+            " REFERENCES apartments(id)",
+        "fulfilled_at": "ALTER TABLE applications ADD COLUMN fulfilled_at DATETIME",
+        "created_at": "ALTER TABLE applications ADD COLUMN created_at DATETIME",
+        "updated_at": "ALTER TABLE applications ADD COLUMN updated_at DATETIME",
+        "archived": "ALTER TABLE applications ADD COLUMN archived BOOLEAN DEFAULT 0",
+    }
+    for col, sql in application_migrations.items():
+        if col not in app_columns:
+            conn.execute(text(sql))
+
+    # Die alte Bewerbung zeigte auf eine konkrete Wohnung -- das ist heute die
+    # erfüllte Wohnung. SQLite kann eine Spalte, die in einer Fremdschlüssel-
+    # definition steht, nicht entfernen: die Tabelle wird deshalb neu aufgebaut.
+    if "apartment_id" in app_columns:
+        conn.execute(text(
+            "UPDATE applications SET fulfilled_apartment_id = apartment_id"
+            " WHERE fulfilled_apartment_id IS NULL AND apartment_id IS NOT NULL"
+        ))
+        carried = (
+            "id, household_id, kind, requested_at, wishes, status, status_note,"
+            " special_case, special_case_note, note, fulfilled_apartment_id,"
+            " fulfilled_at, created_at, updated_at, archived"
         )
+        conn.execute(text("ALTER TABLE applications RENAME TO applications_old"))
+        # Indizes wandern beim Umbenennen mit und würden die Namen blockieren.
+        for (index_name,) in conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type = 'index'"
+            " AND tbl_name = 'applications_old' AND name NOT LIKE 'sqlite_autoindex%'"
+        )).fetchall():
+            conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+        models.Application.__table__.create(bind=conn)
+        conn.execute(text(
+            f"INSERT INTO applications ({carried}) SELECT {carried} FROM applications_old"
+        ))
+        conn.execute(text("DROP TABLE applications_old"))
+
+    # Unbekannte Status ("applied") werden zu "offen".
+    conn.execute(text("UPDATE applications SET kind = 'wartepool' WHERE kind IS NULL OR kind = ''"))
+    conn.execute(text(
+        "UPDATE applications SET status = 'offen'"
+        " WHERE status IS NULL OR status NOT IN ('offen', 'erfuellt', 'zurueckgezogen')"
+    ))
+    conn.execute(text("UPDATE applications SET archived = 0 WHERE archived IS NULL"))
+    conn.execute(text("UPDATE applications SET special_case = 0 WHERE special_case IS NULL"))
+
+    # Der Wohnungswunsch wandert vom Haushalt in die Bewerbung. Bewohner-
+    # Haushalte erhalten einen Wechselwunsch, alle anderen eine Wartepool-
+    # Bewerbung; die Bewerbungsliste aktualisiert sie später mit dem echten Datum.
+    if "desired_apartment_size" in hh_columns or "desired_apartment_type" in hh_columns:
+        size_col = "desired_apartment_size" if "desired_apartment_size" in hh_columns else "NULL"
+        type_col = "desired_apartment_type" if "desired_apartment_type" in hh_columns else "NULL"
+        existing = {
+            (row[1], row[2]): (row[0], row[3], row[4])       # (Haushalt, Art) -> (id, wishes, seit)
+            for row in conn.execute(text(
+                "SELECT id, household_id, kind, wishes, requested_at FROM applications"
+            )).fetchall()
+        }
+        rows = conn.execute(text(
+            f"SELECT id, {size_col}, {type_col}, is_resident, import_timestamp, application_date"
+            " FROM households"
+        )).fetchall()
+        for hh_id, size_raw, type_raw, is_resident, imported, applied in rows:
+            wish_list = wishes.from_household_fields(size_raw, type_raw)
+            if not wish_list:
+                continue
+            kind = "wechselwunsch" if is_resident else "wartepool"
+            params = {
+                "hh": hh_id,
+                "kind": kind,
+                "req": imported or applied,
+                "wishes": _json.dumps(wish_list, ensure_ascii=False),
+                "now": datetime.utcnow(),
+            }
+            match = existing.get((hh_id, kind))
+            if match is None:
+                conn.execute(text(
+                    "INSERT INTO applications (household_id, kind, requested_at, wishes, status,"
+                    " special_case, created_at, archived)"
+                    " VALUES (:hh, :kind, :req, :wishes, 'offen', 0, :now, 0)"
+                ), params)
+                continue
+            # Eine bereits vorhandene Bewerbung wird nicht überschrieben, aber
+            # um den Wunsch ergänzt, solange sie noch keinen trägt.
+            application_id, old_wishes, old_requested = match
+            if old_wishes and old_wishes not in ("null", "[]"):
+                continue
+            params["id"] = application_id
+            conn.execute(text(
+                "UPDATE applications SET wishes = :wishes,"
+                " requested_at = COALESCE(requested_at, :req) WHERE id = :id"
+            ), params)
+
+    for col in ("desired_apartment_size", "desired_apartment_type"):
+        if col in hh_columns:
+            conn.execute(text(f"ALTER TABLE households DROP COLUMN {col}"))
 
     conn.commit()
 
@@ -420,6 +540,18 @@ def read_unassigned_persons(
     return query.all()
 
 # --- Apartments ---
+@app.get("/apartments/categories", response_model=List[schemas.ApartmentCategory])
+def read_apartment_categories(
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Wählbare Wunschkategorien für die Bewerbungspflege.
+
+    Sie entstehen aus den vorhandenen Wohnungen; damit kann ein Wunsch nicht
+    von den Stammdaten abweichen (siehe ``services.apartment_category_options``).
+    """
+    return services.apartment_category_options(db)
+
 @app.post("/apartments/", response_model=schemas.Apartment)
 def create_apartment(
     apartment: schemas.ApartmentCreate,
@@ -513,9 +645,11 @@ def delete_apartment(
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    """Löscht eine Wohnung samt der Bewerbungen auf diese Wohnung.
+    """Löscht eine Wohnung.
 
-    Blockiert, solange ein Haushalt der Wohnung zugeordnet ist.
+    Blockiert, solange ein Haushalt der Wohnung zugeordnet ist. Bewerbungen,
+    die mit dieser Wohnung erfüllt wurden, bleiben als Historie bestehen und
+    verlieren lediglich den Verweis auf die Wohnung.
     """
     apt = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
     if not apt:
@@ -526,33 +660,188 @@ def delete_apartment(
             detail="Wohnung ist einem Haushalt zugeordnet und kann nicht gelöscht werden. "
                    "Bitte zuerst die Zuordnung lösen.",
         )
-    db.query(models.Application).filter(models.Application.apartment_id == apartment_id).delete()
+    db.query(models.Application).filter(
+        models.Application.fulfilled_apartment_id == apartment_id
+    ).update({models.Application.fulfilled_apartment_id: None})
     db.delete(apt)
     db.commit()
     return {"deleted": apartment_id}
 
 # --- Applications ---
-@app.post("/applications/", response_model=schemas.Application)
+def _application_out(application: models.Application) -> schemas.ApplicationWithHousehold:
+    """Bewerbung samt der Angaben, die die Übersicht sonst nachladen müsste."""
+    data = schemas.ApplicationWithHousehold.model_validate(application)
+    hh = application.household
+    if hh:
+        data.household_name = hh.name
+        data.member_count = services.member_count(hh)
+        data.is_resident = hh.is_resident
+        data.wbs_status = hh.wbs_status
+        data.current_apartment_unit = hh.assigned_apartment_unit
+    if application.fulfilled_apartment:
+        data.fulfilled_apartment_unit = application.fulfilled_apartment.unit_number
+    return data
+
+
+def _validate_application(kind: str | None, status: str | None) -> None:
+    if kind is not None and kind not in models.APPLICATION_KINDS:
+        raise HTTPException(status_code=400, detail=f"Unbekannte Bewerbungsart: {kind}")
+    if status is not None and status not in models.APPLICATION_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Unbekannter Status: {status}")
+
+
+@app.post("/applications/", response_model=schemas.ApplicationWithHousehold)
 def create_application(
     application: schemas.ApplicationCreate,
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    db_application = models.Application(
-        household_id=application.household_id,
-        apartment_id=application.apartment_id,
-    )
+    """Legt eine Bewerbung an.
+
+    Je Haushalt und Bewerbungsart darf es nur **eine offene** Bewerbung geben —
+    die Historie entsteht über den Status, nicht über Dubletten.
+    """
+    hh = db.query(models.Household).filter(
+        models.Household.id == application.household_id
+    ).first()
+    if not hh:
+        raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
+    _validate_application(application.kind, application.status)
+    if application.status == "offen" and services.open_applications(
+        db, household_id=application.household_id, kind=application.kind
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Für diesen Haushalt gibt es bereits eine offene Bewerbung dieser Art.",
+        )
+    payload = application.model_dump()
+    payload["wishes"] = wishes.normalize_wishes(payload.get("wishes"))
+    db_application = models.Application(**payload)
     db.add(db_application)
     db.commit()
     db.refresh(db_application)
-    return db_application
+    return _application_out(db_application)
 
-@app.get("/applications/", response_model=List[schemas.Application])
+
+@app.get("/applications/", response_model=List[schemas.ApplicationWithHousehold])
 def read_applications(
+    kind: str | None = Query(None),
+    status: str | None = Query(None),
+    household_id: int | None = Query(None),
+    include_archived: bool = Query(False),
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    return db.query(models.Application).all()
+    query = db.query(models.Application)
+    if not include_archived:
+        query = query.filter(models.Application.archived == False)
+    if kind:
+        query = query.filter(models.Application.kind == kind)
+    if status:
+        query = query.filter(models.Application.status == status)
+    if household_id is not None:
+        query = query.filter(models.Application.household_id == household_id)
+    return [_application_out(a) for a in query.all()]
+
+
+@app.put("/applications/{application_id}", response_model=schemas.ApplicationWithHousehold)
+def update_application(
+    application_id: int,
+    data: schemas.ApplicationUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    application = db.query(models.Application).filter(
+        models.Application.id == application_id
+    ).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Bewerbung nicht gefunden")
+    payload = data.model_dump(exclude_unset=True)
+    _validate_application(payload.get("kind"), payload.get("status"))
+    if "wishes" in payload:
+        payload["wishes"] = wishes.normalize_wishes(payload["wishes"])
+
+    new_kind = payload.get("kind", application.kind)
+    new_status = payload.get("status", application.status)
+    if new_status == "offen":
+        clash = [
+            other for other in services.open_applications(
+                db, household_id=application.household_id, kind=new_kind
+            )
+            if other.id != application.id
+        ]
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail="Für diesen Haushalt gibt es bereits eine offene Bewerbung dieser Art.",
+            )
+    if new_status != "erfuellt":
+        # Nur eine erfüllte Bewerbung trägt eine Wohnung.
+        payload.setdefault("fulfilled_apartment_id", None)
+        application.fulfilled_at = None
+    elif application.status != "erfuellt":
+        application.fulfilled_at = datetime.utcnow()
+
+    for field, value in payload.items():
+        setattr(application, field, value)
+    application.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(application)
+    return _application_out(application)
+
+
+@app.delete("/applications/{application_id}")
+def delete_application(
+    application_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    application = db.query(models.Application).filter(
+        models.Application.id == application_id
+    ).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Bewerbung nicht gefunden")
+    db.delete(application)
+    db.commit()
+    return {"deleted": application_id}
+
+
+@app.patch("/applications/{application_id}/archive")
+def toggle_archive_application(
+    application_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    application = db.query(models.Application).filter(
+        models.Application.id == application_id
+    ).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Bewerbung nicht gefunden")
+    application.archived = not application.archived
+    application.updated_at = datetime.utcnow()
+    db.commit()
+    return {"archived": application.archived}
+
+
+@app.get("/applications/joker", response_model=List[schemas.JokerWaitEntry])
+def read_joker_waitlist(
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Warteliste für Joker-Zimmer: Vergabe nach der Reihenfolge des Wunsches."""
+    return [
+        schemas.JokerWaitEntry(
+            rank=rank,
+            application_id=entry.application.id,
+            household_id=entry.household.id,
+            household_name=entry.household.name,
+            requested_at=entry.application.requested_at,
+            current_apartment_unit=entry.household.assigned_apartment_unit,
+            special_case=bool(entry.application.special_case),
+            special_case_note=entry.application.special_case_note,
+        )
+        for rank, entry in enumerate(services.build_joker_waitlist(db), 1)
+    ]
 
 # --- Import ---
 @app.post("/upload/households/")
@@ -594,6 +883,19 @@ def get_ranking(
         schemas.RankingGroup(
             size_rooms=group["size_rooms"],
             funding_type=group["funding_type"],
+            priority=[
+                schemas.PriorityEntry(
+                    rank=rank,
+                    id=entry.household.id,
+                    name=entry.household.name,
+                    member_count=entry.members,
+                    requested_at=entry.application.requested_at,
+                    current_apartment_unit=entry.household.assigned_apartment_unit,
+                    special_case=bool(entry.application.special_case),
+                    special_case_note=entry.application.special_case_note,
+                )
+                for rank, entry in enumerate(group["priority"], 1)
+            ],
             households=[
                 schemas.RankedHousehold(
                     rank=rank,
@@ -604,6 +906,10 @@ def get_ranking(
                     base_score=entry.base_score,
                     occupancy_score=entry.occupancy_score,
                     total_score=entry.total_score,
+                    by_wish_only=entry.by_wish_only,
+                    special_case=bool(entry.application.special_case),
+                    special_case_note=entry.application.special_case_note,
+                    requested_at=entry.application.requested_at,
                 )
                 for rank, entry in enumerate(group["households"], 1)
             ],
@@ -694,6 +1000,35 @@ def commit_individual_bogen(
 ):
     try:
         return import_service.commit_individual_bogen(request, db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/import/applications/analyze", response_model=schemas.ApplicationAnalysisResponse)
+async def analyze_application_list(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="Bitte eine .xlsx-Datei hochladen.")
+    contents = await file.read()
+    try:
+        return application_import_service.analyze_application_list(contents, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/import/applications/commit", response_model=schemas.ApplicationCommitResponse)
+def commit_application_list(
+    request: schemas.ApplicationCommitRequest,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    try:
+        return application_import_service.commit_application_list(request, db)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

@@ -1116,7 +1116,9 @@ def commit_vcf(request: schemas.VcfCommitRequest, db: Session) -> schemas.VcfCom
 
     for decision in request.decisions:
         raw = raw_map.get(decision.temp_id)
-        if decision.action == "skip" or raw is None:
+        # Nur die bekannten Aktionen wirken; eine im Assistenten nicht
+        # entschiedene Zeile wird übersprungen statt neu angelegt.
+        if decision.action not in ("update", "create") or raw is None:
             households_skipped += 1
             continue
 

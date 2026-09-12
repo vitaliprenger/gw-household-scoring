@@ -2,20 +2,24 @@ import React, { useState, useEffect } from 'react';
 import {
   AppBar, Toolbar, Typography, Container, Box, Tabs, Tab,
   Paper, Button, TextField, Grid, Card, CardContent, Alert, Snackbar, Chip,
-  FormControl, InputLabel, Select, MenuItem, FormControlLabel, Switch, InputAdornment
+  FormControl, InputLabel, Select, MenuItem, FormControlLabel, Switch, InputAdornment,
+  Tooltip
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CalculateIcon from '@mui/icons-material/Calculate';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { deDE } from '@mui/x-data-grid/locales';
-import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, login, getRanking } from './api';
-import { Household, ScoringConfig, RankingGroup, RankedHousehold } from './types';
+import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, login, getRanking, getApplications } from './api';
+import { Household, ScoringConfig, RankingGroup, RankedHousehold, PriorityEntry } from './types';
 import HouseholdDetailDialog from './components/household/HouseholdDetailDialog';
 import ImportTab from './components/import/ImportTab';
 import PersonsTab from './components/persons/PersonsTab';
 import ApartmentsTab from './components/apartments/ApartmentsTab';
 import StatisticsTab from './components/statistics/StatisticsTab';
+import ApplicationsTab from './components/applications/ApplicationsTab';
+import { formatDate } from './components/applications/wishes';
 import CreateHouseholdDialog from './components/household/CreateHouseholdDialog';
 import { zebraGridSx, zebraRowClassName } from './components/common/tableStyles';
 
@@ -75,6 +79,8 @@ function App() {
   const [households, setHouseholds] = useState<Household[]>([]);
   const [configs, setConfigs] = useState<ScoringConfig[]>([]);
   const [rankingGroups, setRankingGroups] = useState<RankingGroup[]>([]);
+  // Haushalte mit offener Wartepool-Bewerbung -- nur sie stehen in der Rangliste.
+  const [poolHouseholdIds, setPoolHouseholdIds] = useState<Set<number>>(new Set());
   const [selectedSize, setSelectedSize] = useState<string>(FILTER_ALL);
   const [selectedFunding, setSelectedFunding] = useState<string>(FILTER_ALL);
   const [message, setMessage] = useState<{text: string, type: 'success'|'error'} | null>(null);
@@ -104,6 +110,8 @@ function App() {
       try {
         const groups = await getRanking();
         setRankingGroups(groups);
+        const pool = await getApplications({ kind: 'wartepool', status: 'offen' });
+        setPoolHouseholdIds(new Set(pool.map(a => a.household_id)));
       } catch (e) {
         console.log("Could not load ranking");
       }
@@ -247,6 +255,7 @@ function App() {
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
           <Tabs value={tabValue} onChange={handleTabChange}>
             <Tab label="Rangliste" />
+            <Tab label="Bewerbungen" />
             <Tab label="Alle Haushalte" />
             <Tab label="Personen" />
             <Tab label="Wohnungen" />
@@ -262,10 +271,11 @@ function App() {
           const fundingTypes = [...new Set(rankingGroups.map(g => g.funding_type))].sort();
 
           // Ein Filter auf "Alle" schränkt nicht ein. Stehen beide Filter auf
-          // "Alle", zeigt die Rangliste jeden nicht archivierten Haushalt ohne
-          // Wohnung -- auch solche, die für keine Wohnungskategorie in Frage
-          // kommen. Bestehende Bewohner suchen keine Wohnung und bleiben wie im
-          // Backend (services.build_ranking) aus der Rangliste heraus.
+          // "Alle", zeigt die Rangliste jeden nicht archivierten Haushalt mit
+          // offener Wartepool-Bewerbung -- auch solche, die für keine
+          // Wohnungskategorie in Frage kommen. Bestehende Bewohner suchen über
+          // den Wartepool keine Wohnung und bleiben wie im Backend
+          // (services.build_ranking) aus diesem Block heraus.
           const unfiltered = selectedSize === FILTER_ALL && selectedFunding === FILTER_ALL;
           const matchingGroups = rankingGroups.filter(
             g => (selectedSize === FILTER_ALL || sizeKey(g.size_rooms) === selectedSize)
@@ -277,16 +287,18 @@ function App() {
           // je Kategorie einen anderen Gesamtscore. Beim Entdoppeln zaehlt deshalb
           // die Kategorie, in der er am besten abschneidet.
           const selectedRanked: RankedHousehold[] = unfiltered
-            ? households.filter(h => !h.archived && !h.is_resident).map(h => ({
-                rank: 0,
-                id: h.id,
-                name: h.name,
-                member_count: h.people.filter(p => !p.archived).length,
-                engagement_score: h.engagement_score,
-                base_score: h.total_score,
-                occupancy_score: null,
-                total_score: h.total_score,
-              }))
+            ? households
+                .filter(h => !h.archived && !h.is_resident && poolHouseholdIds.has(h.id))
+                .map(h => ({
+                  rank: 0,
+                  id: h.id,
+                  name: h.name,
+                  member_count: h.people.filter(p => !p.archived).length,
+                  engagement_score: h.engagement_score,
+                  base_score: h.total_score,
+                  occupancy_score: null,
+                  total_score: h.total_score,
+                }))
             : [...matchingGroups
                 .flatMap(g => g.households)
                 .reduce((best, h) => {
@@ -299,9 +311,63 @@ function App() {
             .sort((a, b) => b.total_score - a.total_score)
             .map((h, index) => ({ ...h, rank: index + 1 }));
 
+          // Vorrang: Wechselwuensche der ausgewaehlten Kategorien, nach dem
+          // Zeitpunkt des Wunsches gereiht -- ohne Scoring.
+          const priorityRows: PriorityEntry[] = [...(unfiltered ? rankingGroups : matchingGroups)
+            .flatMap(g => g.priority)
+            .reduce((seen, e) => {
+              if (!seen.has(e.id)) seen.set(e.id, e);
+              return seen;
+            }, new Map<number, PriorityEntry>())
+            .values()]
+            .sort((a, b) => (a.requested_at ?? '9999').localeCompare(b.requested_at ?? '9999'))
+            .map((e, index) => ({ ...e, rank: index + 1 }));
+
+          const householdCell = (
+            name: string, specialCase?: boolean, note?: string, byWishOnly?: boolean,
+          ) => (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <span>{name}</span>
+              {specialCase && (
+                <Tooltip title={note || 'Sonderfall beachten'}>
+                  <WarningAmberIcon color="warning" fontSize="small" />
+                </Tooltip>
+              )}
+              {byWishOnly && (
+                <Tooltip title="Der Haushalt wünscht diese Kategorie ausdrücklich; die Eignungsprüfung würde ihn hier ausschließen.">
+                  <Chip label="nur auf Wunsch" size="small" variant="outlined" color="info" />
+                </Tooltip>
+              )}
+            </Box>
+          );
+
+          const priorityColumns: GridColDef<PriorityEntry>[] = [
+            { field: 'rank', headerName: 'Rang', width: 80, type: 'number' },
+            {
+              field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180,
+              renderCell: (params: GridRenderCellParams<PriorityEntry>) =>
+                householdCell(params.row.name, params.row.special_case, params.row.special_case_note),
+            },
+            { field: 'member_count', headerName: 'Mitglieder', width: 100, type: 'number' },
+            {
+              field: 'current_apartment_unit', headerName: 'Aktuelle Wohnung', width: 150,
+              valueFormatter: (value: string | undefined) => value || '—',
+            },
+            {
+              field: 'requested_at', headerName: 'Wunsch seit', width: 130,
+              valueFormatter: (value: string | undefined) => formatDate(value),
+            },
+          ];
+
           const rankingColumns: GridColDef<RankedHousehold>[] = [
             { field: 'rank', headerName: 'Rang', width: 80, type: 'number' },
-            { field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180 },
+            {
+              field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180,
+              renderCell: (params: GridRenderCellParams<RankedHousehold>) => householdCell(
+                params.row.name, params.row.special_case, params.row.special_case_note,
+                params.row.by_wish_only,
+              ),
+            },
             { field: 'member_count', headerName: 'Mitglieder', width: 100, type: 'number' },
             {
               field: 'base_score', headerName: 'Grundpunktzahl', width: 140, type: 'number',
@@ -350,7 +416,31 @@ function App() {
                 </FormControl>
               </Box>
 
+              {priorityRows.length > 0 && (
+                <Box sx={{ mb: 4 }}>
+                  <Typography variant="h6" sx={{ mb: 1 }}>Vorrang — Wechselwunsch</Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                    Bestehende Bewohner-Haushalte, die wechseln möchten. Sie werden vorrangig
+                    berücksichtigt; maßgeblich ist der Zeitpunkt des Wunsches, nicht das Scoring.
+                  </Typography>
+                  <DataGrid
+                    rows={priorityRows}
+                    columns={priorityColumns}
+                    autoHeight
+                    density="compact"
+                    disableRowSelectionOnClick
+                    hideFooter={priorityRows.length <= 10}
+                    initialState={{ sorting: { sortModel: [{ field: 'rank', sort: 'asc' }] } }}
+                    getRowClassName={zebraRowClassName}
+                    sx={zebraGridSx}
+                    localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
+                  />
+                </Box>
+              )}
+
+              <Typography variant="h6" sx={{ mb: 1 }}>Wartepool</Typography>
               <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Gezeigt werden nur Haushalte mit offener Wartepool-Bewerbung.{" "}
                 {unfiltered
                   ? 'Ohne Filter wird nur die Grundpunktzahl gezeigt: die Wohnraumausnutzung ergibt sich erst aus der Zimmerzahl der Wohnung.'
                   : 'Die Wohnraumausnutzung gilt je Wohnungsgröße — ein Haushalt, der die Wohnung ausfüllt (Mitglieder ≥ Zimmer), erhält hier volle Punkte, sonst 0.'}
@@ -376,7 +466,7 @@ function App() {
                 <Paper sx={{ p: 3, textAlign: 'center' }}>
                   <Typography color="textSecondary">
                     {unfiltered
-                      ? 'Keine Haushalte vorhanden.'
+                      ? 'Kein Haushalt hat eine offene Wartepool-Bewerbung.'
                       : 'Kein Haushalt kommt für diese Wohnungskategorie in Frage.'}
                   </Typography>
                 </Paper>
@@ -385,7 +475,14 @@ function App() {
           );
         })()}
 
-        {tabValue === 1 && (() => {
+        {tabValue === 1 && (
+          <ApplicationsTab
+            onShowHousehold={(id) => setDetailHouseholdId(id)}
+            onChanged={loadData}
+          />
+        )}
+
+        {tabValue === 2 && (() => {
           const householdColumns: GridColDef<Household>[] = [
             {
               field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180,
@@ -505,25 +602,25 @@ function App() {
           );
         })()}
 
-        {tabValue === 2 && (
+        {tabValue === 3 && (
           <PersonsTab onShowHousehold={(id) => setDetailHouseholdId(id)} />
         )}
 
-        {tabValue === 3 && (
+        {tabValue === 4 && (
           <ApartmentsTab
             onShowHousehold={(id) => setDetailHouseholdId(id)}
             onChanged={loadData}
           />
         )}
 
-        {tabValue === 4 && (
+        {tabValue === 5 && (
           <StatisticsTab
             onShowHousehold={(id) => setDetailHouseholdId(id)}
             refreshKey={statsRefreshKey}
           />
         )}
 
-        {tabValue === 5 && (() => {
+        {tabValue === 6 && (() => {
           const diversityWeights = configs.filter(c => c.key.startsWith('weight_diversity_'));
           const otherWeights = configs.filter(c => c.key.startsWith('weight_') && !c.key.startsWith('weight_diversity_'));
           const naturalSort = (a: ScoringConfig, b: ScoringConfig) =>
@@ -585,7 +682,7 @@ function App() {
           );
         })()}
 
-        {tabValue === 6 && (
+        {tabValue === 7 && (
           <ImportTab onImportComplete={loadData} />
         )}
       </Container>

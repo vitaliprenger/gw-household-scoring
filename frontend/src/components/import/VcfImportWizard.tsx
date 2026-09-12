@@ -14,6 +14,7 @@ import {
 } from '../../types';
 import { commitVcf } from '../../api';
 import MatchingDialog from './MatchingDialog';
+import { isCertainMatch, isUncertainMatch, UNDECIDED, UNDECIDED_LABEL } from './matching';
 
 interface VcfImportWizardProps {
     open: boolean;
@@ -41,14 +42,21 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
     const [decisions, setDecisions] = useState<Record<string, VcfDecision>>(() => {
         const init: Record<string, VcfDecision> = {};
         for (const hh of analysis.households) {
+            // Nur ein eindeutiger Treffer wird automatisch zugeordnet (siehe matching.ts).
+            // Bei einem unsicheren Treffer wäre weder "Aktualisieren" (falscher
+            // Haushalt) noch "Neu anlegen" (Dublette) eine unschuldige
+            // Vorbelegung -- die Zeile braucht eine Entscheidung.
+            let action: VcfDecision['action'];
+            if (hh.already_imported) action = 'skip';
+            else if (isCertainMatch(hh.match_result)) action = 'update';
+            else if (isUncertainMatch(hh.match_result)) action = UNDECIDED;
+            else action = 'create';
             init[hh.temp_id] = {
                 temp_id: hh.temp_id,
-                action: hh.already_imported
-                    ? 'skip'
-                    : hh.match_result.matched_household_id
-                        ? 'update'
-                        : 'create',
-                target_household_id: hh.match_result.matched_household_id ?? undefined,
+                action,
+                target_household_id: isCertainMatch(hh.match_result)
+                    ? hh.match_result.matched_household_id ?? undefined
+                    : undefined,
                 excluded_person_temp_ids: [],
             };
         }
@@ -93,6 +101,27 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
         };
     }, [decisions, withApartment]);
 
+    // Zeilen, über die noch entschieden werden muss: unsicherer Treffer.
+    const undecided = Object.values(decisions).filter((d) => d.action === UNDECIDED);
+
+    function resolveAllUndecided(action: VcfDecision['action']) {
+        setDecisions((prev) => Object.fromEntries(
+            Object.entries(prev).map(([id, dec]) => [
+                id,
+                dec.action === UNDECIDED
+                    ? {
+                        ...dec,
+                        action,
+                        target_household_id: action === 'update'
+                            ? analysis.households.find((hh) => hh.temp_id === id)
+                                ?.match_result.matched_household_id ?? undefined
+                            : undefined,
+                    }
+                    : dec,
+            ]),
+        ));
+    }
+
     function updateDecision(tempId: string, patch: Partial<VcfDecision>) {
         setDecisions((prev) => ({ ...prev, [tempId]: { ...prev[tempId], ...patch } }));
     }
@@ -131,6 +160,26 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                 </Stepper>
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+                {undecided.length > 0 && step > 0 && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                        <strong>{undecided.length} Haushalt(e) mit nur ähnlichem Treffer.</strong>{' '}
+                        Automatisch zugeordnet wird nur bei Mitgliedsnummer, exaktem Namen
+                        oder Wohnungsnummer — hier passt der Name nur ungefähr, und
+                        „neu anlegen" würde hier eine Dublette erzeugen. Bitte je Zeile
+                        entscheiden; der Import bleibt bis dahin gesperrt.
+                        <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                            <Button size="small" variant="outlined"
+                                onClick={() => resolveAllUndecided('create')}>
+                                Alle neu anlegen
+                            </Button>
+                            <Button size="small" variant="outlined"
+                                onClick={() => resolveAllUndecided('skip')}>
+                                Alle überspringen
+                            </Button>
+                        </Box>
+                    </Alert>
+                )}
 
                 {step === 0 && (
                     <Box>
@@ -270,6 +319,7 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                                                     <FormControl size="small" sx={{ minWidth: 140 }}>
                                                         <Select
                                                             value={dec?.action ?? 'create'}
+                                                            error={dec?.action === UNDECIDED}
                                                             onChange={(e) => updateDecision(hh.temp_id, {
                                                                 action: e.target.value as VcfDecision['action'],
                                                                 // "neu anlegen" darf keinen Treffer mitschleppen
@@ -279,6 +329,9 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                                                                     : undefined,
                                                             })}
                                                         >
+                                                            {dec?.action === UNDECIDED && (
+                                                                <MenuItem value={UNDECIDED}>{UNDECIDED_LABEL}</MenuItem>
+                                                            )}
                                                             {(dec?.target_household_id
                                                                 || hh.match_result.matched_household_id) && (
                                                                 <MenuItem value="update">Aktualisieren</MenuItem>
@@ -420,9 +473,14 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                 {step === 1 && (
                     <>
                         <Button onClick={() => setStep(0)}>Zurück</Button>
-                        <Button variant="contained" onClick={handleCommit} disabled={committing}>
+                        <Button
+                            variant="contained" onClick={handleCommit}
+                            disabled={committing || undecided.length > 0}
+                        >
                             {committing ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                            Importieren
+                            {undecided.length > 0
+                                ? `${undecided.length} Zuordnung(en) offen`
+                                : 'Importieren'}
                         </Button>
                     </>
                 )}

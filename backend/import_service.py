@@ -8,7 +8,7 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from . import models, schemas
+from . import models, schemas, wishes as wishes_mod
 
 # ---------------------------------------------------------------------------
 # Session store
@@ -299,8 +299,12 @@ def parse_household_bogen(file_contents: bytes) -> dict:
             "financial_status": _normalize_financial(row.get("Finanzielle Rahmenbedingungen", "")),
             "declared_member_count": declared_count,
             "wheelchair_accessible": _parse_wheelchair(row.get("Rollstuhlgerecht?", "")),
-            "desired_apartment_type": _parse_apartment_types(row.get("Wohnungsart", "")),
-            "desired_apartment_size": str(row.get("Wohnungsgröße", "")).strip() or None,
+            # Der Wohnungswunsch wird sofort in Wunschkategorien übersetzt und
+            # landet in der Wartepool-Bewerbung, nicht am Haushalt.
+            "wishes": wishes_mod.from_household_fields(
+                row.get("Wohnungsgröße", ""), _parse_apartment_types(row.get("Wohnungsart", ""))
+            ),
+            "unparsed_wishes": wishes_mod.parse_wish(row.get("Wohnungsgröße", ""))[1],
             "pets_count": _parse_int(row.get("Haustiere 1", "0")),
             "pets_info": str(row.get("Haustiere 2", "")).strip() or None,
             "persons": persons,
@@ -532,14 +536,39 @@ FIELD_LABELS = {
     "wbs_status": "WBS-Status",
     "pets_count": "Haustiere (Anzahl)",
     "pets_info": "Haustiere (Info)",
-    "desired_apartment_size": "Gewünschte Wohnungsgröße",
-    "desired_apartment_type": "Wohnungsart",
     "wheelchair_accessible": "Rollstuhlgerecht?",
     "financial_status": "Finanzielle Rahmenbedingungen",
     "household_member_count": "Deklarierte Mitglieder",
 }
 
-def compute_data_changes(new_data: dict, existing: models.Household) -> Optional[schemas.ExistingDataChanges]:
+WISH_LABEL = "Wohnungswunsch"
+
+
+def open_wartepool_application(hh: models.Household, db: Session) -> Optional[models.Application]:
+    """Die offene Wartepool-Bewerbung eines Haushalts, sofern es eine gibt.
+
+    Der Wohnungswunsch des Haushaltsbogens landet dort — am Haushalt selbst
+    wird er nicht mehr geführt.
+    """
+    return (
+        db.query(models.Application)
+        .filter(models.Application.household_id == hh.id)
+        .filter(models.Application.kind == "wartepool")
+        .filter(models.Application.status == "offen")
+        .filter(models.Application.archived == False)
+        .first()
+    )
+
+
+def _wishes_display(wish_list) -> str:
+    return ", ".join(wishes_mod.wish_label(w) for w in wish_list or [])
+
+
+def compute_data_changes(
+    new_data: dict,
+    existing: models.Household,
+    db: Optional[Session] = None,
+) -> Optional[schemas.ExistingDataChanges]:
     overwrites = []
     removals = []
 
@@ -547,8 +576,6 @@ def compute_data_changes(new_data: dict, existing: models.Household) -> Optional
         "wbs_status": new_data.get("wbs_status"),
         "pets_count": new_data.get("pets_count"),
         "pets_info": new_data.get("pets_info"),
-        "desired_apartment_size": new_data.get("desired_apartment_size"),
-        "desired_apartment_type": new_data.get("desired_apartment_type"),
         "wheelchair_accessible": new_data.get("wheelchair_accessible"),
         "financial_status": new_data.get("financial_status"),
         "household_member_count": new_data.get("declared_member_count"),
@@ -574,6 +601,22 @@ def compute_data_changes(new_data: dict, existing: models.Household) -> Optional
                 continue
             removals.append(schemas.DataChange(
                 field=label, old_value=_display(old_val)
+            ))
+
+    # Der Wohnungswunsch steht in der offenen Wartepool-Bewerbung, nicht am Haushalt.
+    if db is not None:
+        application = open_wartepool_application(existing, db)
+        old_wishes = wishes_mod.normalize_wishes(application.wishes if application else [])
+        new_wishes = new_data.get("wishes") or []
+        if old_wishes and new_wishes and old_wishes != new_wishes:
+            overwrites.append(schemas.DataChange(
+                field=WISH_LABEL,
+                old_value=_wishes_display(old_wishes),
+                new_value=_wishes_display(new_wishes),
+            ))
+        elif old_wishes and not new_wishes:
+            removals.append(schemas.DataChange(
+                field=WISH_LABEL, old_value=_wishes_display(old_wishes)
             ))
 
     if not overwrites and not removals:
@@ -612,7 +655,7 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
         if match_result.matched_household_id and not already_imported:
             existing = db.query(models.Household).get(match_result.matched_household_id)
             if existing:
-                data_changes = compute_data_changes(hh_data, existing)
+                data_changes = compute_data_changes(hh_data, existing, db)
 
         member_count_mismatch = (
             hh_data["declared_member_count"] > 0
@@ -626,8 +669,8 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
             financial_status=hh_data.get("financial_status"),
             declared_member_count=hh_data.get("declared_member_count", 0),
             wheelchair_accessible=hh_data.get("wheelchair_accessible", False),
-            desired_apartment_type=hh_data.get("desired_apartment_type"),
-            desired_apartment_size=hh_data.get("desired_apartment_size"),
+            wishes=[schemas.ApplicationWish(**w) for w in hh_data.get("wishes", [])],
+            unparsed_wishes=hh_data.get("unparsed_wishes", []),
             pets_count=hh_data.get("pets_count", 0),
             pets_info=hh_data.get("pets_info"),
             persons=[schemas.ImportPersonPreview(**p) for p in hh_data["persons"]],
@@ -673,7 +716,9 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
     skipped_no_match = 0
 
     for dec in request.decisions:
-        if dec.action == "skip":
+        # Alles außer "update" ist keine Zuordnung -- eine im Assistenten noch
+        # nicht entschiedene Zeile darf nichts bewirken.
+        if dec.action != "update":
             skipped += 1
             continue
 
@@ -704,17 +749,43 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
     )
 
 
+def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session):
+    """Schreibt den Wohnungswunsch des Fragebogens in die Wartepool-Bewerbung.
+
+    Gibt es noch keine offene Wartepool-Bewerbung, entsteht sie hier. Der
+    Fragebogen-Import legt damit weiterhin **keine Haushalte** an — nur die
+    Bewerbung zu einem bereits bestehenden Haushalt.
+    """
+    wish_list = wishes_mod.normalize_wishes(raw.get("wishes") or [])
+    application = open_wartepool_application(hh, db)
+    if application is None:
+        if not wish_list:
+            return
+        application = models.Application(
+            household_id=hh.id,
+            kind="wartepool",
+            status="offen",
+            requested_at=raw.get("timestamp"),
+            created_at=datetime.utcnow(),
+        )
+        db.add(application)
+    application.wishes = wish_list
+    if application.requested_at is None:
+        application.requested_at = raw.get("timestamp")
+    application.updated_at = datetime.utcnow()
+
+
 def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
     hh.wbs_status = raw.get("wbs_status")
     hh.pets_count = raw.get("pets_count", 0)
     hh.pets_info = raw.get("pets_info")
-    hh.desired_apartment_size = raw.get("desired_apartment_size")
-    hh.desired_apartment_type = raw.get("desired_apartment_type")
     hh.wheelchair_accessible = raw.get("wheelchair_accessible", False)
     hh.financial_status = raw.get("financial_status")
     hh.import_timestamp = raw.get("timestamp")
     hh.import_source = "HH-Fragebogen"
     hh.household_member_count = raw.get("declared_member_count")
+
+    _apply_wishes_from_bogen(hh, raw, db)
 
     # Personen werden ueber Mitgliedsnummer/Name/Geburtsdatum wiedergefunden,
     # damit Schreibweisen aus dem Fragebogen keine Dubletten zu den bereits
@@ -1047,7 +1118,9 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
     skipped_no_match = 0
 
     for dec in request.decisions:
-        if dec.action == "skip":
+        # Alles außer "update" ist keine Zuordnung -- eine im Assistenten noch
+        # nicht entschiedene Zeile darf nichts bewirken.
+        if dec.action != "update":
             skipped_count += 1
             continue
 

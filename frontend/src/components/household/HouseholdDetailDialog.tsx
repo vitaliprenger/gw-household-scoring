@@ -3,15 +3,25 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, Typography, Grid, TextField, Select, MenuItem,
     FormControl, InputLabel, Switch, FormControlLabel, Divider,
-    Box, Alert, CircularProgress, Checkbox, ListItemText, Chip,
-    OutlinedInput,
+    Box, Alert, CircularProgress, Chip, Tooltip, IconButton, Stack,
 } from '@mui/material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
-import { Household, Person } from '../../types';
-import { getHousehold, updateHousehold, updatePerson, toggleArchiveHousehold, unassignPerson, deleteHousehold } from '../../api';
+import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import {
+    Application, Household, Person,
+    APPLICATION_KIND_LABELS, APPLICATION_STATUS_LABELS,
+} from '../../types';
+import {
+    getHousehold, updateHousehold, updatePerson, toggleArchiveHousehold, unassignPerson,
+    deleteHousehold, getApplications,
+} from '../../api';
 import PersonCard from './PersonCard';
 import AddPersonDialog from './AddPersonDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
+import ApplicationEditDialog from '../applications/ApplicationEditDialog';
+import { wishLabel, formatDate } from '../applications/wishes';
 
 interface HouseholdDetailDialogProps {
     open: boolean;
@@ -21,13 +31,6 @@ interface HouseholdDetailDialogProps {
 }
 
 const WBS_OPTIONS = ['', 'kein WBS', 'WBS A', 'WBS B'];
-
-const APARTMENT_TYPE_OPTIONS = [
-    'Standard Wohnungstypen',
-    'Clusterwohnung',
-    'Ausbauwohnung',
-    'Atelierwohnung',
-];
 
 export default function HouseholdDetailDialog({
     open, householdId, onClose, onSaved,
@@ -44,6 +47,9 @@ export default function HouseholdDetailDialog({
     const [removing, setRemoving] = useState(false);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [applications, setApplications] = useState<Application[]>([]);
+    const [applicationTarget, setApplicationTarget] = useState<Application | null>(null);
+    const [applicationOpen, setApplicationOpen] = useState(false);
 
     useEffect(() => {
         if (open && householdId) {
@@ -58,8 +64,15 @@ export default function HouseholdDetailDialog({
                 })
                 .catch(() => setError('Haushalt konnte nicht geladen werden'))
                 .finally(() => setLoading(false));
+            loadApplications(householdId);
         }
     }, [open, householdId]);
+
+    function loadApplications(id: number) {
+        getApplications({ household_id: id, include_archived: true })
+            .then(setApplications)
+            .catch(() => setApplications([]));
+    }
 
     if (!open) return null;
 
@@ -265,41 +278,6 @@ export default function HouseholdDetailDialog({
                                     <FieldDisplay label="WBS-Status" value={currentHH.wbs_status} />
                                 )}
                             </Grid>
-                            <GridField label="Gewünschte Wohnungsgröße" value={currentHH.desired_apartment_size ?? ''} editing={editing}
-                                onChange={(v) => handleHHChange('desired_apartment_size', v)} />
-                            <Grid size={{ xs: 6, sm: 4 }}>
-                                {editing ? (
-                                    <FormControl size="small" fullWidth>
-                                        <InputLabel>Wohnungsart</InputLabel>
-                                        <Select
-                                            multiple
-                                            value={currentHH.desired_apartment_type ?? []}
-                                            label="Wohnungsart"
-                                            input={<OutlinedInput label="Wohnungsart" />}
-                                            onChange={(e) => handleHHChange('desired_apartment_type', e.target.value as string[])}
-                                            renderValue={(selected) => (
-                                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                                    {(selected as string[]).map((v) => (
-                                                        <Chip key={v} label={v} size="small" />
-                                                    ))}
-                                                </Box>
-                                            )}
-                                        >
-                                            {APARTMENT_TYPE_OPTIONS.map((opt) => (
-                                                <MenuItem key={opt} value={opt}>
-                                                    <Checkbox checked={(currentHH.desired_apartment_type ?? []).includes(opt)} />
-                                                    <ListItemText primary={opt} />
-                                                </MenuItem>
-                                            ))}
-                                        </Select>
-                                    </FormControl>
-                                ) : (
-                                    <FieldDisplay
-                                        label="Wohnungsart"
-                                        value={(currentHH.desired_apartment_type ?? []).join(', ') || undefined}
-                                    />
-                                )}
-                            </Grid>
                             <GridField label="Haustiere (Anzahl)" value={String(currentHH.pets_count)} editing={editing}
                                 onChange={(v) => handleHHChange('pets_count', parseInt(v) || 0)} />
                             <GridField label="Haustiere (Info)" value={currentHH.pets_info ?? ''} editing={editing}
@@ -332,6 +310,84 @@ export default function HouseholdDetailDialog({
                             <FieldDisplay label="Letzte Bearbeitung" value={formatDateTime(currentHH.updated_at)} />
                             <FieldDisplay label="Grundpunktzahl (ohne Wohnraumausnutzung)" value={currentHH.total_score.toFixed(2)} />
                         </Box>
+
+                        <Divider sx={{ my: 2 }} />
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="h6">
+                                Bewerbungen ({applications.length})
+                            </Typography>
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<AddIcon />}
+                                onClick={() => { setApplicationTarget(null); setApplicationOpen(true); }}
+                                disabled={editing}
+                            >
+                                Bewerbung anlegen
+                            </Button>
+                        </Box>
+                        {applications.length === 0 ? (
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                Dieser Haushalt hat keine Bewerbung. Ohne offene Bewerbung
+                                erscheint er in keiner Rangliste.
+                            </Typography>
+                        ) : (
+                            <Stack spacing={1} sx={{ mb: 1 }}>
+                                {applications.map((application) => (
+                                    <Box
+                                        key={application.id}
+                                        sx={{
+                                            display: 'flex', alignItems: 'center', gap: 1,
+                                            flexWrap: 'wrap', p: 1,
+                                            border: 1, borderColor: 'divider', borderRadius: 1,
+                                        }}
+                                    >
+                                        <Chip size="small" label={APPLICATION_KIND_LABELS[application.kind]} />
+                                        <Chip
+                                            size="small"
+                                            color={application.status === 'offen' ? 'warning' : 'default'}
+                                            label={APPLICATION_STATUS_LABELS[application.status]}
+                                        />
+                                        {application.wishes.map((wish, i) => (
+                                            <Chip key={i} size="small" variant="outlined" label={wishLabel(wish)} />
+                                        ))}
+                                        {application.wishes.length === 0 && (
+                                            <Typography variant="body2" color="text.secondary">
+                                                kein Wunsch gepflegt
+                                            </Typography>
+                                        )}
+                                        {application.special_case && (
+                                            <Tooltip title={application.special_case_note || 'Sonderfall beachten'}>
+                                                <WarningAmberIcon color="warning" fontSize="small" />
+                                            </Tooltip>
+                                        )}
+                                        <Box sx={{ flexGrow: 1 }} />
+                                        <Typography variant="body2" color="text.secondary">
+                                            seit {formatDate(application.requested_at)}
+                                        </Typography>
+                                        {application.fulfilled_apartment_unit && (
+                                            <Typography variant="body2">
+                                                → {application.fulfilled_apartment_unit}
+                                            </Typography>
+                                        )}
+                                        <Tooltip title="Bearbeiten">
+                                            <span>
+                                                <IconButton
+                                                    size="small"
+                                                    disabled={editing}
+                                                    onClick={() => {
+                                                        setApplicationTarget(application);
+                                                        setApplicationOpen(true);
+                                                    }}
+                                                >
+                                                    <EditIcon fontSize="small" />
+                                                </IconButton>
+                                            </span>
+                                        </Tooltip>
+                                    </Box>
+                                ))}
+                            </Stack>
+                        )}
 
                         <Divider sx={{ my: 2 }} />
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -377,6 +433,18 @@ export default function HouseholdDetailDialog({
                     <Button onClick={onClose}>Schließen</Button>
                 )}
             </DialogActions>
+
+            <ApplicationEditDialog
+                open={applicationOpen}
+                application={applicationTarget}
+                households={[]}
+                fixedHousehold={household}
+                onClose={() => { setApplicationOpen(false); setApplicationTarget(null); }}
+                onSaved={() => {
+                    if (householdId) loadApplications(householdId);
+                    onSaved();
+                }}
+            />
 
             <AddPersonDialog
                 open={addPersonOpen}

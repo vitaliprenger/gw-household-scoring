@@ -2,11 +2,15 @@ import { useState } from 'react';
 import {
     Box, Typography, Paper, Button, Alert, CircularProgress,
 } from '@mui/material';
-import { analyzeHHBogen, analyzeIndividualBogen, analyzeVcf } from '../../api';
-import { HHAnalysisResponse, IndividualAnalysisResponse, VcfAnalysisResponse } from '../../types';
+import { analyzeHHBogen, analyzeIndividualBogen, analyzeVcf, analyzeApplicationList } from '../../api';
+import {
+    HHAnalysisResponse, IndividualAnalysisResponse, VcfAnalysisResponse,
+    ApplicationAnalysisResponse,
+} from '../../types';
 import HHImportWizard from './HHImportWizard';
 import IndividualImportWizard from './IndividualImportWizard';
 import VcfImportWizard from './VcfImportWizard';
+import ApplicationImportWizard from './ApplicationImportWizard';
 
 interface ImportTabProps {
     onImportComplete: () => void;
@@ -25,7 +29,28 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
     const [vcfWizardOpen, setVcfWizardOpen] = useState(false);
     const [vcfLoading, setVcfLoading] = useState(false);
 
+    const [appAnalysis, setAppAnalysis] = useState<ApplicationAnalysisResponse | null>(null);
+    const [appWizardOpen, setAppWizardOpen] = useState(false);
+    const [appLoading, setAppLoading] = useState(false);
+
     const [error, setError] = useState('');
+
+    async function handleApplicationUpload(event: React.ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        setAppLoading(true);
+        setError('');
+        try {
+            const result = await analyzeApplicationList(file);
+            setAppAnalysis(result);
+            setAppWizardOpen(true);
+        } catch (e: any) {
+            setError(e?.response?.data?.detail || 'Analyse fehlgeschlagen');
+        } finally {
+            setAppLoading(false);
+            event.target.value = '';
+        }
+    }
 
     async function handleHHUpload(event: React.ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0];
@@ -124,7 +149,7 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
                 </Button>
             </Paper>
 
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: 3, mb: 3 }}>
                 <Typography variant="h6" gutterBottom>3. Haushaltsbogen importieren</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                     Ergänzt bestehende Haushalte um die Angaben aus dem Haushaltsbogen-Fragebogen
@@ -138,6 +163,32 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
                     <input type="file" hidden onChange={handleHHUpload} accept=".xlsx" />
                 </Button>
             </Paper>
+
+            <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>4. Bewerbungsliste importieren</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Übernimmt die gepflegte Bewerbungsliste (.xlsx) mit Typ, Wunsch, Datum, Status
+                    und Kommentar. Der Wunsch wird in Wohnungskategorien übersetzt („2,5 A"); nicht
+                    auflösbare Angaben werden im Assistenten ausgewiesen statt stillschweigend
+                    übernommen. Dieser Import <strong>darf Haushalte anlegen</strong> — Wartepool-Bewerber
+                    wohnen noch nicht im Projekt und entstehen deshalb nicht aus der vCard. Vorhandene
+                    Personen ohne Haushalt werden zur Zuordnung vorgeschlagen.
+                </Typography>
+                <Button variant="contained" component="label" disabled={appLoading}>
+                    {appLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                    Bewerbungsliste hochladen
+                    <input type="file" hidden onChange={handleApplicationUpload} accept=".xlsx" />
+                </Button>
+            </Paper>
+
+            {appWizardOpen && appAnalysis && (
+                <ApplicationImportWizard
+                    open={appWizardOpen}
+                    analysis={appAnalysis}
+                    onClose={() => setAppWizardOpen(false)}
+                    onComplete={() => { setAppWizardOpen(false); onImportComplete(); }}
+                />
+            )}
 
             {hhWizardOpen && hhAnalysis && (
                 <HHImportWizard

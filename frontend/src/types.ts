@@ -33,8 +33,6 @@ export interface Household {
     wbs_status?: string;
     pets_count: number;
     pets_info?: string;
-    desired_apartment_size?: string;
-    desired_apartment_type?: string[];
     wheelchair_accessible: boolean;
     financial_status?: string;
     import_source?: string;
@@ -81,12 +79,165 @@ export interface RankedHousehold {
     occupancy_score: number | null;
     /** base_score + occupancy_score */
     total_score: number;
+    /** Steht nur hier, weil der Haushalt die Kategorie ausdrücklich wünscht. */
+    by_wish_only?: boolean;
+    special_case?: boolean;
+    special_case_note?: string;
+    requested_at?: string;
+}
+
+/** Ein Wechselwunsch in einer Kategorie: Vorrang nach Datum, ohne Scoring. */
+export interface PriorityEntry {
+    rank: number;
+    id: number;
+    name: string;
+    member_count: number;
+    requested_at?: string;
+    current_apartment_unit?: string;
+    special_case?: boolean;
+    special_case_note?: string;
 }
 
 export interface RankingGroup {
     size_rooms: number | null;
     funding_type: string;
+    priority: PriorityEntry[];
     households: RankedHousehold[];
+}
+
+// --- Bewerbungen ---
+
+export type ApplicationKind = 'wartepool' | 'wechselwunsch' | 'joker';
+export type ApplicationStatus = 'offen' | 'erfuellt' | 'zurueckgezogen';
+
+export const APPLICATION_KIND_LABELS: Record<ApplicationKind, string> = {
+    wartepool: 'Wartepool',
+    wechselwunsch: 'Wechselwunsch',
+    joker: 'Joker',
+};
+
+export const APPLICATION_STATUS_LABELS: Record<ApplicationStatus, string> = {
+    offen: 'offen',
+    erfuellt: 'erfüllt',
+    zurueckgezogen: 'zurückgezogen',
+};
+
+/**
+ * Eine gewünschte Wohnungskategorie. `null` heißt in jedem Feld "egal".
+ * Die Zimmerzahl ist die ganze Zahl des Modells: 2 steht für "2,5".
+ */
+export interface ApplicationWish {
+    size_rooms?: number | null;
+    funding_type?: string | null;
+    apartment_category?: string | null;
+}
+
+export interface Application {
+    id: number;
+    household_id: number;
+    kind: ApplicationKind;
+    requested_at?: string | null;
+    wishes: ApplicationWish[];
+    status: ApplicationStatus;
+    status_note?: string | null;
+    special_case: boolean;
+    special_case_note?: string | null;
+    note?: string | null;
+    fulfilled_apartment_id?: number | null;
+    fulfilled_at?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+    archived: boolean;
+    household_name?: string | null;
+    member_count: number;
+    is_resident: boolean;
+    wbs_status?: string | null;
+    current_apartment_unit?: string | null;
+    fulfilled_apartment_unit?: string | null;
+}
+
+/** Wählbare Wunschkategorie, abgeleitet aus den Wohnungsstammdaten. */
+export interface ApartmentCategory {
+    size_rooms?: number | null;
+    funding_type?: string | null;
+    apartment_category?: string | null;
+    label: string;
+    apartment_count: number;
+}
+
+export interface JokerWaitEntry {
+    rank: number;
+    application_id: number;
+    household_id: number;
+    household_name: string;
+    requested_at?: string;
+    current_apartment_unit?: string;
+    special_case?: boolean;
+    special_case_note?: string;
+}
+
+// --- Bewerbungslisten-Import ---
+
+export interface ApplicationPersonCandidate {
+    person_id: number;
+    name: string;
+    member_number?: string;
+    score: number;
+}
+
+export interface ApplicationImportPreview {
+    temp_id: string;
+    row: number;
+    raw_household: string;
+    kind: ApplicationKind;
+    raw_kind?: string;
+    requested_at?: string;
+    wishes: ApplicationWish[];
+    /** Teile der Wunsch-Zelle, die der Parser nicht auflösen konnte. */
+    unparsed_wishes: string[];
+    status: ApplicationStatus;
+    raw_status?: string;
+    note?: string;
+    raw_current_type?: string;
+    raw_current_unit?: string;
+    raw_new_unit?: string;
+    match_result: MatchResult;
+    apartment_mismatch: boolean;
+    unknown_apartment: boolean;
+    existing_application_id?: number;
+    person_candidates: ApplicationPersonCandidate[];
+    suggested_household_name: string;
+}
+
+export interface ApplicationAnalysisResponse {
+    session_id: string;
+    total_rows: number;
+    skipped_empty: number;
+    households: ApplicationImportPreview[];
+}
+
+export interface ApplicationDecision {
+    temp_id: string;
+    /** "update" | "create" | "create_household" | "skip" */
+    action: string;
+    target_household_id?: number;
+    household_name?: string;
+    person_ids: number[];
+}
+
+export interface ApplicationCommitRequest {
+    session_id: string;
+    decisions: ApplicationDecision[];
+}
+
+export interface ApplicationCommitResponse {
+    applications_created: number;
+    applications_updated: number;
+    households_created: number;
+    persons_assigned: number;
+    skipped: number;
+    skipped_no_match: number;
+    created_household_ids: number[];
 }
 
 // --- Import Types ---
@@ -111,6 +262,12 @@ export interface MatchResult {
     matched_household_id?: number;
     matched_household_name?: string;
     confidence: number;
+    /**
+     * Eindeutiger Treffer (Mitgliedsnummer, exakter Name oder Wohnungsnummer).
+     * Nur dann darf ein Assistent die Zuordnung vorauswählen — siehe
+     * `components/import/matching.ts`.
+     */
+    is_certain: boolean;
     fuzzy_candidates: FuzzyCandidate[];
 }
 
@@ -132,8 +289,9 @@ export interface HouseholdImportPreview {
     financial_status?: string;
     declared_member_count: number;
     wheelchair_accessible: boolean;
-    desired_apartment_type?: string[];
-    desired_apartment_size?: string;
+    /** Wohnungswunsch aus dem Fragebogen -- landet in der Wartepool-Bewerbung. */
+    wishes: ApplicationWish[];
+    unparsed_wishes: string[];
     pets_count: number;
     pets_info?: string;
     persons: ImportPersonPreview[];
@@ -269,7 +427,8 @@ export interface VcfAnalysisResponse {
 
 export interface VcfDecision {
     temp_id: string;
-    action: 'create' | 'update' | 'skip';
+    /** 'undecided': unsicherer Treffer, über den noch niemand entschieden hat. */
+    action: 'create' | 'update' | 'skip' | 'undecided';
     target_household_id?: number;
     excluded_person_temp_ids: string[];
 }

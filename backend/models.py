@@ -24,8 +24,8 @@ class Household(Base):
     wbs_status = Column(String, nullable=True)
     pets_count = Column(Integer, default=0)
     pets_info = Column(String, nullable=True)
-    desired_apartment_size = Column(String, nullable=True)
-    desired_apartment_type = Column(JSON, nullable=True)
+    # Der Wohnungswunsch liegt nicht mehr am Haushalt, sondern strukturiert an
+    # der Bewerbung (``Application.wishes``).
     wheelchair_accessible = Column(Boolean, default=False)
     financial_status = Column(String, nullable=True)
     import_source = Column(String, nullable=True)
@@ -94,19 +94,62 @@ class Apartment(Base):
     household_id = Column(Integer, ForeignKey("households.id"), nullable=True)
 
     household = relationship("Household", back_populates="apartment")
-    applications = relationship("Application", back_populates="apartment")
+    #: Bewerbungen, die mit dieser Wohnung erfüllt wurden (Historie)
+    applications = relationship("Application", back_populates="fulfilled_apartment")
+
+#: Bewerbungsarten. ``wartepool`` sind Haushalte, die noch nicht im Projekt
+#: wohnen -- sie werden per Scoring gereiht. ``wechselwunsch`` und ``joker``
+#: stellen bestehende Bewohner-Haushalte; dort entscheidet die Reihenfolge des
+#: Wunsches (``requested_at``), nicht das Scoring.
+APPLICATION_KINDS = ("wartepool", "wechselwunsch", "joker")
+
+#: Bewerbungsstatus. Erfüllte und zurückgezogene Bewerbungen bleiben erhalten,
+#: damit rückwirkend einsehbar ist, welche Bewerbungen es gab und warum sie
+#: endeten.
+APPLICATION_STATUSES = ("offen", "erfuellt", "zurueckgezogen")
+
 
 class Application(Base):
-    """Link between Household and Apartment (Many-to-Many with extra data if needed)"""
+    """Bewerbung eines Haushalts auf eine oder mehrere Wohnungskategorien.
+
+    Eine Bewerbung richtet sich **nicht** auf eine konkrete Wohnung, sondern auf
+    Wunschkategorien (Zimmerzahl x Förderungsart, ggf. Wohnungsart). Die
+    konkrete Wohnung entsteht erst bei der Erfüllung
+    (``fulfilled_apartment_id``) und wird beim Einzug automatisch gesetzt
+    (``services.close_open_applications``).
+    """
+
     __tablename__ = "applications"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    household_id = Column(Integer, ForeignKey("households.id"))
-    apartment_id = Column(Integer, ForeignKey("apartments.id"))
-    status = Column(String, default="applied") # applied, offered, rejected
-    
+    household_id = Column(Integer, ForeignKey("households.id"), index=True)
+
+    kind = Column(String, default="wartepool", index=True)   # siehe APPLICATION_KINDS
+    requested_at = Column(DateTime, nullable=True)           # "Mail / Info von"
+
+    #: Wunschkategorien als Liste von Objekten
+    #: ``{"size_rooms": int|None, "funding_type": str|None, "apartment_category": str|None}``.
+    #: ``None`` in einem Feld heißt "egal". Validiert über ``schemas.ApplicationWish``.
+    wishes = Column(JSON, nullable=True)
+
+    status = Column(String, default="offen", index=True)     # siehe APPLICATION_STATUSES
+    status_note = Column(String, nullable=True)              # z. B. warum zurückgezogen
+
+    #: Kennzeichen, dass von der Regelvergabe abgewichen werden sollte, samt Begründung.
+    special_case = Column(Boolean, default=False)
+    special_case_note = Column(String, nullable=True)
+
+    note = Column(String, nullable=True)                     # allgemeiner Kommentar
+
+    fulfilled_apartment_id = Column(Integer, ForeignKey("apartments.id"), nullable=True)
+    fulfilled_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)
+    archived = Column(Boolean, default=False)
+
     household = relationship("Household", back_populates="applications")
-    apartment = relationship("Apartment", back_populates="applications")
+    fulfilled_apartment = relationship("Apartment", back_populates="applications")
 
 class ScoringConfig(Base):
     """Stores weights and target values"""

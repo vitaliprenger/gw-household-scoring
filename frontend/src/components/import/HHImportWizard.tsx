@@ -12,6 +12,7 @@ import {
 } from '../../types';
 import { commitHHBogen } from '../../api';
 import MatchingDialog from './MatchingDialog';
+import { isCertainMatch, isUncertainMatch } from './matching';
 import DataChangeDialog from './DataChangeDialog';
 
 interface HHImportWizardProps {
@@ -47,17 +48,18 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
     const [decisions, setDecisions] = useState<Record<string, HouseholdDecision>>(() => {
         const init: Record<string, HouseholdDecision> = {};
         for (const hh of analysis.households) {
-            const matchType = hh.match_result.type;
             let action: 'update' | 'skip';
             let targetId: number | undefined;
             if (hh.already_imported) {
                 action = 'skip';
-            } else if (matchType === 'exact_member_nr' || matchType === 'exact_name_dob') {
+            } else if (isCertainMatch(hh.match_result)) {
                 action = 'update';
                 targetId = hh.match_result.matched_household_id ?? undefined;
             } else {
-                // Der Haushaltsbogen legt keine Haushalte an; ohne sicheren
-                // Treffer muss die Zuordnung manuell erfolgen.
+                // Nur ein eindeutiger Treffer wird automatisch zugeordnet (siehe
+                // matching.ts). Der Haushaltsbogen legt nichts an, deshalb ist
+                // "Überspringen" hier die unschuldige Vorbelegung: der
+                // Vorschlag bleibt sichtbar und auswählbar.
                 action = 'skip';
             }
             init[hh.temp_id] = {
@@ -75,6 +77,12 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
     const [committing, setCommitting] = useState(false);
     const [commitResult, setCommitResult] = useState<HHCommitResponse | null>(null);
     const [error, setError] = useState('');
+
+    // Zeilen, deren Treffer nur ein Vorschlag ist und die deshalb nicht
+    // vorausgewählt wurden (siehe matching.ts).
+    const uncertainCount = analysis.households.filter(
+        (hh) => !hh.already_imported && isUncertainMatch(hh.match_result),
+    ).length;
 
     function updateDecision(tempId: string, patch: Partial<HouseholdDecision>) {
         setDecisions((prev) => ({
@@ -121,6 +129,16 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                         Es sind noch keine Haushalte vorhanden. Bitte zuerst die
                         Mitgliederliste (vCard) importieren — der Haushaltsbogen
                         ergänzt nur bestehende Haushalte.
+                    </Alert>
+                )}
+
+                {uncertainCount > 0 && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                        <strong>{uncertainCount} Zeile(n) mit nur ähnlichem Treffer.</strong>{' '}
+                        Nur ein eindeutiger Treffer wird automatisch zugeordnet —
+                        Mitgliedsnummer, exakter Name oder Wohnungsnummer. Ein nur ähnlicher
+                        Name steht auf „Überspringen"; der Vorschlag lässt sich über den
+                        Treffer-Chip prüfen und übernehmen.
                     </Alert>
                 )}
 
