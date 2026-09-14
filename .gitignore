@@ -11,6 +11,8 @@ frontend/dist/
 
 # Databases
 *.db
+*.db-wal
+*.db-shm
 
 # Environment
 .env

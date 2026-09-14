@@ -3,10 +3,13 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, Box, Link,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Paper, Divider,
 } from '@mui/material';
+import GitHubIcon from '@mui/icons-material/GitHub';
 import Markdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 // Einzige Quelle des Handbuchs: dieselbe Datei, die im Repository unter docs/ liegt.
 import manual from '../../../../docs/Benutzerhandbuch.md?raw';
+
+const REPOSITORY_URL = 'https://github.com/vitaliprenger/gw-household-scoring';
 
 /** Text eines React-Knotens, z. B. einer Überschrift mit Hervorhebungen. */
 function textOf(node: React.ReactNode): string {
@@ -88,6 +91,12 @@ export default function HelpDialog({ open, onClose, section }: Props) {
         </Box>
       </DialogContent>
       <DialogActions>
+        {/* Bewusst außerhalb des Handbuchs: das enthält keine Links in das Repository. */}
+        <Link href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer" variant="body2"
+          sx={{ mr: 'auto', ml: 1, display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+          <GitHubIcon fontSize="small" />
+          Quellcode auf GitHub
+        </Link>
         <Button onClick={onClose}>Schließen</Button>
       </DialogActions>
     </Dialog>
