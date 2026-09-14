@@ -12,6 +12,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import HistoryIcon from '@mui/icons-material/History';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { DataGrid, GridColDef, GridRenderCellParams, GridRowId, GridRowSelectionModel } from '@mui/x-data-grid';
 import { deDE } from '@mui/x-data-grid/locales';
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, login, getRanking, getApplications } from './api';
@@ -27,6 +28,7 @@ import CreateHouseholdDialog from './components/household/CreateHouseholdDialog'
 import { zebraGridSx, zebraRowClassName } from './components/common/tableStyles';
 import ScoreBreakdownDialog from './components/scoring/ScoreBreakdownDialog';
 import ScoreComparisonDialog, { ComparisonEntry } from './components/scoring/ScoreComparisonDialog';
+import HelpDialog from './components/help/HelpDialog';
 
 /** Höchstens so viele Haushalte lassen sich nebeneinander vergleichen. */
 const MAX_COMPARE = 5;
@@ -74,6 +76,21 @@ const CONFIG_LABELS: Record<string, string> = {
   max_membership_years:            'Maximale Mitgliedsjahre (voller Punkt)',
 };
 
+/**
+ * Abschnitt des Benutzerhandbuchs (Überschrift ohne Nummer), bei dem die Hilfe
+ * je Tab öffnet — in der Reihenfolge der Tabs.
+ */
+const HELP_SECTIONS = [
+  'Eine Vergabe durchführen',    // Rangliste
+  'Bewerbungen pflegen',         // Bewerbungen
+  'Die Tabs im Überblick',       // Alle Haushalte
+  'Die Tabs im Überblick',       // Personen
+  'Schritt 5: Wohnung zuordnen', // Wohnungen
+  'Datenqualität prüfen',        // Ist-Statistik
+  'So entstehen die Punkte',     // Bewertungskonfiguration
+  'Daten einlesen',              // Datenimport
+];
+
 const SIZE_NONE = '__none__';
 /** Filterwert "Alle": der Filter schränkt die Rangliste nicht ein. */
 const FILTER_ALL = '__all__';
@@ -86,6 +103,7 @@ const sizeLabel = (value: number | null): string =>
 
 function App() {
   const [tabValue, setTabValue] = useState(0);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [households, setHouseholds] = useState<Household[]>([]);
   const [configs, setConfigs] = useState<ScoringConfig[]>([]);
   const [rankingGroups, setRankingGroups] = useState<RankingGroup[]>([]);
@@ -261,9 +279,15 @@ function App() {
           >
             Punkte neu berechnen
           </Button>
+          <Tooltip title="Hilfe zu diesem Tab">
+            <IconButton color="inherit" onClick={() => setHelpOpen(true)} sx={{ mr: 1 }} aria-label="Hilfe">
+              <HelpOutlineIcon />
+            </IconButton>
+          </Tooltip>
           <Button color="inherit" onClick={handleLogout}>Abmelden</Button>
         </Toolbar>
       </AppBar>
+      <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} section={HELP_SECTIONS[tabValue]} />
 
       <Container maxWidth="lg" sx={{ mt: 4 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
@@ -406,7 +430,7 @@ function App() {
                     params.row.by_wish_only,
                   )}
                   {staleIds.has(params.row.id) && (
-                    <Tooltip title="Gespeicherte Punktzahl ist veraltet: Daten oder Stichtag haben sich seit der letzten Berechnung geändert. „Punkte neu berechnen“ aktualisiert sie.">
+                    <Tooltip title="Gespeicherte Punktzahl ist veraltet: Daten des Haushalts, der Bewohner oder die Bewertungskonfiguration haben sich seit der letzten Berechnung geändert. „Punkte neu berechnen“ aktualisiert sie.">
                       <HistoryIcon color="warning" fontSize="small" />
                     </Tooltip>
                   )}
