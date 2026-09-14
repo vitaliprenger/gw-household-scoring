@@ -4,6 +4,7 @@ Scoring-Anwendung zur Vergabe freier Wohnungen in einem genossenschaftlichen Woh
 
 - **Bedienung** der Anwendung: [docs/Benutzerhandbuch.md](docs/Benutzerhandbuch.md)
 - **Fachliche und technische Anforderungen** (für Entwicklung und LLMs): [Instructions.md](Instructions.md)
+- **Betrieb** (Produktion, Migrationen, Deployment-Vertrag): [docs/Betrieb.md](docs/Betrieb.md); Vorlage für die Ansible-Rolle: [deploy/ansible/README.md](deploy/ansible/README.md)
 
 ## Voraussetzungen
 
@@ -36,6 +37,17 @@ python -m uvicorn backend.main:app --reload
 cd frontend
 npm run dev
 ```
+
+Die Anwendung läuft unter http://localhost:3000.
+
+## Datenbankschema ändern
+
+```powershell
+alembic revision --autogenerate -m "kurze beschreibung"   # erzeugt backend/migrations/versions/…
+python tests/test_migrations.py
+```
+
+Regeln dazu: [Instructions.md](Instructions.md#betrieb-und-migrationen).
 
 ## Test
 

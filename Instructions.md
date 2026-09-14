@@ -534,13 +534,24 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 |---------|-------------|
 | Backend | Python, FastAPI, SQLAlchemy, Pandas |
 | Frontend | React (TypeScript), Vite, Material UI (inkl. MUI X Data Grid und MUI X Charts) |
-| Datenbank | SQLite (Dev), PostgreSQL (Prod) |
-| Auth | Einfaches Passwort (Env-Variable `APP_PASSWORD`, Default: `geheim`) |
+| Datenbank | SQLite, auch in Produktion (Begründung in [docs/Betrieb.md](docs/Betrieb.md)) |
+| Migrationen | Alembic (`backend/migrations/`) |
+| Auth | Einfaches Passwort (siehe „Authentifizierung") |
+
+### Betrieb und Migrationen
+
+Betrieb, Deployment und Release beschreibt ausschließlich [docs/Betrieb.md](docs/Betrieb.md), der **Betriebsvertrag** für die Ansible-Rolle (Vorlage: [deploy/ansible/README.md](deploy/ansible/README.md)). Ändern sich Umgebungsvariablen, Befehle, Abhängigkeiten, Pfade oder der Ablauf eines Updates, **muss** `docs/Betrieb.md` im selben Commit angepasst werden. Hier stehen nur die Regeln für die Entwicklung:
+
+- **Ohne `APP_ENV`** gilt Entwicklung: `housing.db` im Arbeitsverzeichnis, Passwort `geheim`, und `backend/main.py` migriert beim Start (`migrate.upgrade`). Mit `APP_ENV=production` prüft es stattdessen nur (`auth._load_password`, `migrate.ensure_up_to_date`).
+- **Jede Änderung an `backend/models.py` braucht eine Alembic-Revision** (`alembic revision --autogenerate -m "..."`, danach prüfen und von Hand ergänzen). Datenmigrationen gehören in dieselbe Revision. Spaltenänderungen laufen über `op.batch_alter_table`, weil SQLite Spalten nur über einen Tabellen-Neuaufbau ändern kann (`render_as_batch` in `env.py`). Ausgerollte Revisionen werden nicht mehr geändert.
+- **`backend/legacy_migrations.py` wird nicht erweitert.** Es hebt nur Datenbanken aus der Zeit vor Alembic auf die Ausgangsrevision `0001_baseline` (`migrate.upgrade`).
+- Das Frontend spricht das Backend relativ unter `/api` an (`frontend/src/api.ts`); in der Entwicklung leitet der Vite-Proxy weiter und entfernt das Präfix.
 
 ### API-Endpunkte
 
 | Methode | Pfad | Beschreibung | Auth |
 |---------|------|--------------|------|
+| GET | `/health` | Betriebsprüfung: Datenbank erreichbar, `db_revision` (Alembic) | – |
 | POST | `/token` | Login (Passwort prüfen, Token zurückgeben) | – |
 | GET | `/households/` | Alle Haushalte mit Personen & Score | Auth |
 | POST | `/households/` | Haushalt anlegen | Auth |
@@ -587,8 +598,8 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 ### Authentifizierung
 
 - Einfaches Passwort-Login (kein SSO, keine Rollen, keine Nutzerverwaltung).
-- Das Passwort wird über die Umgebungsvariable `APP_PASSWORD` gesetzt (Default: `geheim`).
-- Alle Endpunkte außer `/token` erfordern ein gültiges Bearer-Token.
+- Das Passwort wird über die Umgebungsvariable `APP_PASSWORD` gesetzt. Der Default `geheim` gilt nur in der Entwicklung; in Produktion ist ein eigenes Passwort Pflicht (Regeln: [docs/Betrieb.md](docs/Betrieb.md), „Laufzeitkonfiguration").
+- Alle Endpunkte außer `/token` und `/health` erfordern ein gültiges Bearer-Token.
 - Ohne Anmeldung sind keine Inhalte erreichbar.
 
 ### Datenmodell (Übersicht)
@@ -620,19 +631,19 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 - **Tab „Bewertungskonfiguration“**: Editierbare Karten für alle Gewichte, Zielwerte und die Formelparameter (Gruppe „Formelparameter“: Maximale Mitgliedsjahre). Wie alle Tabs für jeden angemeldeten Nutzer sichtbar (es gibt keine Rollen, s. „Authentifizierung“).
 - **Tabellen**: Alle Datentabellen (Ranking, Bewerbungen, Haushalte, Personen, Wohnungen) zeigen standardmäßig **100 Zeilen pro Seite**; wählbar sind 10, 25, 50 und 100. Alle Tabellen sind **abwechselnd eingefärbt (Zebrastreifen)**: jede zweite Zeile erhält einen leicht abgesetzten Hintergrund. Die Streifen richten sich nach der Position in der aktuellen Seite und bleiben daher nach Sortieren, Filtern und Blättern korrekt; der Hover-Effekt bleibt auf allen Zeilen sichtbar. In den Tabellen der Ist-Statistik bleibt die Summenzeile ungestreift.
 - **Kopfzeile (AppBar)**: Der Button „Punkte neu berechnen" steht in der Kopfzeile der Seite und ist damit aus jedem Tab erreichbar. Einen eigenen „Aktionen"-Tab gibt es nicht mehr; der frühere Alt-Upload „Excel-Daten hochladen" entfällt, Excel-Dateien werden ausschließlich über den Datenimport-Tab eingelesen.
-- **Hilfe**: Ein Hilfe-Symbol (?) in der Kopfzeile öffnet das Benutzerhandbuch in einem Dialog (`frontend/src/components/help/HelpDialog.tsx`), und zwar beim Abschnitt, der zum aktiven Tab passt (`HELP_SECTIONS` in `App.tsx`; Anker = Überschrift ohne Nummerierung). Quelle ist die Datei `docs/Benutzerhandbuch.md` selbst, beim Build per `?raw` eingebunden und mit `react-markdown` + `remark-gfm` gerendert — es gibt keine zweite Fassung im Frontend. Der Dev-Server gibt dafür das übergeordnete Verzeichnis frei (`server.fs.allow` in `vite.config.ts`).
+- **Hilfe**: Ein Hilfe-Symbol (?) in der Kopfzeile öffnet das Benutzerhandbuch in einem Dialog (`frontend/src/components/help/HelpDialog.tsx`), und zwar beim Abschnitt, der zum aktiven Tab passt (`HELP_SECTIONS` in `App.tsx`; Anker = Überschrift ohne Nummerierung). Quelle ist die Datei `docs/Benutzerhandbuch.md` selbst, beim Build per `?raw` eingebunden und mit `react-markdown` + `remark-gfm` gerendert — es gibt keine zweite Fassung im Frontend. Der Dev-Server gibt dafür das übergeordnete Verzeichnis frei (`server.fs.allow` in `vite.config.ts`). Die Fußzeile des Dialogs verlinkt links auf das Repository (https://github.com/vitaliprenger/gw-household-scoring, neuer Tab) — außerhalb des Handbuchs, das selbst keine Repository-Links enthält.
 - Login/Logout über AppBar.
 
 ---
 
 ## Konventionen
 
-- Backend-Code in `backend/`, Frontend in `frontend/`, Tests in `tests/`.
+- Backend-Code in `backend/`, Frontend in `frontend/`, Tests in `tests/`, Migrationen in `backend/migrations/`, Deployment-Vorlagen in `deploy/`.
 - Import-Logik: Fragebögen in `backend/import_service.py`, vCard in `backend/vcf_import_service.py`, Bewerbungsliste in `backend/application_import_service.py` (beide nutzen Session-Store, Namensnormalisierung und Haushalts-Matching aus `import_service`).
-- Wohnungswünsche: `backend/wishes.py` — Parsen, Anzeigen und Abgleichen der Wunschkategorien. Hängt bewusst nur an der Standardbibliothek und wird von Ranking, beiden Importen und der Startmigration benutzt. Das Frontend spiegelt die Anzeige in `frontend/src/components/applications/wishes.ts`.
+- Wohnungswünsche: `backend/wishes.py` — Parsen, Anzeigen und Abgleichen der Wunschkategorien. Hängt bewusst nur an der Standardbibliothek und wird von Ranking, beiden Importen und der Altmigration (`backend/legacy_migrations.py`) benutzt. Das Frontend spiegelt die Anzeige in `frontend/src/components/applications/wishes.ts`.
 - Wohnungsstammdaten: `backend/apartment_seed_data.py` (generiert aus `imported_data/Wohnungen.xlsx`), angelegt über `services.seed_apartments`; die Zuordnung zum Haushalt erfolgt über `services.assign_household`.
 - Scoring-Transparenz: `backend/scoring.py` (`explain_household`, `explain_as_calculated`, Stichtag über `scoring.at_reference_date`), `backend/score_export.py` (Aufschlüsselung mehrerer Haushalte, Excel-Export). Frontend: `frontend/src/components/scoring/`.
-- Tests: `python tests/test_scoring.py` (Punkteaufschlüsselung mit von Hand gerechneten Werten, Invarianten, Stichtag, Veraltet-Hinweis, Simulation, Formelparameter, Excel-Export), `python tests/test_apartments.py` (Wohnungsstammdaten und Zuordnung), `python tests/test_ranking.py` (Eignung, Rangliste, Vorrang und Bewerbungspflicht), `python tests/test_applications.py` (Wunsch-Parser, Statusregeln, Auswahlkategorien), `python tests/test_application_import.py` (Bewerbungslisten-Import), `python tests/test_statistics.py` (Ist-Statistik der Bewohner und Prüfliste „ohne Angabe", u. a. mit den Beispieldaten und einem Individualbogen-Importfehler), `python tests/test_import_order.py` (Reihenfolge der Importe), `python tests/test_matching.py` (Zuordnungssicherheit der Importe), `python tests/test_vcf_import.py` (vCard-Import). Alle laufen ohne Server gegen eine In-Memory-Datenbank.
+- Tests: `python tests/test_scoring.py` (Punkteaufschlüsselung mit von Hand gerechneten Werten, Invarianten, Stichtag, Veraltet-Hinweis, Simulation, Formelparameter, Excel-Export), `python tests/test_apartments.py` (Wohnungsstammdaten und Zuordnung), `python tests/test_ranking.py` (Eignung, Rangliste, Vorrang und Bewerbungspflicht), `python tests/test_applications.py` (Wunsch-Parser, Statusregeln, Auswahlkategorien), `python tests/test_application_import.py` (Bewerbungslisten-Import), `python tests/test_statistics.py` (Ist-Statistik der Bewohner und Prüfliste „ohne Angabe", u. a. mit den Beispieldaten und einem Individualbogen-Importfehler), `python tests/test_import_order.py` (Reihenfolge der Importe), `python tests/test_matching.py` (Zuordnungssicherheit der Importe), `python tests/test_vcf_import.py` (vCard-Import), `python tests/test_migrations.py` (Alembic-Migrationen: leere, migrierte und alte SQLite-Datenbank), `python tests/test_backup.py` (WAL-Modus, Backup bei offener Verbindung, Aufbewahrung); beide nutzen temporäre Dateien. Alle übrigen laufen ohne Server gegen eine In-Memory-Datenbank.
 - Pydantic V2: `from_attributes = True` statt `orm_mode`.
 - Relative Imports innerhalb des `backend`-Packages.
 - `backend/__init__.py` muss vorhanden sein.
