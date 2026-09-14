@@ -132,15 +132,23 @@ flowchart LR
     Route[POST /scoring/calculate] --> Run[run_scoring]
     Run --> Init[initialize_config]
     Run --> Dict[get_config_dict]
-    Run --> Stats[calculate_resident_stats]
-    Run --> Diversity[calculate_diversity_subscores]
-    Diversity --> Age[calculate_age_group]
-    Run --> Membership[calculate_membership_score]
-    Run --> Engagement[calculate_engagement_score]
+    Run --> Date[at_reference_date]
+    Run --> Ref[calculate_resident_reference]
+    Run --> Explain[explain_household]
+    Explain --> Target[_explain_target_criterion]
+    Target --> Age[calculate_age_group]
+    Explain --> Membership[_explain_membership]
+    Explain --> Manual[_explain_manual]
     Run --> Commit[(db.commit)]
+    Breakdown[GET /scoring/households/id/breakdown<br/>POST /scoring/breakdowns] --> HB[score_export.household_breakdowns]
+    Export[POST /scoring/breakdowns/export] --> Build[score_export.build_export]
+    Build --> HB
+    HB --> AsCalc[explain_as_calculated]
+    AsCalc --> Explain
+    Ranking[services.build_ranking] --> AsCalc
 ```
 
-`run_scoring` bewertet nur nicht archivierte Nicht-Bewohner. `calculate_resident_stats` erzeugt aus nicht archivierten Bewohnern die Ist-Verteilung. Pro Bewerber berechnet `calculate_diversity_subscores` Alters-, Geschlechts-, Berufs-, Bildungs-, Kultur- und Lebenslagenanteile; `calculate_membership_score` nimmt das früheste Eintrittsdatum; `calculate_engagement_score` begrenzt den Wert auf 0 bis 1. Das Ergebnis wird in `Household.total_score` gespeichert.
+`run_scoring` bewertet nur nicht archivierte Nicht-Bewohner. Zum gemeinsamen Stichtag erzeugt `calculate_resident_reference` aus den nicht archivierten Bewohnern die Ist-Verteilung, als Anteile und als Zähler. `explain_household` ist die einzige Berechnung der Grundpunktzahl: je Zielwert-Kriterium die Terme pro Gruppe, dazu Mitgliedsdauer (je nicht archivierter Person, summiert) und die manuellen Kriterien, jeweils mit Teilscore, Gewicht und Punkten. Gespeichert werden die Summe in `Household.total_score` und der Stichtag in `Household.score_calculated_at`. `explain_as_calculated` rechnet zu diesem Stichtag nach; Aufschlüsselung, Excel-Export und `is_stale` der Rangliste nutzen es. `calculate_diversity_subscores` und `calculate_membership_score` sind dünne Wrapper darauf.
 
 ### Fragebogenimporte
 

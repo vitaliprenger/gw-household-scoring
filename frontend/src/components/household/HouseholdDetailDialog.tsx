@@ -9,6 +9,7 @@ import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import {
     Application, Household, Person,
     APPLICATION_KIND_LABELS, APPLICATION_STATUS_LABELS,
@@ -28,12 +29,14 @@ interface HouseholdDetailDialogProps {
     householdId: number | null;
     onClose: () => void;
     onSaved: () => void;
+    /** Öffnet die Punkteaufschlüsselung; ohne Handler entfällt der Button. */
+    onShowBreakdown?: (householdId: number) => void;
 }
 
 const WBS_OPTIONS = ['', 'kein WBS', 'WBS A', 'WBS B'];
 
 export default function HouseholdDetailDialog({
-    open, householdId, onClose, onSaved,
+    open, householdId, onClose, onSaved, onShowBreakdown,
 }: HouseholdDetailDialogProps) {
     const [household, setHousehold] = useState<Household | null>(null);
     const [editing, setEditing] = useState(false);
@@ -308,7 +311,16 @@ export default function HouseholdDetailDialog({
                             <FieldDisplay label="Import-Quelle" value={currentHH.import_source} />
                             <FieldDisplay label="Letzter Import" value={formatDateTime(currentHH.import_timestamp)} />
                             <FieldDisplay label="Letzte Bearbeitung" value={formatDateTime(currentHH.updated_at)} />
-                            <FieldDisplay label="Grundpunktzahl (ohne Wohnraumausnutzung)" value={currentHH.total_score.toFixed(2)} />
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <FieldDisplay label="Grundpunktzahl (ohne Wohnraumausnutzung)" value={currentHH.total_score.toFixed(2)} />
+                                {onShowBreakdown && !currentHH.is_resident && (
+                                    <Tooltip title="Punkteaufschlüsselung">
+                                        <IconButton size="small" onClick={() => onShowBreakdown(currentHH.id)}>
+                                            <InfoOutlinedIcon fontSize="small" />
+                                        </IconButton>
+                                    </Tooltip>
+                                )}
+                            </Box>
                         </Box>
 
                         <Divider sx={{ my: 2 }} />

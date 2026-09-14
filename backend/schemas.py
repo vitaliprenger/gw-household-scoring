@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator, model_validator
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import datetime
 
 # --- Person Schemas ---
@@ -228,6 +228,11 @@ class RankedHousehold(BaseModel):
     special_case: bool = False
     special_case_note: Optional[str] = None
     requested_at: Optional[datetime] = None
+    #: Die gespeicherte Grundpunktzahl weicht von der aktuellen Berechnung ab
+    #: (Daten geändert oder Stichtag verschoben, ohne neu zu berechnen).
+    is_stale: bool = False
+    size_rooms: Optional[int] = None
+    funding_type: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -592,3 +597,91 @@ class VcfCommitResponse(BaseModel):
     persons_without_household: int = 0
     created_household_ids: List[int] = []
 
+
+# --- Punkteaufschlüsselung (Transparenz des Scorings) ---
+class ScoreTerm(BaseModel):
+    """Eine Gruppe eines Zielwert-Kriteriums: (Ziel − Ist) × Personen × Faktor."""
+    group: str
+    label: str
+    persons: List[str] = []
+    count: int
+    target: float
+    resident_count: Optional[int] = None   # Bewohner-Personen der Gruppe
+    resident_basis: Optional[int] = None   # Bewohner-Personen mit Angabe (Bezugsgröße)
+    current: float                         # Ist-Anteil = resident_count / resident_basis
+    gap: float                             # target − current
+    applies: bool                          # nur bei Ist < Ziel gibt es Punkte
+    relative_gap: float                    # Beitrag je Person: (Ziel − Ist) / Ziel, 0–1
+    value: float                           # relative_gap × count
+
+class IgnoredPerson(BaseModel):
+    name: str
+    reason: str
+
+class MembershipPerson(BaseModel):
+    """Beitrag einer Person zur Mitgliedsdauer: min(Jahre; Maximum) / Maximum."""
+    person_name: str
+    member_since: datetime
+    years: float
+    capped_years: float                    # min(years, max_years)
+    value: float                           # capped_years / max_years, 0–1
+
+class MembershipInputs(BaseModel):
+    reference_date: datetime
+    max_years: float
+    persons: List[MembershipPerson] = []
+
+class ScoreCriterion(BaseModel):
+    key: str
+    category: str
+    label: str
+    kind: str                      # target | membership | manual
+    manual: bool
+    field: Optional[str] = None    # Haushaltsfeld der manuellen Bewertung
+    weight: float
+    value: Optional[float] = None  # Erfüllungsgrad (manuell)
+    subscore: float
+    points: float                  # subscore × weight
+    terms: List[ScoreTerm] = []
+    ignored_persons: List[IgnoredPerson] = []
+    membership: Optional[MembershipInputs] = None
+
+class OccupancyExplanation(BaseModel):
+    size_rooms: Optional[int] = None
+    members: int
+    fulfilled: float
+    weight: float
+    points: float
+
+class HouseholdBreakdown(BaseModel):
+    household_id: int
+    name: str
+    member_count: int
+    calculated_at: datetime        # Stichtag, zu dem die Aufschlüsselung rechnet
+    score_calculated_at: Optional[datetime] = None  # Stichtag der gespeicherten Punktzahl (None = nie berechnet)
+    base_score: float              # zum Stichtag berechnet
+    stored_score: float            # Household.total_score (Stand der letzten Berechnung)
+    is_stale: bool
+    criteria: List[ScoreCriterion]
+    occupancy: Optional[OccupancyExplanation] = None
+    total_score: float             # base_score + Wohnraumausnutzung (falls Zimmerzahl gewählt)
+
+class BreakdownTarget(BaseModel):
+    household_id: int
+    #: Zimmerzahl der Kategorie; ohne Angabe keine Wohnraumausnutzung.
+    size_rooms: Optional[int] = None
+    #: True, wenn eine Kategorie gewählt ist -- auch "ohne Zimmerangabe" (size_rooms = None).
+    with_occupancy: bool = False
+
+class ManualOverride(BaseModel):
+    """Simulierte manuelle Bewertung (0–1) für den Vergleich; fehlende Felder bleiben unverändert."""
+    engagement_score: Optional[float] = None
+    cultural_diversity_score: Optional[float] = None
+    special_needs_score: Optional[float] = None
+
+class BreakdownRequest(BaseModel):
+    targets: List[BreakdownTarget]
+
+class BreakdownExportRequest(BreakdownRequest):
+    #: household_id → simulierte Werte
+    overrides: Dict[int, ManualOverride] = {}

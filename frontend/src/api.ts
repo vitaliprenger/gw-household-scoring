@@ -23,6 +23,9 @@ import {
     ApplicationAnalysisResponse,
     ApplicationCommitRequest,
     ApplicationCommitResponse,
+    BreakdownTarget,
+    HouseholdBreakdown,
+    ManualOverrides,
 } from './types';
 
 const API_URL = 'http://127.0.0.1:8000';
@@ -204,6 +207,24 @@ export const calculateScores = async () => {
 export const getRanking = async () => {
     const response = await api.get<RankingGroup[]>('/ranking/');
     return response.data;
+};
+
+export const getScoreBreakdowns = async (targets: BreakdownTarget[]) => {
+    const response = await api.post<HouseholdBreakdown[]>('/scoring/breakdowns', { targets });
+    return response.data;
+};
+
+/** Vergleich als .xlsx herunterladen; Rechenschritte stehen als Excel-Formeln darin. */
+export const exportScoreBreakdowns = async (targets: BreakdownTarget[], overrides: ManualOverrides) => {
+    const response = await api.post('/scoring/breakdowns/export', { targets, overrides }, { responseType: 'blob' });
+    const disposition: string = response.headers['content-disposition'] ?? '';
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'Punktevergleich.xlsx';
+    const url = URL.createObjectURL(response.data);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
 };
 
 export const getResidentStatistics = async () => {

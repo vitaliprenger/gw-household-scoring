@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from sqlalchemy.orm import Session
 from . import models
 import pandas as pd
@@ -107,6 +110,9 @@ DEFAULT_CONFIG = {
     "weight_engagement":       {"value": 5.0, "description": "Gewicht: Engagement für die Genossenschaft (§3 Abs. 5)"},
     "weight_occupancy":        {"value": 2.0, "description": "Gewicht: Wohnraumausnutzung (§3 Abs. 2)"},
 
+    # Formelparameter. Teilscores sind auf 1 normiert; nur das Gewicht skaliert.
+    "max_membership_years": {"value": 10.0, "description": "Maximale Mitgliedsjahre: ab so vielen Jahren gibt es den vollen Punkt (anteilig davor)"},
+
     **{f"target_occupation_{k}": {"value": 0.10, "description": f"Zielwert Beruf: {v}"} for k, v in OCCUPATION_LABELS.items()},
     **{f"target_education_{k}": {"value": 0.125, "description": f"Zielwert Bildung: {v}"} for k, v in EDUCATION_LABELS.items()},
 
@@ -148,6 +154,37 @@ def get_config_dict(db: Session):
     configs = db.query(models.ScoringConfig).all()
     return {c.key: c.value for c in configs}
 
+
+def config_value(config: dict, key: str) -> float:
+    """Wert aus der Konfiguration; fehlt er, gilt der Standardwert aus ``DEFAULT_CONFIG``."""
+    value = config.get(key)
+    return DEFAULT_CONFIG[key]["value"] if value is None else value
+
+
+def system_now() -> pd.Timestamp:
+    """Aktuelle Uhrzeit -- eigene Funktion, damit Tests sie festsetzen koennen."""
+    return pd.Timestamp.now()
+
+
+# Stichtag, zu dem gerade gerechnet wird. Eine ContextVar statt einer globalen
+# Variable, damit parallele Anfragen (Threadpool) sich nicht beeinflussen.
+_reference_date: ContextVar[pd.Timestamp | None] = ContextVar("scoring_reference_date", default=None)
+
+
+def now() -> pd.Timestamp:
+    """Stichtag fuer Alter und Mitgliedsdauer: der gesetzte Stichtag, sonst jetzt."""
+    return _reference_date.get() or system_now()
+
+
+@contextmanager
+def at_reference_date(date):
+    """Rechnet innerhalb des Blocks zum angegebenen Stichtag (``None`` = jetzt)."""
+    token = _reference_date.set(pd.Timestamp(date) if date is not None else None)
+    try:
+        yield
+    finally:
+        _reference_date.reset(token)
+
 def calculate_age_group(age):
     if age < 20: return "under_20"
     if age < 30: return "20_29"
@@ -164,7 +201,7 @@ def person_age(person: models.Person) -> float | None:
     """Alter in Jahren, ``None`` wenn kein Geburtsdatum gepflegt ist."""
     if not person.birth_date:
         return None
-    return (pd.Timestamp.now() - pd.to_datetime(person.birth_date)).days / 365.25
+    return (now() - pd.to_datetime(person.birth_date)).days / 365.25
 
 
 def person_age_group(person: models.Person) -> str:
@@ -275,64 +312,286 @@ def resident_people(db: Session):
     """
     return [p for h in resident_households(db) for p in h.people if not p.archived]
 
-def calculate_diversity_subscores(household: models.Household, current_stats: dict, config: dict) -> dict:
-    """Returns individual sub-scores per diversity dimension (§3 Abs. 1a–f)."""
-    subscores = {
-        "diversity_age": 0.0,
-        "diversity_gender": 0.0,
-        "diversity_cultural": 0.0,
-        "diversity_occupation": 0.0,
-        "diversity_education": 0.0,
-        "diversity_special_needs": 0.0,
+# --- Punkteaufschluesselung -------------------------------------------------
+#
+# ``explain_household`` ist die *einzige* Berechnung der Grundpunktzahl: sie
+# liefert jeden Teilscore samt Eingangswerten, ``run_scoring`` speichert nur ihre
+# Summe. Anzeige, Excel-Export und gespeicherter Score koennen deshalb nicht
+# auseinanderlaufen.
+
+# Zielwert-Kriterien der Durchmischung: Schluessel, Beschriftung, Gruppenlabels.
+TARGET_CRITERIA = [
+    ("age", "diversity_age", "Altersstruktur", AGE_LABELS),
+    ("gender", "diversity_gender", "Geschlechterverhältnis", GENDER_LABELS),
+    ("occupation", "diversity_occupation", "Berufliche Tätigkeiten",
+     {k: f"{k} – {v}" for k, v in OCCUPATION_LABELS.items()}),
+    ("education", "diversity_education", "Bildungsabschlüsse",
+     {k: f"{k} – {v}" for k, v in EDUCATION_LABELS.items()}),
+]
+
+# Manuell bewertete Kriterien: Schluessel, Haushaltsfeld, Kategorie, Beschriftung.
+MANUAL_CRITERIA = [
+    ("diversity_cultural", "cultural_diversity_score", "Durchmischung", "Kulturelle Vielfalt"),
+    ("diversity_special_needs", "special_needs_score", "Durchmischung", "Besondere Lebenslagen"),
+    ("engagement", "engagement_score", "Engagement", "Engagement"),
+]
+
+# Ab dieser Abweichung gilt der gespeicherte Score als veraltet.
+STALE_TOLERANCE = 0.005
+
+IGNORED_REASON_LABELS = {
+    MISSING_EMPTY: "keine Angabe",
+    MISSING_CATEGORY_0: "Kategorie 0 – keine Zuordnung",
+    MISSING_UNRECOGNIZED: "Wert nicht erkannt",
+    "excluded": "unter 20 – nicht Teil der Altersstruktur",
+}
+
+
+def person_name(person: models.Person) -> str:
+    return " ".join(part for part in (person.first_name, person.last_name) if part) or f"Person {person.id}"
+
+
+def calculate_resident_reference(db: Session) -> dict:
+    """IST-Verteilung samt absoluter Zaehler: ``ratios``, ``counts`` und ``basis`` je Merkmal.
+
+    ``ratios`` entspricht ``calculate_resident_stats``; die Zaehler machen jeden
+    Anteil als "Personen der Gruppe / Personen mit Angabe" nachrechenbar.
+    """
+    people = resident_people(db)
+    counts = count_people(people)
+    basis = basis_totals(counts, len(people))
+    ratios = {
+        f"ratio_{dim}_{g}": counts[f"{dim}_{g}"] / basis[dim] if basis[dim] else 0.0
+        for dim, groups in DIMENSION_GROUPS.items()
+        for g in groups
+    }
+    return {"ratios": ratios, "counts": counts, "basis": basis}
+
+
+def _clamp01(value) -> float:
+    return max(0.0, min(1.0, value or 0.0))
+
+
+def _explain_target_criterion(dimension: str, key: str, label: str, labels: dict,
+                              people: list, reference: dict, config: dict) -> dict:
+    """Zielwert-Kriterium: Teilscore = Σ je Person (Ziel − Ist) / Ziel, nur wo Ist < Ziel.
+
+    Jede Person traegt hoechstens 1 bei (Ist = 0, die Gruppe fehlt ganz) und 0,
+    sobald ihre Gruppe den Zielwert erreicht. Die Beitraege werden ueber alle
+    Personen addiert und nicht gekappt: jede Person traegt einzeln zur
+    Durchmischung bei.
+    """
+    weight = config_value(config, f"weight_{key}")
+    ratios = reference["ratios"]
+
+    by_group: dict[str, list] = {}
+    ignored = []
+    for p in people:
+        group = PERSON_GROUP[dimension](p)
+        if group in EXCLUDED_GROUPS.get(dimension, {}):
+            ignored.append({"name": person_name(p), "reason": IGNORED_REASON_LABELS["excluded"]})
+        elif group == UNKNOWN_GROUP:
+            reason = missing_value(p, dimension)["reason"]
+            ignored.append({"name": person_name(p), "reason": IGNORED_REASON_LABELS[reason]})
+        else:
+            by_group.setdefault(group, []).append(person_name(p))
+
+    terms = []
+    for group in DIMENSION_GROUPS[dimension]:
+        if group not in by_group:
+            continue
+        count = len(by_group[group])
+        target = config.get(f"target_{dimension}_{group}", 0.0)
+        current = ratios.get(f"ratio_{dimension}_{group}", 0.0)
+        applies = current < target
+        gap = target - current
+        relative_gap = gap / target if applies else 0.0
+        terms.append({
+            "group": group,
+            "label": labels.get(group, group),
+            "persons": by_group[group],
+            "count": count,
+            "target": target,
+            "resident_count": reference["counts"].get(f"{dimension}_{group}"),
+            "resident_basis": reference["basis"].get(dimension),
+            "current": current,
+            "gap": gap,
+            "applies": applies,
+            "relative_gap": relative_gap,   # Beitrag je Person: (Ziel − Ist) / Ziel
+            "value": relative_gap * count,
+        })
+
+    subscore = sum(t["value"] for t in terms)
+    return {
+        "key": key,
+        "category": "Durchmischung",
+        "label": label,
+        "kind": "target",
+        "manual": False,
+        "weight": weight,
+        "value": None,
+        "subscore": subscore,
+        "points": subscore * weight,
+        "terms": terms,
+        "ignored_persons": ignored,
+        "membership": None,
     }
 
-    subscores["diversity_cultural"] = max(0.0, min(1.0, household.cultural_diversity_score or 0.0))
-    subscores["diversity_special_needs"] = max(0.0, min(1.0, household.special_needs_score or 0.0))
 
+def _explain_membership(people: list, config: dict) -> dict:
+    """Mitgliedsdauer je Person: min(Jahre; maximale Jahre) / maximale Jahre, summiert.
+
+    Jede Person mit Eintrittsdatum erhaelt anteilige Punkte bis zu den maximalen
+    Mitgliedsjahren; wer sie erreicht, erhaelt genau 1. Wie bei der Durchmischung
+    werden die Beitraege aller Personen addiert und nicht gekappt. Personen ohne
+    Eintrittsdatum tragen nichts bei und werden ausgewiesen.
+    """
+    max_years = config_value(config, "max_membership_years")
+    weight = config_value(config, "weight_membership")
+
+    persons = []
+    ignored = []
+    for p in sorted(people, key=lambda p: (p.member_since is None, p.member_since or 0)):
+        if not p.member_since:
+            ignored.append({"name": person_name(p), "reason": "kein Eintrittsdatum"})
+            continue
+        years = (now() - pd.to_datetime(p.member_since)).days / 365.25
+        capped = max(0.0, min(years, max_years))
+        persons.append({
+            "person_name": person_name(p),
+            "member_since": p.member_since,
+            "years": years,
+            "capped_years": capped,
+            "value": capped / max_years if max_years > 0 else 0.0,
+        })
+    subscore = sum(entry["value"] for entry in persons)
+    membership = {
+        "reference_date": now().to_pydatetime(),
+        "max_years": max_years,
+        "persons": persons,
+    }
+    return {
+        "key": "membership",
+        "category": "Mitgliedsdauer",
+        "label": "Dauer der Mitgliedschaft",
+        "kind": "membership",
+        "manual": False,
+        "weight": weight,
+        "value": None,
+        "subscore": subscore,
+        "points": subscore * weight,
+        "terms": [],
+        "ignored_persons": ignored,
+        "membership": membership,
+    }
+
+
+def _explain_manual(key: str, field: str, category: str, label: str,
+                    household: models.Household, config: dict, overrides: dict) -> dict:
+    """Manuell bewertetes Kriterium: Punkte = Erfuellungsgrad (0–1) × Gewicht."""
+    weight = config_value(config, f"weight_{key}")
+    raw = overrides.get(field)
+    value = _clamp01(getattr(household, field) if raw is None else raw)
+    return {
+        "key": key,
+        "category": category,
+        "label": label,
+        "kind": "manual",
+        "manual": True,
+        "field": field,
+        "weight": weight,
+        "value": value,
+        "subscore": value,
+        "points": value * weight,
+        "terms": [],
+        "ignored_persons": [],
+        "membership": None,
+    }
+
+
+def explain_household(household: models.Household, reference: dict, config: dict,
+                      overrides: dict | None = None) -> dict:
+    """Grundpunktzahl eines Haushalts, aufgeschluesselt nach Kriterien.
+
+    ``reference`` stammt aus ``calculate_resident_reference``. Die Summe der
+    ``points`` aller Kriterien ist die Grundpunktzahl (``base_score``).
+
+    ``overrides`` ersetzt manuelle Bewertungen (Haushaltsfeld → Wert) fuer eine
+    Simulation, ohne den Haushalt zu veraendern. ``is_stale`` bezieht sich dann
+    auf die simulierte Summe; fuer die Pruefung auf Veraltung ohne Overrides rechnen.
+    """
+    overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
     people = [p for p in household.people if not p.archived]
-    if not people:
-        return subscores
+    criteria = [
+        _explain_target_criterion(dim, key, label, labels, people, reference, config)
+        for dim, key, label, labels in TARGET_CRITERIA
+    ]
+    criteria += [
+        _explain_manual(key, field, category, label, household, config, overrides)
+        for key, field, category, label in MANUAL_CRITERIA if category == "Durchmischung"
+    ]
+    criteria.append(_explain_membership(people, config))
+    criteria += [
+        _explain_manual(key, field, category, label, household, config, overrides)
+        for key, field, category, label in MANUAL_CRITERIA if category != "Durchmischung"
+    ]
 
-    hh_stats = count_people(people)
+    base_score = sum(c["points"] for c in criteria)
+    stored = household.total_score or 0.0
+    return {
+        "household_id": household.id,
+        "name": household.name,
+        "member_count": len(people),
+        "calculated_at": now().to_pydatetime(),
+        "score_calculated_at": household.score_calculated_at,
+        "base_score": base_score,
+        "stored_score": stored,
+        "is_stale": abs(base_score - stored) > STALE_TOLERANCE,
+        "criteria": criteria,
+    }
 
-    for group in AGE_GROUPS:
-        target = config.get(f"target_age_{group}", 0.0)
-        current = current_stats.get(f"ratio_age_{group}", 0.0)
-        if current < target and hh_stats[f"age_{group}"] > 0:
-            gap = target - current
-            subscores["diversity_age"] += gap * hh_stats[f"age_{group}"] * 10
 
-    for group in OCCUPATION_GROUPS:
-        target = config.get(f"target_occupation_{group}", 0.0)
-        current = current_stats.get(f"ratio_occupation_{group}", 0.0)
-        if current < target and hh_stats[f"occupation_{group}"] > 0:
-            gap = target - current
-            subscores["diversity_occupation"] += gap * hh_stats[f"occupation_{group}"] * 10
+def explain_as_calculated(db: Session, household: models.Household, config: dict,
+                          reference_cache: dict, overrides: dict | None = None) -> dict:
+    """``explain_household`` zum Stichtag der letzten Berechnung des Haushalts.
 
-    for group in EDUCATION_GROUPS:
-        target = config.get(f"target_education_{group}", 0.0)
-        current = current_stats.get(f"ratio_education_{group}", 0.0)
-        if current < target and hh_stats[f"education_{group}"] > 0:
-            gap = target - current
-            subscores["diversity_education"] += gap * hh_stats[f"education_{group}"] * 10
+    So reproduziert die Aufschluesselung genau die gespeicherte Grundpunktzahl,
+    die auch die Rangliste zeigt; ``is_stale`` bedeutet dann: die Daten haben
+    sich seit der Berechnung geaendert. Ohne gespeicherten Stichtag (noch nie
+    berechnet) wird zum heutigen Tag gerechnet. ``reference_cache`` haelt die
+    IST-Verteilung je Stichtag, damit sie bei vielen Haushalten nur einmal entsteht.
+    """
+    date = household.score_calculated_at
+    with at_reference_date(date):
+        if date not in reference_cache:
+            reference_cache[date] = calculate_resident_reference(db)
+        return explain_household(household, reference_cache[date], config, overrides)
 
-    for g in ["f", "m", "d"]:
-        target = config.get(f"target_gender_{g}", 0.0)
-        current = current_stats.get(f"ratio_gender_{g}", 0.0)
-        if current < target and hh_stats[f"gender_{g}"] > 0:
-            gap = target - current
-            subscores["diversity_gender"] += gap * hh_stats[f"gender_{g}"] * 10
 
-    return subscores
+def explain_occupancy(members: int, size_rooms: int | None, config: dict) -> dict:
+    """Wohnraumausnutzung fuer eine Zimmerzahl: Erfuellungsgrad × Gewicht."""
+    weight = config_value(config, "weight_occupancy")
+    fulfilled = calculate_occupancy_subscore(members, size_rooms)
+    return {
+        "size_rooms": size_rooms,
+        "members": members,
+        "fulfilled": fulfilled,
+        "weight": weight,
+        "points": fulfilled * weight,
+    }
 
-def calculate_membership_score(household: models.Household) -> float:
-    dates = [p.member_since for p in household.people if p.member_since]
-    if not dates:
-        return 0.0
 
-    earliest = min(dates)
-    years = (pd.Timestamp.now() - pd.to_datetime(earliest)).days / 365.25
-    return min(years, 10.0) * 2.0
+def calculate_diversity_subscores(household: models.Household, current_stats: dict, config: dict) -> dict:
+    """Teilscores je Durchmischungs-Dimension (§3 Abs. 1a–f) aus ``explain_household``."""
+    reference = {"ratios": current_stats, "counts": {}, "basis": {}}
+    explanation = explain_household(household, reference, config)
+    return {c["key"]: c["subscore"] for c in explanation["criteria"]
+            if c["key"].startswith("diversity_")}
+
+
+def calculate_membership_score(household: models.Household, config: dict | None = None) -> float:
+    people = [p for p in household.people if not p.archived]
+    return _explain_membership(people, config or {})["subscore"]
 
 def calculate_occupancy_subscore(members: int, size_rooms: int | None) -> float:
     """Erfuellungsgrad der Wohnraumausnutzung (§3 Abs. 2) fuer *eine* Wohnungsgroesse.
@@ -353,12 +612,11 @@ def calculate_occupancy_subscore(members: int, size_rooms: int | None) -> float:
 
 def calculate_occupancy_score(members: int, size_rooms: int | None, config: dict) -> float:
     """Gewichtete Punkte fuer die Wohnraumausnutzung in einer Wohnungsgroesse."""
-    weight = config.get("weight_occupancy", DEFAULT_CONFIG["weight_occupancy"]["value"])
-    return calculate_occupancy_subscore(members, size_rooms) * weight
+    return explain_occupancy(members, size_rooms, config)["points"]
 
 
 def calculate_engagement_score(household: models.Household) -> float:
-    return max(0.0, min(1.0, household.engagement_score or 0.0))
+    return _clamp01(household.engagement_score)
 
 def basis_totals(counts: dict, total: int) -> dict:
     """Bezugsgroesse der Anteile je Merkmal: Personen in einer der ``DIMENSION_GROUPS``.
@@ -383,15 +641,7 @@ def calculate_resident_stats(db: Session) -> dict:
     bei den Altersgruppen nur ab 20 Jahren (``basis_totals``). Die Anteile sind
     die Vergleichswerte fuer die Zielwerte der Durchmischung (§3 Abs. 1).
     """
-    people = resident_people(db)
-    counts = count_people(people)
-    basis = basis_totals(counts, len(people))
-
-    return {
-        f"ratio_{dim}_{g}": counts[f"{dim}_{g}"] / basis[dim] if basis[dim] else 0.0
-        for dim, groups in DIMENSION_GROUPS.items()
-        for g in groups
-    }
+    return calculate_resident_reference(db)["ratios"]
 
 
 def _statistics_groups(dimension: str, groups, labels: dict, counts: dict,
@@ -564,23 +814,13 @@ def run_scoring(db: Session):
         models.Household.archived == False,
     ).all()
 
-    current_stats = calculate_resident_stats(db)
-
-    for h in households:
-        subscores = calculate_diversity_subscores(h, current_stats, config)
-        div_total = sum(
-            subscores[dim] * config.get(f"weight_{dim}", 1.0)
-            for dim in subscores
-        )
-
-        mem_score = calculate_membership_score(h)
-        eng_score = calculate_engagement_score(h)
-
-        w_mem = config.get("weight_membership", 1.0)
-        w_eng = config.get("weight_engagement", 1.0)
-
-        # Ohne Wohnraumausnutzung -- die kommt je Wohnungsgroesse im Ranking dazu.
-        h.total_score = div_total + (mem_score * w_mem) + (eng_score * w_eng)
+    stichtag = system_now()
+    with at_reference_date(stichtag):
+        reference = calculate_resident_reference(db)
+        for h in households:
+            # Ohne Wohnraumausnutzung -- die kommt je Wohnungsgroesse im Ranking dazu.
+            h.total_score = explain_household(h, reference, config)["base_score"]
+            h.score_calculated_at = stichtag.to_pydatetime()
 
     db.commit()
     return {"message": "Bewertung für alle Haushalte aktualisiert."}
