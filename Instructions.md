@@ -532,7 +532,7 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 
 | Schicht | Technologie |
 |---------|-------------|
-| Backend | Python, FastAPI, SQLAlchemy, Pandas |
+| Backend | Python 3.13, FastAPI, SQLAlchemy, Pandas |
 | Frontend | React (TypeScript), Vite, Material UI (inkl. MUI X Data Grid und MUI X Charts) |
 | Datenbank | SQLite, auch in Produktion (Begründung in [docs/Betrieb.md](docs/Betrieb.md)) |
 | Migrationen | Alembic (`backend/migrations/`) |

@@ -26,7 +26,7 @@ Entwicklung und Tests laufen ebenfalls auf SQLite, Produktion nutzt also dieselb
 Datenbank. Kein Datenbankdienst, keine Datenbankzugangsdaten.
 
 **Container:** Debian 13 (trixie), unprivilegiert, 2 vCPU, **2 GB RAM** (der Frontend-Build
-braucht über 1 GB), 10 GB Speicher. Debian 13 bringt Python 3.13 (benötigt: 3.12+), Node.js 20
+braucht über 1 GB), 10 GB Speicher. Debian 13 bringt Python 3.13 (die Projektversion), Node.js 20
 und nginx aus den Standardquellen mit.
 
 ## Versionen und Branches

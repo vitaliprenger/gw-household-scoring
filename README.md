@@ -8,14 +8,14 @@ Scoring-Anwendung zur Vergabe freier Wohnungen in einem genossenschaftlichen Woh
 
 ## Voraussetzungen
 
-- Python 3.12+
+- Python 3.13 (installierbar via `winget install Python.Python.3.13`)
 - Node.js 20+ (installierbar via `winget install OpenJS.NodeJS`)
 
 ## Setup
 
 ```powershell
 # Virtuelle Umgebung erstellen & aktivieren
-python -m venv .venv
+py -3.13 -m venv .venv
 .venv\Scripts\Activate.ps1
 
 # Backend-Abhängigkeiten
