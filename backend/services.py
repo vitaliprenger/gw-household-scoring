@@ -356,6 +356,7 @@ class RankedEntry(NamedTuple):
     total_score: float       # base_score + occupancy_score
     application: models.Application
     by_wish_only: bool       # nur über den ausdrücklichen Wunsch in dieser Kategorie
+    is_stale: bool = False   # gespeicherte Grundpunktzahl weicht von der aktuellen Berechnung ab
 
 
 class PriorityEntry(NamedTuple):
@@ -436,6 +437,14 @@ def build_ranking(db: Session) -> list[dict]:
         (application, member_count(application.household))
         for application in open_applications_with_households(db, "wechselwunsch")
     ]
+    # Gespeicherte Grundpunktzahl zum Stichtag ihrer Berechnung nachrechnen: weicht
+    # sie ab, haben sich die Daten seither geaendert. Je Haushalt einmal, nicht je Kategorie.
+    reference_cache: dict = {}
+    stale = {
+        application.household.id: scoring.explain_as_calculated(
+            db, application.household, config, reference_cache)["is_stale"]
+        for application, _ in pool
+    }
 
     groups = []
     for (size_rooms, funding_type), min_occupants in sorted(
@@ -471,6 +480,7 @@ def build_ranking(db: Session) -> list[dict]:
                 total_score=base + occupancy,
                 application=application,
                 by_wish_only=not eligible,
+                is_stale=stale[household.id],
             ))
         entries.sort(key=lambda e: e.total_score, reverse=True)
         groups.append({

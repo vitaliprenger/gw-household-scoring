@@ -84,7 +84,101 @@ export interface RankedHousehold {
     special_case?: boolean;
     special_case_note?: string;
     requested_at?: string;
+    /** Gespeicherte Grundpunktzahl weicht von der aktuellen Berechnung ab. */
+    is_stale?: boolean;
+    /** Kategorie, aus der die Zeile stammt (für die Wohnraumausnutzung in der Aufschlüsselung). */
+    size_rooms?: number | null;
+    funding_type?: string | null;
 }
+
+// --- Punkteaufschlüsselung ---
+
+/** Eine Gruppe eines Zielwert-Kriteriums: (Ziel − Ist) × Personen × Faktor. */
+export interface ScoreTerm {
+    group: string;
+    label: string;
+    persons: string[];
+    count: number;
+    target: number;
+    resident_count?: number | null;
+    resident_basis?: number | null;
+    current: number;
+    gap: number;
+    /** Nur bei Ist < Ziel gibt es Punkte. */
+    applies: boolean;
+    /** Beitrag je Person: (Ziel − Ist) / Ziel, 0–1. */
+    relative_gap: number;
+    /** relative_gap × count */
+    value: number;
+}
+
+/** Beitrag einer Person zur Mitgliedsdauer: min(Jahre; Maximum) / Maximum. */
+export interface MembershipPerson {
+    person_name: string;
+    member_since: string;
+    years: number;
+    /** min(years, max_years) */
+    capped_years: number;
+    /** capped_years / max_years, 0–1 */
+    value: number;
+}
+
+export interface MembershipInputs {
+    reference_date: string;
+    max_years: number;
+    persons: MembershipPerson[];
+}
+
+export type ManualScoreField = 'engagement_score' | 'cultural_diversity_score' | 'special_needs_score';
+
+export interface ScoreCriterion {
+    key: string;
+    category: string;
+    label: string;
+    kind: 'target' | 'membership' | 'manual';
+    manual: boolean;
+    field?: ManualScoreField | null;
+    weight: number;
+    value?: number | null;
+    subscore: number;
+    points: number;
+    terms: ScoreTerm[];
+    ignored_persons: { name: string; reason: string }[];
+    membership?: MembershipInputs | null;
+}
+
+export interface OccupancyExplanation {
+    size_rooms: number | null;
+    members: number;
+    fulfilled: number;
+    weight: number;
+    points: number;
+}
+
+export interface HouseholdBreakdown {
+    household_id: number;
+    name: string;
+    member_count: number;
+    /** Stichtag, zu dem die Aufschlüsselung rechnet (= letzte Berechnung, sonst heute). */
+    calculated_at: string;
+    /** Stichtag der gespeicherten Punktzahl; null = noch nie berechnet. */
+    score_calculated_at?: string | null;
+    base_score: number;
+    stored_score: number;
+    is_stale: boolean;
+    criteria: ScoreCriterion[];
+    occupancy?: OccupancyExplanation | null;
+    total_score: number;
+}
+
+/** Haushalt samt Kategorie-Kontext: mit Kategorie kommt die Wohnraumausnutzung hinzu. */
+export interface BreakdownTarget {
+    household_id: number;
+    size_rooms?: number | null;
+    with_occupancy?: boolean;
+}
+
+export type ManualOverrides = Record<number, Partial<Record<ManualScoreField, number>>>;
 
 /** Ein Wechselwunsch in einer Kategorie: Vorrang nach Datum, ohne Scoring. */
 export interface PriorityEntry {

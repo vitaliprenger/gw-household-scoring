@@ -1,13 +1,13 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from datetime import datetime
 from . import (
     models, schemas, database, services, scoring, auth, wishes,
-    import_service, vcf_import_service, application_import_service,
+    import_service, vcf_import_service, application_import_service, score_export,
 )
 
 models.Base.metadata.create_all(bind=database.engine)
@@ -32,6 +32,7 @@ with database.engine.connect() as conn:
         "updated_at": "ALTER TABLE households ADD COLUMN updated_at DATETIME",
         "apartment_unit": "ALTER TABLE households ADD COLUMN apartment_unit TEXT",
         "vcf_import_timestamp": "ALTER TABLE households ADD COLUMN vcf_import_timestamp DATETIME",
+        "score_calculated_at": "ALTER TABLE households ADD COLUMN score_calculated_at DATETIME",
     }
     for col, sql in hh_migrations.items():
         if col not in hh_columns:
@@ -267,6 +268,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Dateiname des Excel-Exports für den Browser lesbar machen.
+    expose_headers=["Content-Disposition"],
 )
 
 # Dependency
@@ -868,6 +871,50 @@ def calculate_scores(
 ):
     return scoring.run_scoring(db)
 
+@app.get("/scoring/households/{household_id}/breakdown", response_model=schemas.HouseholdBreakdown)
+def get_score_breakdown(
+    household_id: int,
+    size_rooms: Optional[int] = None,
+    with_occupancy: bool = False,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Grundpunktzahl eines Haushalts je Kriterium mit allen Eingangswerten.
+
+    Mit ``with_occupancy`` kommt die Wohnraumausnutzung für ``size_rooms`` hinzu
+    (ohne ``size_rooms``: Kategorie „ohne Zimmerangabe").
+    """
+    target = schemas.BreakdownTarget(household_id=household_id, size_rooms=size_rooms,
+                                     with_occupancy=with_occupancy)
+    result = score_export.household_breakdowns(db, [target])
+    if not result:
+        raise HTTPException(status_code=404, detail="Haushalt nicht gefunden")
+    return result[0]
+
+@app.post("/scoring/breakdowns", response_model=List[schemas.HouseholdBreakdown])
+def get_score_breakdowns(
+    request: schemas.BreakdownRequest,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Aufschlüsselung mehrerer Haushalte in einem Aufruf -- für den Vergleich."""
+    return score_export.household_breakdowns(db, request.targets)
+
+@app.post("/scoring/breakdowns/export")
+def export_score_breakdowns(
+    request: schemas.BreakdownExportRequest,
+    db: Session = Depends(get_db),
+    _=Depends(auth.require_auth),
+):
+    """Vergleich und Aufschlüsselung als .xlsx; Rechenschritte als Excel-Formeln."""
+    content = score_export.build_export(db, request)
+    filename = f"Punktevergleich_{datetime.now():%Y-%m-%d_%H-%M}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 # --- Ranking ---
 @app.get("/ranking/", response_model=List[schemas.RankingGroup])
 def get_ranking(
@@ -910,6 +957,9 @@ def get_ranking(
                     special_case=bool(entry.application.special_case),
                     special_case_note=entry.application.special_case_note,
                     requested_at=entry.application.requested_at,
+                    is_stale=entry.is_stale,
+                    size_rooms=group["size_rooms"],
+                    funding_type=group["funding_type"],
                 )
                 for rank, entry in enumerate(group["households"], 1)
             ],

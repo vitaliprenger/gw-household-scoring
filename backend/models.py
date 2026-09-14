@@ -19,6 +19,9 @@ class Household(Base):
 
     # Calculated Score (cached)
     total_score = Column(Float, default=0.0)
+    # Stichtag der letzten Berechnung: Alter und Mitgliedsdauer haengen am Datum,
+    # die Aufschluesselung rechnet zu diesem Stichtag nach (``scoring.explain_household``).
+    score_calculated_at = Column(DateTime, nullable=True)
 
     # Import fields
     wbs_status = Column(String, nullable=True)

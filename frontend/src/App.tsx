@@ -3,13 +3,16 @@ import {
   AppBar, Toolbar, Typography, Container, Box, Tabs, Tab,
   Paper, Button, TextField, Grid, Card, CardContent, Alert, Snackbar, Chip,
   FormControl, InputLabel, Select, MenuItem, FormControlLabel, Switch, InputAdornment,
-  Tooltip
+  Tooltip, IconButton
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CalculateIcon from '@mui/icons-material/Calculate';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import HistoryIcon from '@mui/icons-material/History';
+import { DataGrid, GridColDef, GridRenderCellParams, GridRowId, GridRowSelectionModel } from '@mui/x-data-grid';
 import { deDE } from '@mui/x-data-grid/locales';
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, login, getRanking, getApplications } from './api';
 import { Household, ScoringConfig, RankingGroup, RankedHousehold, PriorityEntry } from './types';
@@ -22,6 +25,12 @@ import ApplicationsTab from './components/applications/ApplicationsTab';
 import { formatDate } from './components/applications/wishes';
 import CreateHouseholdDialog from './components/household/CreateHouseholdDialog';
 import { zebraGridSx, zebraRowClassName } from './components/common/tableStyles';
+import ScoreBreakdownDialog from './components/scoring/ScoreBreakdownDialog';
+import ScoreComparisonDialog, { ComparisonEntry } from './components/scoring/ScoreComparisonDialog';
+
+/** Höchstens so viele Haushalte lassen sich nebeneinander vergleichen. */
+const MAX_COMPARE = 5;
+const EMPTY_SELECTION: GridRowSelectionModel = { type: 'include', ids: new Set() };
 
 const CONFIG_LABELS: Record<string, string> = {
   weight_diversity_age:            'Altersstruktur',
@@ -62,6 +71,7 @@ const CONFIG_LABELS: Record<string, string> = {
   target_gender_f:                 'Geschlecht: weiblich',
   target_gender_m:                 'Geschlecht: männlich',
   target_gender_d:                 'Geschlecht: divers',
+  max_membership_years:            'Maximale Mitgliedsjahre (voller Punkt)',
 };
 
 const SIZE_NONE = '__none__';
@@ -83,6 +93,10 @@ function App() {
   const [poolHouseholdIds, setPoolHouseholdIds] = useState<Set<number>>(new Set());
   const [selectedSize, setSelectedSize] = useState<string>(FILTER_ALL);
   const [selectedFunding, setSelectedFunding] = useState<string>(FILTER_ALL);
+  // Punkteaufschlüsselung und Vergleich aus der Rangliste.
+  const [rankingSelection, setRankingSelection] = useState<GridRowSelectionModel>(EMPTY_SELECTION);
+  const [breakdownEntry, setBreakdownEntry] = useState<ComparisonEntry | null>(null);
+  const [comparisonEntries, setComparisonEntries] = useState<ComparisonEntry[]>([]);
   const [message, setMessage] = useState<{text: string, type: 'success'|'error'} | null>(null);
 
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'));
@@ -311,6 +325,23 @@ function App() {
             .sort((a, b) => b.total_score - a.total_score)
             .map((h, index) => ({ ...h, rank: index + 1 }));
 
+          // Veraltete gespeicherte Punktzahl: das Backend prüft je Haushalt, unabhängig von der Kategorie.
+          const staleIds = new Set(rankingGroups.flatMap(g => g.households).filter(h => h.is_stale).map(h => h.id));
+
+          // Kontext für Aufschlüsselung und Vergleich: mit Filter die Kategorie der Zeile
+          // (samt Wohnraumausnutzung), ohne Filter nur die Grundpunktzahl -- wie die Tabelle.
+          const entryFor = (h: RankedHousehold): ComparisonEntry => unfiltered
+            ? { target: { household_id: h.id, with_occupancy: false } }
+            : {
+                target: { household_id: h.id, size_rooms: h.size_rooms ?? null, with_occupancy: true },
+                categoryLabel: `${sizeLabel(h.size_rooms ?? null)} / ${h.funding_type}`,
+              };
+
+          const selectedIds: GridRowId[] = rankingSelection.type === 'include'
+            ? [...rankingSelection.ids]
+            : rankingRows.map(r => r.id).filter(id => !rankingSelection.ids.has(id));
+          const selectedRows = rankingRows.filter(r => selectedIds.includes(r.id)).slice(0, MAX_COMPARE);
+
           // Vorrang: Wechselwuensche der ausgewaehlten Kategorien, nach dem
           // Zeitpunkt des Wunsches gereiht -- ohne Scoring.
           const priorityRows: PriorityEntry[] = [...(unfiltered ? rankingGroups : matchingGroups)
@@ -363,9 +394,23 @@ function App() {
             { field: 'rank', headerName: 'Rang', width: 80, type: 'number' },
             {
               field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180,
-              renderCell: (params: GridRenderCellParams<RankedHousehold>) => householdCell(
-                params.row.name, params.row.special_case, params.row.special_case_note,
-                params.row.by_wish_only,
+              renderCell: (params: GridRenderCellParams<RankedHousehold>) => (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
+                  <Tooltip title="Punkteaufschlüsselung">
+                    <IconButton size="small" onClick={() => setBreakdownEntry(entryFor(params.row))}>
+                      <InfoOutlinedIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  {householdCell(
+                    params.row.name, params.row.special_case, params.row.special_case_note,
+                    params.row.by_wish_only,
+                  )}
+                  {staleIds.has(params.row.id) && (
+                    <Tooltip title="Gespeicherte Punktzahl ist veraltet: Daten oder Stichtag haben sich seit der letzten Berechnung geändert. „Punkte neu berechnen“ aktualisiert sie.">
+                      <HistoryIcon color="warning" fontSize="small" />
+                    </Tooltip>
+                  )}
+                </Box>
               ),
             },
             { field: 'member_count', headerName: 'Mitglieder', width: 100, type: 'number' },
@@ -393,7 +438,7 @@ function App() {
                   <Select
                     value={selectedSize}
                     label="Wohnungsgröße"
-                    onChange={(e) => setSelectedSize(e.target.value)}
+                    onChange={(e) => { setSelectedSize(e.target.value); setRankingSelection(EMPTY_SELECTION); }}
                   >
                     <MenuItem value={FILTER_ALL}>Alle</MenuItem>
                     {sizes.map(s => (
@@ -406,7 +451,7 @@ function App() {
                   <Select
                     value={selectedFunding}
                     label="Förderungsart"
-                    onChange={(e) => setSelectedFunding(e.target.value)}
+                    onChange={(e) => { setSelectedFunding(e.target.value); setRankingSelection(EMPTY_SELECTION); }}
                   >
                     <MenuItem value={FILTER_ALL}>Alle</MenuItem>
                     {fundingTypes.map(f => (
@@ -438,12 +483,27 @@ function App() {
                 </Box>
               )}
 
-              <Typography variant="h6" sx={{ mb: 1 }}>Wartepool</Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Typography variant="h6" sx={{ flexGrow: 1 }}>Wartepool</Typography>
+                <Tooltip title={`Haushalte über die Kästchen auswählen (2 bis ${MAX_COMPARE}), um Punkte nebeneinander zu vergleichen und manuelle Bewertungen durchzuspielen.`}>
+                  <span>
+                    <Button
+                      variant="outlined"
+                      startIcon={<CompareArrowsIcon />}
+                      disabled={selectedRows.length < 2}
+                      onClick={() => setComparisonEntries(selectedRows.map(entryFor))}
+                    >
+                      Vergleichen ({selectedRows.length})
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Box>
               <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
                 Gezeigt werden nur Haushalte mit offener Wartepool-Bewerbung.{" "}
                 {unfiltered
                   ? 'Ohne Filter wird nur die Grundpunktzahl gezeigt: die Wohnraumausnutzung ergibt sich erst aus der Zimmerzahl der Wohnung.'
                   : 'Die Wohnraumausnutzung gilt je Wohnungsgröße — ein Haushalt, der die Wohnung ausfüllt (Mitglieder ≥ Zimmer), erhält hier volle Punkte, sonst 0.'}
+                {' '}Das Info-Symbol zeigt, wie sich die Punkte eines Haushalts zusammensetzen.
               </Typography>
 
               {rankingRows.length > 0 ? (
@@ -453,6 +513,11 @@ function App() {
                   autoHeight
                   density="compact"
                   disableRowSelectionOnClick
+                  checkboxSelection
+                  rowSelectionModel={rankingSelection}
+                  onRowSelectionModelChange={setRankingSelection}
+                  isRowSelectable={(params) =>
+                    selectedIds.length < MAX_COMPARE || selectedIds.includes(params.id)}
                   initialState={{
                     sorting: { sortModel: [{ field: 'rank', sort: 'asc' }] },
                     pagination: { paginationModel: { pageSize: 100 } },
@@ -674,7 +739,7 @@ function App() {
               {targetOccupation.length > 0 && renderConfigGroup('Haupttätigkeit', targetOccupation)}
               {targetEducation.length > 0 && renderConfigGroup('Bildungsabschlüsse', targetEducation)}
               {targetOther.length > 0 && renderConfigGroup('Sonstige Zielwerte', targetOther)}
-              {bonuses.length > 0 && renderConfigGroup('Bonuspunkte', bonuses)}
+              {bonuses.length > 0 && renderConfigGroup('Formelparameter', bonuses)}
               <Button variant="contained" color="primary" onClick={handleSaveConfig}>
                 Konfiguration speichern
               </Button>
@@ -695,6 +760,23 @@ function App() {
           setStatsRefreshKey((k) => k + 1);
         }}
         onSaved={loadData}
+        onShowBreakdown={(id) => setBreakdownEntry({ target: { household_id: id, with_occupancy: false } })}
+      />
+
+      <ScoreBreakdownDialog
+        open={breakdownEntry !== null}
+        target={breakdownEntry?.target ?? null}
+        categoryLabel={breakdownEntry?.categoryLabel}
+        onClose={() => setBreakdownEntry(null)}
+        onRecalculated={loadData}
+      />
+
+      <ScoreComparisonDialog
+        open={comparisonEntries.length > 0}
+        entries={comparisonEntries}
+        onClose={() => setComparisonEntries([])}
+        onApplied={loadData}
+        onShowBreakdown={setBreakdownEntry}
       />
 
       <CreateHouseholdDialog
