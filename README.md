@@ -4,7 +4,7 @@ Scoring-Anwendung zur Vergabe freier Wohnungen in einem genossenschaftlichen Woh
 
 - **Bedienung** der Anwendung: [docs/Benutzerhandbuch.md](docs/Benutzerhandbuch.md)
 - **Fachliche und technische Anforderungen** (für Entwicklung und LLMs): [Instructions.md](Instructions.md)
-- **Betrieb** (Produktion, Migrationen, Deployment-Vertrag): [docs/Betrieb.md](docs/Betrieb.md); Vorlage für die Ansible-Rolle: [deploy/ansible/README.md](deploy/ansible/README.md)
+- **Betrieb** (Betriebsvertrag: was die Anwendung in Produktion benötigt): [docs/Betrieb.md](docs/Betrieb.md)
 
 ## Voraussetzungen
 

@@ -540,7 +540,7 @@ Vergabe durch Vorstand. Sonderregeln: Pflegebedarf, Finanzierung, Vorrang für b
 
 ### Betrieb und Migrationen
 
-Betrieb, Deployment und Release beschreibt ausschließlich [docs/Betrieb.md](docs/Betrieb.md), der **Betriebsvertrag** für die Ansible-Rolle (Vorlage: [deploy/ansible/README.md](deploy/ansible/README.md)). Ändern sich Umgebungsvariablen, Befehle, Abhängigkeiten, Pfade oder der Ablauf eines Updates, **muss** `docs/Betrieb.md` im selben Commit angepasst werden. Hier stehen nur die Regeln für die Entwicklung:
+Betrieb, Deployment und Release beschreibt ausschließlich [docs/Betrieb.md](docs/Betrieb.md), der **Betriebsvertrag**. Er beschreibt nur, was die Anwendung benötigt und bereitstellt, keine Umsetzung (Werkzeuge, Pfade, Konfigurationsdateien wählt der Betrieb). Ändern sich Umgebungsvariablen, Befehle, Abhängigkeiten, Anforderungen an Laufzeit, Datenbank oder HTTP-Eingang oder der Ablauf eines Updates, **muss** `docs/Betrieb.md` im selben Commit angepasst werden. Hier stehen nur die Regeln für die Entwicklung:
 
 - **Ohne `APP_ENV`** gilt Entwicklung: `housing.db` im Arbeitsverzeichnis, Passwort `geheim`, und `backend/main.py` migriert beim Start (`migrate.upgrade`). Mit `APP_ENV=production` prüft es stattdessen nur (`auth._load_password`, `migrate.ensure_up_to_date`).
 - **Jede Änderung an `backend/models.py` braucht eine Alembic-Revision** (`alembic revision --autogenerate -m "..."`, danach prüfen und von Hand ergänzen). Datenmigrationen gehören in dieselbe Revision. Spaltenänderungen laufen über `op.batch_alter_table`, weil SQLite Spalten nur über einen Tabellen-Neuaufbau ändern kann (`render_as_batch` in `env.py`). Ausgerollte Revisionen werden nicht mehr geändert.
@@ -638,7 +638,7 @@ ScoringConfig: Key-Value-Paare für Gewichte und Zielwerte
 
 ## Konventionen
 
-- Backend-Code in `backend/`, Frontend in `frontend/`, Tests in `tests/`, Migrationen in `backend/migrations/`, Deployment-Vorlagen in `deploy/`.
+- Backend-Code in `backend/`, Frontend in `frontend/`, Tests in `tests/`, Migrationen in `backend/migrations/`.
 - Import-Logik: Fragebögen in `backend/import_service.py`, vCard in `backend/vcf_import_service.py`, Bewerbungsliste in `backend/application_import_service.py` (beide nutzen Session-Store, Namensnormalisierung und Haushalts-Matching aus `import_service`).
 - Wohnungswünsche: `backend/wishes.py` — Parsen, Anzeigen und Abgleichen der Wunschkategorien. Hängt bewusst nur an der Standardbibliothek und wird von Ranking, beiden Importen und der Altmigration (`backend/legacy_migrations.py`) benutzt. Das Frontend spiegelt die Anzeige in `frontend/src/components/applications/wishes.ts`.
 - Wohnungsstammdaten: `backend/apartment_seed_data.py` (generiert aus `imported_data/Wohnungen.xlsx`), angelegt über `services.seed_apartments`; die Zuordnung zum Haushalt erfolgt über `services.assign_household`.
