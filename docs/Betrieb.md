@@ -65,6 +65,7 @@ Backend und alle Befehle unter „Befehle“ brauchen dieselben Umgebungsvariabl
   Grund steht in der Fehlerausgabe (stderr) des Prozesses.
 - Passwortwechsel: Wert ändern, Backend neu starten.
 - **MUSS:** Das Passwort ist nur für den Betrieb und das Backend lesbar.
+- Abhängigkeiten installieren und Frontend bauen brauchen keine Laufzeitkonfiguration.
 
 ## Backend
 
