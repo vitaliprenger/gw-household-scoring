@@ -1,241 +1,169 @@
 # Betrieb: GW Haushalts-Scoring
 
-> **Zielgruppe:** Betrieb und Automatisierung (Ansible, auch LLM-gestützt).
-> Dieses Dokument ist der **Betriebsvertrag** der Anwendung und die einzige Quelle für ihren
-> Betrieb: Was hier steht, darf eine Deployment-Automatisierung voraussetzen. Ändert sich etwas
-> davon, wird dieses Dokument im selben Commit angepasst. Maßgeblich ist immer die Fassung
-> **in der Version, die ausgerollt wird**:
+> **Zielgruppe:** Betrieb und Automatisierung (auch LLM-gestützt).
+> Dieses Dokument ist der **Betriebsvertrag** der Anwendung. Es legt fest, **was die Anwendung
+> benötigt und was sie bereitstellt**, nicht wie der Betrieb das umsetzt. Werkzeuge, Pfade,
+> Namen, Dienstverwaltung, Webserver, Automatisierung und Überwachung wählt der Betrieb.
+> Ändert sich eine Anforderung, wird dieses Dokument im selben Commit angepasst. Maßgeblich ist
+> immer die Fassung **in der Version, die ausgerollt wird**:
 > `https://raw.githubusercontent.com/vitaliprenger/gw-household-scoring/<version>/docs/Betrieb.md`
+>
+> **MUSS** kennzeichnet Anforderungen, ohne die die Anwendung nicht korrekt oder nicht sicher
+> läuft. Alles andere ist Information oder Empfehlung.
 
 ## Überblick
 
-Die gesamte Anwendung läuft in **einem** Proxmox-LXC-Container:
-
 ```
-Browser ──HTTP(S)──> nginx :80
-                      ├── /        → statisches Frontend    (frontend/dist)
-                      └── /api/    → uvicorn 127.0.0.1:8000 (FastAPI, systemd-Dienst)
-                                        └── SQLite-Datei     (WAL-Modus, Schema über Alembic)
+Browser ──HTTPS──> HTTP-Eingang
+                     ├── /        → statisches Frontend  (Build-Ergebnis frontend/dist)
+                     └── /api/    → Backend              (FastAPI/ASGI, genau ein Prozess)
+                                      └── SQLite-Datei   (WAL-Modus, Schema über Alembic)
 ```
 
-nginx liefert das Frontend aus und leitet `/api/` an das Backend weiter; dabei entfällt das
-Präfix. Das Frontend spricht das Backend relativ unter `/api` an.
+Das Frontend spricht das Backend relativ unter `/api` an.
 
 **Warum SQLite:** 9 Nutzer\*innen, wenige hundert Datensätze, ein einziger Backend-Prozess.
 Entwicklung und Tests laufen ebenfalls auf SQLite, Produktion nutzt also dieselbe, getestete
 Datenbank. Kein Datenbankdienst, keine Datenbankzugangsdaten.
 
-**Container:** Debian 13 (trixie), unprivilegiert, 2 vCPU, **2 GB RAM** (der Frontend-Build
-braucht über 1 GB), 10 GB Speicher. Debian 13 bringt Python 3.13 (die Projektversion), Node.js 20
-und nginx aus den Standardquellen mit.
+Die Datenbank enthält **personenbezogene Daten** der Bewerber\*innen.
 
-## Versionen und Branches
+## Versionen
 
 | Branch | Zweck |
 |--------|-------|
 | `main` | Entwicklung |
-| `prod` | **ausgerollter Stand**, nur per Fast-Forward von `main` aktualisiert |
+| `prod` | **freigegebener Stand**, nur per Fast-Forward von `main` aktualisiert |
 
-Freigabe einer neuen Version:
+Ausgerollt wird `prod` oder ein daraus freigegebener Tag/Commit. Das Repo ist öffentlich.
 
-```bash
-git checkout prod && git merge --ff-only main && git push origin prod
-# optional ein Tag, auf den das Deployment gepinnt werden kann
-git tag -a v2026.09.1 -m "Release" && git push origin v2026.09.1
-```
+## Laufzeitumgebung
 
-Ausgerollt wird `prod` oder ein gepinnter Tag/Commit. Das Repo ist öffentlich und wird per
-HTTPS ausgecheckt.
+| Bedarf | Anforderung |
+|--------|-------------|
+| Betriebssystem | Linux (getestet: Debian 13) |
+| Python | **3.13**, Pakete aus `backend/requirements.txt` |
+| Node.js | nur für den Frontend-Build, getestet mit Node.js 20; zur Laufzeit nicht nötig |
+| Arbeitsspeicher | Laufzeit gering; der Frontend-Build braucht **über 1 GB** |
+| Speicher | Anwendung, Abhängigkeiten, Datenbank und Backups: wenige GB |
+
+Der Frontend-Build braucht den **vollständigen Checkout** (er bindet `docs/Benutzerhandbuch.md`
+ein). Wo er läuft, ist frei; ausgeliefert wird nur `frontend/dist/`.
 
 ## Laufzeitkonfiguration
+
+Backend und alle Befehle unter „Befehle“ brauchen dieselben Umgebungsvariablen:
 
 | Variable | Wert in Produktion | Bedeutung |
 |----------|--------------------|-----------|
 | `APP_ENV` | `production` | schaltet die Prüfungen unten ein |
 | `APP_PASSWORD` | *(Secret)*, **≥ 12 Zeichen, nicht `geheim`** | gemeinsames Login-Passwort |
-| `DATABASE_URL` | `sqlite:////var/lib/gw-scoring/housing.db` | absoluter Pfad = **vier** Schrägstriche |
+| `DATABASE_URL` | `sqlite:///<absoluter Pfad>` | z. B. `sqlite:////srv/data/housing.db`: absoluter Pfad = **vier** Schrägstriche |
 
-Mit `APP_ENV=production` **startet das Backend nicht**, wenn das Passwort die Regeln verletzt oder
-die Datenbank nicht auf der neuesten Migration steht; die Anwendung migriert dort nicht selbst.
-Der Grund steht im Journal des Dienstes. Passwortwechsel: Wert in der Umgebungsdatei ändern,
-Dienst neu starten.
+- Mit `APP_ENV=production` **startet das Backend nicht**, wenn das Passwort die Regeln verletzt
+  oder die Datenbank nicht auf der neuesten Migration steht; es migriert dort nicht selbst. Der
+  Grund steht in der Fehlerausgabe (stderr) des Prozesses.
+- Passwortwechsel: Wert ändern, Backend neu starten.
+- **MUSS:** Das Passwort ist nur für den Betrieb und das Backend lesbar.
 
-## Pfade und Rechte
+## Backend
 
-Pfade und Namen sind Vorschläge; eine Automatisierung darf sie über Variablen ändern. Die Rechte
-sind verbindlich.
+- **Start:** ASGI-Anwendung `backend.main:app`, z. B. `uvicorn backend.main:app --host <host>
+  --port <port>`. Arbeitsverzeichnis ist das Wurzelverzeichnis des Checkouts (das Paket
+  `backend` muss importierbar sein). Host und Port sind frei.
+- **MUSS: genau ein Prozess** (bei uvicorn `--workers 1`, keine weiteren Instanzen). Das
+  Sitzungstoken liegt im Speicher des Prozesses; nach jedem Neustart melden sich alle neu an.
+- **MUSS:** nach einem Absturz und nach einem Neustart des Systems ohne Eingriff wieder laufen.
+- **MUSS:** Clients erreichen das Backend nur über den HTTP-Eingang, nicht direkt.
+- Schreibzugriff braucht das Backend nur auf das Datenbankverzeichnis.
+- Beim ersten Start legt es Wohnungsstammdaten und Scoring-Konfiguration an (idempotent). Alle
+  weiteren Daten entstehen über Importe und Eingaben im Frontend.
+- Das Backend wertet keine `X-Forwarded-*`-Header aus.
 
-| Zweck | Pfad | Eigentümer | Rechte |
-|-------|------|------------|--------|
-| Dienstnutzer | `gw-scoring` (Systemnutzer, ohne Login) | | |
-| Checkout (vollständig, der Build liest `docs/`) | `/opt/gw-scoring/app` | Dienstnutzer | `0755` |
-| virtualenv | `/opt/gw-scoring/venv` | Dienstnutzer | `0755` |
-| Umgebungsdatei | `/etc/gw-scoring/gw-scoring.env` | `root`:Dienstnutzer | `0640` |
-| Datenbankverzeichnis | `/var/lib/gw-scoring/` | Dienstnutzer | `0750` |
-| Datenbank | `/var/lib/gw-scoring/housing.db` | Dienstnutzer | `0640` |
-| Backups | `/var/backups/gw-scoring/` | Dienstnutzer | `0700` (Dateien `0600`) |
+## Datenbank
 
-- Das Datenbankverzeichnis liegt auf **lokalem** Container-Speicher, nicht auf NFS/CIFS: dort
-  funktionieren die Dateisperren von SQLite nicht zuverlässig.
-- Das **Verzeichnis** muss dem Dienstnutzer gehören: SQLite legt daneben `housing.db-wal` und
-  `housing.db-shm` an. Sie gehören zur Datenbank und werden bei laufendem Dienst nie gelöscht.
+- **MUSS: lokales Dateisystem**, nicht NFS/CIFS: dort funktionieren die Dateisperren von SQLite
+  nicht zuverlässig.
+- **MUSS:** Das Backend darf im **Verzeichnis** der Datenbank Dateien anlegen: SQLite legt dort
+  `<name>-wal` und `<name>-shm` an. Sie gehören zur Datenbank und werden bei laufendem Backend
+  nie gelöscht.
+- **MUSS:** Datenbank und Backups sind nur für das Backend und den Betrieb lesbar
+  (personenbezogene Daten).
+- **MUSS:** Die Datenbankdatei wird bei laufendem Backend nie direkt kopiert; Kopien entstehen
+  mit dem Backup-Befehl.
+
+## HTTP-Eingang
+
+Der Eingang (Webserver, Reverse Proxy o. Ä.) muss Folgendes leisten:
+
+| Anforderung | Grund |
+|-------------|-------|
+| **MUSS:** `/` liefert die Dateien aus `frontend/dist/` aus | Frontend |
+| **MUSS:** Pfade außerhalb von `/api/` und `/assets/`, zu denen keine Datei existiert, liefern `index.html` | Routing im Browser |
+| **MUSS:** `/api/<pfad>` geht an das Backend als `/<pfad>`, das Präfix entfällt (`/api/health` → `/health`) | Backend kennt kein Präfix |
+| **MUSS:** Request-Bodys bis mindestens **25 MB** | Excel- und vCard-Importe |
+| **MUSS:** Antworten des Backends werden mindestens **300 s** abgewartet | große Importe und Neuberechnung |
+| **MUSS:** `index.html` wird nicht zwischengespeichert (z. B. `Cache-Control: no-cache`) | sonst lädt der Browser nach einem Update alte Assets |
+| Dateien unter `/assets/` dürfen unbegrenzt zwischengespeichert werden | Dateinamen enthalten einen Hash |
+| **MUSS:** Zugriffe von außerhalb eines vertrauenswürdigen Netzes nur über HTTPS | sonst geht das Passwort im Klartext über das Netz |
+
+Wo TLS terminiert wird, ist frei. Die Anwendung ist nicht für den ungeschützten Betrieb im
+Internet gedacht.
 
 ## Befehle
 
-Alle Befehle laufen **als Dienstnutzer**, im **Checkout-Verzeichnis** und mit der
-Laufzeitkonfiguration.
+Alle Befehle laufen im **Wurzelverzeichnis des Checkouts**, mit der **Laufzeitkonfiguration** und
+mit denselben Dateirechten wie das Backend. `python` meint die Python-Umgebung des Backends.
 
 | Zweck | Befehl | Ergebnis |
 |-------|--------|----------|
-| Python-Abhängigkeiten | `<venv>/bin/pip install -r backend/requirements.txt` | |
+| Python-Abhängigkeiten | `pip install -r backend/requirements.txt` | |
 | Frontend bauen | `cd frontend && npm ci && npm run build` | `frontend/dist/` |
-| Migrationsstand prüfen | `<venv>/bin/python -m backend.migrate --check` | Exit **0** aktuell, **1** ausstehend, sonst Fehler |
-| Migrieren | `<venv>/bin/python -m backend.migrate` | idempotent; legt eine fehlende Datenbank an und übernimmt Datenbanken aus der Zeit vor Alembic |
-| Revision ausgeben | `<venv>/bin/python -m backend.migrate --current` | `current=<rev> head=<rev>` |
-| Backup | `<venv>/bin/python -m backend.backup <verzeichnis> --label <label> [--keep-days N]` | Pfad der Datei auf stdout; löscht mit `--keep-days` ältere Backups desselben Labels |
+| Migrationsstand prüfen | `python -m backend.migrate --check` | Exit **0** aktuell, **1** ausstehend, sonst Fehler |
+| Migrieren | `python -m backend.migrate` | idempotent; legt eine fehlende Datenbank an und übernimmt Datenbanken aus der Zeit vor Alembic |
+| Revision ausgeben | `python -m backend.migrate --current` | `current=<rev> head=<rev>` |
+| Backup | `python -m backend.backup <verzeichnis> --label <label> [--keep-days N]` | Pfad der Datei auf stdout; löscht mit `--keep-days` ältere Backups desselben Labels |
 | Gesundheitsprüfung | `GET /api/health` (ohne Anmeldung) | HTTP 200 `{"status": "ok", "db_revision": "<rev>"}` |
 
-Das Backend selbst startet über die systemd-Unit (siehe „Referenzkonfiguration“).
+Der Backup-Befehl ist auch bei laufendem Backend konsistent und prüft die Kopie mit
+`PRAGMA integrity_check`.
 
 ## Ablauf beim Aktualisieren
 
-Die Reihenfolge ist verbindlich:
+**MUSS:** diese Reihenfolge.
 
-1. Neuen Stand auschecken, Python-Abhängigkeiten installieren, Frontend bauen.
+1. Neuen Stand bereitstellen: Python-Abhängigkeiten installieren, Frontend bauen.
 2. Migrationsstand prüfen.
-3. **Nur bei Exit 1:** Dienst stoppen → Backup mit `--label pre-migration` → migrieren.
-   Schlägt ein Schritt fehl: **abbrechen, Dienst nicht starten**.
-4. Dienst (neu) starten.
+3. **Nur bei Exit 1:** Backend stoppen → Backup mit `--label pre-migration` → migrieren.
+   Schlägt ein Schritt fehl: **abbrechen, Backend nicht starten**.
+4. Backend (neu) starten und das neue Frontend ausliefern.
 5. Gesundheitsprüfung: HTTP 200, und `db_revision` entspricht `head` aus „Revision ausgeben“.
-
-Beim ersten Start legt die Anwendung Wohnungsstammdaten und Scoring-Konfiguration an
-(idempotent). Alle weiteren Daten entstehen über Importe und Eingaben im Frontend.
 
 ### Erstbefüllung mit einer vorhandenen Datenbank
 
-Eine bestehende `housing.db` wird **vor dem ersten Ablauf** an den Datenbankpfad kopiert;
+Eine bestehende Datenbankdatei wird **vor dem ersten Ablauf** an den Datenbankpfad gelegt;
 Schritt 3 hebt sie auf den aktuellen Stand. Eine vorhandene Produktionsdatenbank wird **nie**
 überschrieben. Die Quelldatei muss vollständig sein: Stammt sie aus einer laufenden Anwendung,
 vorher die Anwendung beenden oder die Kopie mit dem Backup-Befehl erzeugen.
 
 ## Zurückrollen
 
-Migrationen werden in Produktion **nicht** per `downgrade` zurückgenommen, sondern:
+**MUSS:** Migrationen werden in Produktion **nicht** per `downgrade` zurückgenommen, sondern:
 
-1. Dienst stoppen.
+1. Backend stoppen.
 2. Backup mit `--label pre-rollback`.
-3. `housing.db-wal` und `housing.db-shm` löschen, das `pre-migration`-Backup an den Datenbankpfad
-   kopieren.
-4. Vorherige Version auschecken, Abhängigkeiten installieren, Frontend bauen.
-5. Dienst starten, **ohne** zu migrieren; Gesundheitsprüfung.
+3. `<name>-wal` und `<name>-shm` löschen, das `pre-migration`-Backup an den Datenbankpfad legen
+   (Zugriffsrechte wie unter „Datenbank“).
+4. Vorherige Version bereitstellen (Abhängigkeiten, Frontend).
+5. Backend starten, **ohne** zu migrieren; Gesundheitsprüfung.
+
+Nur Daten zurück (gleiche Version): Schritte 1–3, dann Backend starten. Ist das Backup älter als
+der Code, startet das Backend nicht, bis migriert wurde.
 
 ## Backups
 
-- Vor jeder Migration (siehe „Ablauf beim Aktualisieren“) und täglich per systemd-Timer (siehe
-  „Referenzkonfiguration“).
-- Der Backup-Befehl ist auch bei laufendem Dienst konsistent und prüft die Kopie mit
-  `PRAGMA integrity_check`. **Die Datenbankdatei wird nie direkt kopiert**, solange der Dienst läuft.
-- Ein Proxmox-Backup (vzdump) des Containers sichert die Datenbank zusätzlich mit; einzelne Stände
-  werden aus den Backup-Dateien wiederhergestellt.
-
-## Anmeldung
-
-Das Sitzungstoken liegt **im Speicher des Backend-Prozesses**. Deshalb läuft uvicorn mit
-**genau einem Worker**, und nach jedem Neustart des Dienstes melden sich alle neu an.
-
-## Referenzkonfiguration
-
-Mit den Pfaden aus „Pfade und Rechte“.
-
-### systemd: Anwendung
-
-```ini
-# /etc/systemd/system/gw-scoring.service
-[Unit]
-Description=GW Haushalts-Scoring (Backend)
-After=network.target
-
-[Service]
-Type=simple
-User=gw-scoring
-Group=gw-scoring
-WorkingDirectory=/opt/gw-scoring/app
-EnvironmentFile=/etc/gw-scoring/gw-scoring.env
-ExecStart=/opt/gw-scoring/venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers
-Restart=on-failure
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/gw-scoring
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### systemd: tägliches Backup
-
-```ini
-# /etc/systemd/system/gw-scoring-backup.service
-[Unit]
-Description=GW Haushalts-Scoring: tägliches Datenbank-Backup
-
-[Service]
-Type=oneshot
-User=gw-scoring
-Group=gw-scoring
-WorkingDirectory=/opt/gw-scoring/app
-EnvironmentFile=/etc/gw-scoring/gw-scoring.env
-ExecStart=/opt/gw-scoring/venv/bin/python -m backend.backup /var/backups/gw-scoring --label daily --keep-days 14
-```
-
-```ini
-# /etc/systemd/system/gw-scoring-backup.timer
-[Unit]
-Description=GW Haushalts-Scoring: tägliches Datenbank-Backup
-
-[Timer]
-OnCalendar=*-*-* 02:30:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-### nginx
-
-```nginx
-# /etc/nginx/sites-available/gw-scoring
-server {
-    listen 80;
-    server_name _;
-
-    root /opt/gw-scoring/app/frontend/dist;
-    index index.html;
-
-    # Excel- und vCard-Importe
-    client_max_body_size 25m;
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000/;   # abschließender Slash entfernt das Präfix /api
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;             # große Importe und Neuberechnung
-    }
-
-    location /assets/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    location / {
-        try_files $uri /index.html;
-        add_header Cache-Control "no-cache";
-    }
-}
-```
-
-TLS terminiert ein vorgelagerter Reverse Proxy oder nginx im Container (zusätzlicher
-`listen 443 ssl`-Block). Ohne TLS wird das Passwort im Klartext übertragen; die Anwendung ist
-nicht für den ungeschützten Betrieb im Internet gedacht.
+- **MUSS:** vor jeder Migration (siehe „Ablauf beim Aktualisieren“).
+- **MUSS:** zusätzlich regelmäßig, mindestens **täglich**, mit dem Backup-Befehl. Aufbewahrung
+  legt der Betrieb fest (Empfehlung: 14 Tage).
+- Sicherungen des ganzen Systems (Snapshots, Images) sind möglich, ersetzen den Backup-Befehl aber
+  nicht: Einzelne Stände werden aus dessen Dateien wiederhergestellt.
