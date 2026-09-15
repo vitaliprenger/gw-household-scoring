@@ -29,7 +29,7 @@ import {
 } from './types';
 
 // Relativ, damit Frontend und Backend unter derselben Adresse laufen: in der
-// Entwicklung leitet der Vite-Proxy /api weiter, im Betrieb nginx.
+// Entwicklung leitet der Vite-Proxy /api weiter, im Betrieb der HTTP-Eingang (docs/Betrieb.md).
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 
 export const api = axios.create({
