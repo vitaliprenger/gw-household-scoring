@@ -584,7 +584,7 @@ function App() {
             },
             {
               field: 'people_count', headerName: 'Mitglieder', width: 100, type: 'number',
-              valueGetter: (_value: unknown, row: Household) => row.people.length,
+              valueGetter: (_value: unknown, row: Household) => row.people.filter(p => !p.archived).length,
             },
             {
               field: 'wbs_status', headerName: 'WBS', width: 100,
