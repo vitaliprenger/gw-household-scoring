@@ -17,6 +17,10 @@ frontend/dist/
 # Environment
 .env
 
+# Claude Code (Projekt-Skills unter .claude/skills/ werden versioniert)
+.claude/worktrees/
+.claude/settings.local.json
+
 # IDE
 .vscode/
 .idea/

@@ -22,9 +22,7 @@ Browser ──HTTPS──> HTTP-Eingang
 
 Das Frontend spricht das Backend relativ unter `/api` an.
 
-**Warum SQLite:** 9 Nutzer\*innen, wenige hundert Datensätze, ein einziger Backend-Prozess.
-Entwicklung und Tests laufen ebenfalls auf SQLite, Produktion nutzt also dieselbe, getestete
-Datenbank. Kein Datenbankdienst, keine Datenbankzugangsdaten.
+Kein Datenbankdienst, keine Datenbankzugangsdaten. Warum SQLite: [ADR 0001](adr/0001-sqlite-auch-in-produktion.md).
 
 Die Datenbank enthält **personenbezogene Daten** der Bewerber\*innen.
 

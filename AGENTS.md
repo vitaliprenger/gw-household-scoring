@@ -1,1 +1,1 @@
-Lies und befolge die Anweisungen in Instructions.md.
+Lies und befolge die Anweisungen in CLAUDE.md.
