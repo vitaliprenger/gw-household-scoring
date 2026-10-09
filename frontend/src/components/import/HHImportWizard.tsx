@@ -179,7 +179,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                     <TableRow>
                                         <TableCell>Person 1</TableCell>
                                         <TableCell>MitglNr.</TableCell>
-                                        <TableCell>Mitglieder</TableCell>
+                                        <TableCell>Personen</TableCell>
                                         <TableCell>Match</TableCell>
                                         <TableCell>Status</TableCell>
                                         <TableCell>Hinweise</TableCell>

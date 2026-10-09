@@ -51,7 +51,7 @@ export const membershipFormula = (p: MembershipPerson, maxYears: number): string
 export const occupancyFormula = (o: OccupancyExplanation): string =>
   o.size_rooms === null || o.size_rooms === undefined
     ? `ohne Zimmerangabe → erfüllt 1 × Gewicht ${plain(o.weight)} = ${points(o.points)}`
-    : `${o.members} Mitglieder ${o.members >= o.size_rooms ? '≥' : '<'} ${o.size_rooms} Zimmer → `
+    : `${o.members} Personen${o.members >= o.size_rooms ? '≥' : '<'} ${o.size_rooms} Zimmer → `
       + `${plain(o.fulfilled)} × Gewicht ${plain(o.weight)} = ${points(o.points)}`;
 
 export const occupancyLabel = (sizeRooms: number | null | undefined): string =>
