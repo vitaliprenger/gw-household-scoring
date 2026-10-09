@@ -180,6 +180,39 @@ def test_vcf_is_idempotent():
                 db.query(models.Household).count(), households_before)
 
 
+def test_vcf_leaves_declared_member_count():
+    print("\n== vCard: setzt die angegebene Haushaltsgröße nicht ==")
+    db = make_session()
+    import_sample(db)
+    hh = db.query(models.Household).first()
+    check_equal("neuer Haushalt ohne angegebene Haushaltsgröße",
+                hh.household_member_count, None)
+
+    # Selbstauskunft weicht von den vier Personen der vCard ab
+    hh.household_member_count = 2
+    hh.vcf_import_timestamp = None  # sonst gilt die Karte als bereits importiert
+    db.commit()
+
+    analysis = V.analyze_vcf(SAMPLE.encode("utf-8"), db)
+    preview = next(p for p in analysis.households
+                   if p.match_result.matched_household_id == hh.id)
+    changes = preview.existing_data_changes
+    fields = [c.field for c in changes.fields_to_overwrite] if changes else []
+    check("keine Änderungsanzeige zur Haushaltsgröße",
+          not any(f in ("household_member_count", "Haushaltsgroesse") for f in fields),
+          str(fields))
+
+    V.commit_vcf(schemas.VcfCommitRequest(
+        session_id=analysis.session_id,
+        decisions=[schemas.VcfDecision(
+            temp_id=preview.temp_id, action="update",
+            target_household_id=hh.id, excluded_person_temp_ids=[],
+        )],
+    ), db)
+    db.refresh(hh)
+    check_equal("angegebene Haushaltsgröße bleibt erhalten", hh.household_member_count, 2)
+
+
 # ---------------------------------------------------------------------------
 # 2. Individualbogen
 # ---------------------------------------------------------------------------
@@ -311,6 +344,7 @@ def test_household_bogen_never_creates():
     check_equal("Wohnungswunsch ergänzt", application.wishes,
                 [{"size_rooms": 4, "funding_type": None, "apartment_category": None}])
     check_equal("Haustiere ergänzt", hh.pets_count, 1)
+    check_equal("angegebene Haushaltsgröße aus dem Bogen", hh.household_member_count, 4)
 
 
 def test_household_bogen_reuses_existing_persons():
@@ -397,6 +431,7 @@ def run_tests():
         test_vcf_creates_children_from_notes,
         test_vcf_overwrites_but_keeps_missing,
         test_vcf_is_idempotent,
+        test_vcf_leaves_declared_member_count,
         test_individual_matches_person_without_household,
         test_individual_never_creates,
         test_household_bogen_never_creates,

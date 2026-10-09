@@ -173,6 +173,8 @@ def test_commit_creates_household():
 
     hh = db.query(models.Household).filter(models.Household.name == "Jenny Sander").first()
     check("Person hängt am neuen Haushalt", person.household_id == hh.id)
+    # Die angegebene Haushaltsgröße ist Selbstauskunft, nicht die Zahl der zugeordneten Personen.
+    check_equal("angegebene Haushaltsgröße bleibt leer", hh.household_member_count, None)
     application = services.open_applications(db, hh.id)[0]
     check_equal("Art", application.kind, "wartepool")
     check_equal("Datum", application.requested_at, datetime(2023, 7, 26))
