@@ -38,6 +38,13 @@ der Regel abweichen, halten wir das an der Bewerbung als Sonderfall fest.
 Den Button **„Punkte neu berechnen“** findest du oben in der Kopfzeile – er ist aus jedem Tab
 erreichbar.
 
+**Auf dem Handy** sieht manches etwas anders aus:
+
+- Die Tableiste passt nicht ganz auf den Bildschirm. Wisch sie zur Seite oder tipp auf die Pfeile
+  am Rand, um zu den übrigen Tabs zu kommen.
+- **„Punkte neu berechnen“** und **„Abmelden“** erscheinen in der Kopfzeile als Symbole: der
+  Rechner berechnet die Punkte neu, das Symbol ganz rechts meldet dich ab.
+
 ---
 
 ## 3. Daten einlesen

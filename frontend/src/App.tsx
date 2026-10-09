@@ -13,6 +13,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import HistoryIcon from '@mui/icons-material/History';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import LogoutIcon from '@mui/icons-material/Logout';
 import { DataGrid, GridColDef, GridRenderCellParams, GridRowId, GridRowSelectionModel } from '@mui/x-data-grid';
 import { deDE } from '@mui/x-data-grid/locales';
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, login, getRanking, getApplications } from './api';
@@ -26,6 +27,7 @@ import ApplicationsTab from './components/applications/ApplicationsTab';
 import { formatDate } from './components/applications/wishes';
 import CreateHouseholdDialog from './components/household/CreateHouseholdDialog';
 import { zebraGridSx, zebraRowClassName } from './components/common/tableStyles';
+import { useIsMobile } from './components/common/useIsMobile';
 import ScoreBreakdownDialog from './components/scoring/ScoreBreakdownDialog';
 import ScoreComparisonDialog, { ComparisonEntry } from './components/scoring/ScoreComparisonDialog';
 import HelpDialog from './components/help/HelpDialog';
@@ -102,6 +104,7 @@ const sizeLabel = (value: number | null): string =>
   value === null || value === undefined ? 'ohne Zimmerangabe' : `${value} Zimmer`;
 
 function App() {
+  const isMobile = useIsMobile();
   const [tabValue, setTabValue] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [households, setHouseholds] = useState<Household[]>([]);
@@ -267,31 +270,53 @@ function App() {
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
         <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+          <Typography variant="h6" component="div" noWrap sx={{ flexGrow: 1 }}>
             GW Haushalts-Scoring
           </Typography>
-          <Button
-            color="inherit"
-            variant="outlined"
-            startIcon={<CalculateIcon />}
-            onClick={handleCalculate}
-            sx={{ mr: 2 }}
-          >
-            Punkte neu berechnen
-          </Button>
+          {isMobile ? (
+            <Tooltip title="Punkte neu berechnen">
+              <IconButton color="inherit" onClick={handleCalculate} aria-label="Punkte neu berechnen">
+                <CalculateIcon />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Button
+              color="inherit"
+              variant="outlined"
+              startIcon={<CalculateIcon />}
+              onClick={handleCalculate}
+              sx={{ mr: 2 }}
+            >
+              Punkte neu berechnen
+            </Button>
+          )}
           <Tooltip title="Hilfe zu diesem Tab">
-            <IconButton color="inherit" onClick={() => setHelpOpen(true)} sx={{ mr: 1 }} aria-label="Hilfe">
+            <IconButton color="inherit" onClick={() => setHelpOpen(true)} sx={{ mr: isMobile ? 0 : 1 }} aria-label="Hilfe">
               <HelpOutlineIcon />
             </IconButton>
           </Tooltip>
-          <Button color="inherit" onClick={handleLogout}>Abmelden</Button>
+          {isMobile ? (
+            <Tooltip title="Abmelden">
+              <IconButton color="inherit" edge="end" onClick={handleLogout} aria-label="Abmelden">
+                <LogoutIcon />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Button color="inherit" onClick={handleLogout}>Abmelden</Button>
+          )}
         </Toolbar>
       </AppBar>
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} section={HELP_SECTIONS[tabValue]} />
 
       <Container maxWidth="lg" sx={{ mt: 4 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-          <Tabs value={tabValue} onChange={handleTabChange}>
+          <Tabs
+            value={tabValue}
+            onChange={handleTabChange}
+            variant="scrollable"
+            scrollButtons="auto"
+            allowScrollButtonsMobile
+          >
             <Tab label="Rangliste" />
             <Tab label="Bewerbungen" />
             <Tab label="Alle Haushalte" />
