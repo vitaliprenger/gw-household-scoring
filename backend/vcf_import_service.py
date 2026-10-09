@@ -806,7 +806,6 @@ VCF_FIELD_LABELS = {
     "name": "Haushaltsname",
     "apartment_unit": "Wohnungsnummer",
     "is_resident": "Aktueller Bewohner",
-    "household_member_count": "Haushaltsgroesse",
 }
 
 
@@ -825,7 +824,6 @@ def compute_vcf_changes(hh_data: dict, existing: models.Household) -> Optional[s
     new_values = {
         "apartment_unit": hh_data.get("apartment_unit"),
         "is_resident": hh_data.get("is_resident", False),
-        "household_member_count": len(hh_data.get("persons", [])),
     }
     for field, new_value in new_values.items():
         old_value = getattr(existing, field, None)
@@ -1085,7 +1083,8 @@ def _sync_household(
 ) -> dict:
     hh.name = hh_data["name"]
     hh.apartment_unit = hh_data.get("apartment_unit")
-    hh.household_member_count = len(persons)
+    # household_member_count ist die angegebene Haushaltsgröße, also die
+    # Selbstauskunft aus dem Haushaltsbogen; die vCard setzt sie nicht.
     hh.vcf_import_timestamp = hh_data.get("rev")
     hh.updated_at = datetime.utcnow()
 
