@@ -49,6 +49,8 @@ erreichbar.
 - Die Rangliste zeigt vorn ohne Filter die Grundpunktzahl („Grund“), mit Filter die
   Gesamtpunktzahl („Gesamt“).
 - Warnzeichen, Uhr und den Chip „nur auf Wunsch“ tippst du an, um den Hinweis dazu zu lesen.
+- Größere Dialoge wie das Haushaltsdetail oder die Punkteaufschlüsselung füllen den ganzen
+  Bildschirm. Du schließt sie über den Button am unteren Rand.
 
 ---
 

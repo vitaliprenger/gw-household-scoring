@@ -694,7 +694,7 @@ function App() {
             },
           ];
 
-          // Handy: Name, Mitglieder und Wohnung passen nebeneinander.
+          // Handy: Haushaltsname, Haushaltsgröße und Wohnung passen nebeneinander.
           const householdGridColumns = isMobile
             ? mobileColumns(householdColumns, ['name', 'people_count', 'assigned_apartment_unit'], {
                 name: { minWidth: 154 },

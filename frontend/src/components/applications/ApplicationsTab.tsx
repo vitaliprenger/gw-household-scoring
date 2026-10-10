@@ -194,8 +194,6 @@ export default function ApplicationsTab({ onShowHousehold, onChanged }: Applicat
     const gridColumns = isMobile
         ? mobileColumns(columns, ['household_name', 'status', 'actions'], {
             household_name: { minWidth: 150 },
-            status: { width: 112 },
-            actions: { width: 84 },
         })
         : columns;
 
