@@ -491,6 +491,8 @@ export interface VcfAnalysisResponse {
     skipped_no_name: number;
     /** Karten ohne sicheren Treffer; sie bewirken nichts. */
     unmatched_cards: number;
+    /** Karten mit sicherem Treffer, bei dem nichts fehlt. */
+    unchanged_cards: number;
     fills: MemberListFills;
     /** Größte Abweichung zuerst. */
     member_since_deviations: MemberSinceDeviation[];
@@ -504,6 +506,7 @@ export interface VcfCommitRequest {
 export interface VcfCommitResponse {
     fills: MemberListFills;
     unmatched_cards: number;
+    member_numbers_not_stored: MemberNumberConflict[];
 }
 
 // --- Ist-Statistik ---

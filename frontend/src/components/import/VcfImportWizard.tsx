@@ -4,7 +4,9 @@ import {
     Button, Typography, Box, Alert, CircularProgress,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
 } from '@mui/material';
-import { MemberListFills, VcfAnalysisResponse, VcfCommitResponse } from '../../types';
+import {
+    MemberListFills, MemberNumberConflict, VcfAnalysisResponse, VcfCommitResponse,
+} from '../../types';
 import { commitVcf } from '../../api';
 
 interface VcfImportWizardProps {
@@ -19,6 +21,10 @@ function formatDate(iso: string): string {
     return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleDateString('de-DE');
 }
 
+function personWord(count: number): string {
+    return count === 1 ? 'Person' : 'Personen';
+}
+
 function FillCounts({ fills }: { fills: MemberListFills }) {
     return (
         <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
@@ -27,6 +33,23 @@ function FillCounts({ fills }: { fills: MemberListFills }) {
             <Typography>Mitgliedsnummer: <strong>{fills.member_number}</strong></Typography>
             <Typography>Geschlecht: <strong>{fills.gender}</strong></Typography>
         </Box>
+    );
+}
+
+function NumberConflicts({ conflicts, title }: { conflicts: MemberNumberConflict[]; title: string }) {
+    if (conflicts.length === 0) return null;
+    return (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+            <strong>{title}</strong>
+            <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                {conflicts.map((conflict, i) => (
+                    <li key={i}>
+                        {conflict.person}: Nummer {conflict.member_number} trägt
+                        schon {conflict.holder}
+                    </li>
+                ))}
+            </ul>
+        </Alert>
     );
 }
 
@@ -61,11 +84,17 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
                 {result ? (
-                    <Alert severity="success">
-                        Bei <strong>{result.fills.persons}</strong> Personen wurden fehlende Angaben
-                        ergänzt.
-                        <Box sx={{ mt: 1 }}><FillCounts fills={result.fills} /></Box>
-                    </Alert>
+                    <>
+                        <Alert severity="success" sx={{ mb: 2 }}>
+                            Bei <strong>{result.fills.persons}</strong> {personWord(result.fills.persons)}{' '}
+                            wurden fehlende Angaben ergänzt.
+                            <Box sx={{ mt: 1 }}><FillCounts fills={result.fills} /></Box>
+                        </Alert>
+                        <NumberConflicts
+                            conflicts={result.member_numbers_not_stored}
+                            title="Mitgliedsnummer nicht eingetragen, weil sie schon vergeben ist:"
+                        />
+                    </>
                 ) : (
                     <>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -79,6 +108,9 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                             <Typography>
                                 Ohne passende Person: <strong>{analysis.unmatched_cards}</strong>
                             </Typography>
+                            <Typography>
+                                Ohne Änderung: <strong>{analysis.unchanged_cards}</strong>
+                            </Typography>
                             {analysis.skipped_no_name > 0 && (
                                 <Typography>Ohne Namen: <strong>{analysis.skipped_no_name}</strong></Typography>
                             )}
@@ -89,26 +121,18 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                                 'Es fehlen keine Angaben, die die Mitgliederliste füllen könnte.'
                             ) : (
                                 <>
-                                    Bei <strong>{analysis.fills.persons}</strong> Personen werden
-                                    fehlende Angaben ergänzt:
+                                    Bei <strong>{analysis.fills.persons}</strong>{' '}
+                                    {personWord(analysis.fills.persons)} werden fehlende Angaben
+                                    ergänzt:
                                     <Box sx={{ mt: 1 }}><FillCounts fills={analysis.fills} /></Box>
                                 </>
                             )}
                         </Alert>
 
-                        {analysis.member_numbers_not_stored.length > 0 && (
-                            <Alert severity="warning" sx={{ mb: 2 }}>
-                                <strong>Mitgliedsnummer wird nicht eingetragen, weil sie schon vergeben ist:</strong>
-                                <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
-                                    {analysis.member_numbers_not_stored.map((conflict, i) => (
-                                        <li key={i}>
-                                            {conflict.person}: Nummer {conflict.member_number} trägt
-                                            schon {conflict.holder}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </Alert>
-                        )}
+                        <NumberConflicts
+                            conflicts={analysis.member_numbers_not_stored}
+                            title="Mitgliedsnummer wird nicht eingetragen, weil sie schon vergeben ist:"
+                        />
 
                         {analysis.member_since_deviations.length > 0 && (
                             <>

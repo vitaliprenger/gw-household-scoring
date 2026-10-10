@@ -90,10 +90,26 @@ def test_create_person_in_unknown_household():
     db.close()
 
 
+def test_create_person_needs_both_names():
+    print("\n== Person anlegen: Vor- und Nachname sind Pflicht ==")
+    for label, names in [("ohne Vornamen", {"first_name": "  ", "last_name": "Sommer"}),
+                         ("ohne Nachnamen", {"first_name": "Mia", "last_name": ""})]:
+        try:
+            schemas.PersonCreate(**names)
+            check(f"{label} ist ein Fehler", False)
+        except ValueError:
+            check(f"{label} ist ein Fehler", True)
+
+    created = schemas.PersonCreate(first_name=" Mia ", last_name=" Sommer ")
+    check_equal("Leerzeichen am Rand entfallen",
+                (created.first_name, created.last_name), ("Mia", "Sommer"))
+
+
 if __name__ == "__main__":
     test_create_person_without_household()
     test_create_person_in_household()
     test_create_person_in_unknown_household()
+    test_create_person_needs_both_names()
 
     print("\n" + "=" * 50)
     if failures:

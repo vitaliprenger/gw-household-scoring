@@ -154,7 +154,12 @@ kaputt machen.
   wenn du die Liste noch einmal einliest.
 - Es gibt nichts zu entscheiden: Der Assistent zeigt, bei wie vielen Personen welche Angaben
   ergänzt würden, und du bestätigst. Karten, zu denen es in der Anwendung keine Person gibt,
-  bewirken nichts – die meisten Mitglieder haben sich ja nie beworben.
+  bewirken nichts – die meisten Mitglieder haben sich ja nie beworben. Dasselbe gilt, wenn zwei
+  Karten auf dieselbe Person passen, etwa bei zwei Mitgliedern gleichen Namens: Dann trag die
+  Angaben von Hand ein.
+- Trägt schon eine andere Person die Mitgliedsnummer einer Karte, wird die Nummer nicht
+  eingetragen. Der Assistent nennt beide Personen, vor und nach dem Ergänzen. Klär, wem die Nummer
+  gehört.
 - Weicht **„Mitglied seit“** der Mitgliederliste vom gespeicherten Wert ab, listet der Assistent
   beide Daten auf, die größte Abweichung zuerst. Geändert wird nichts. Stimmt das Datum der
   Mitgliederliste, trag es von Hand bei der Person ein; das gilt genauso für einen geänderten

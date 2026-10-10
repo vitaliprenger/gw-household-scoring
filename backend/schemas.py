@@ -19,6 +19,13 @@ class PersonCreate(PersonBase):
     #: Haushalt, in dem die Person sofort steht; ohne Angabe hat sie keinen
     household_id: Optional[int] = None
 
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def _name_required(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Vor- und Nachname sind Pflicht")
+        return value.strip()
+
 class PersonUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -555,6 +562,8 @@ class VcfAnalysisResponse(BaseModel):
     skipped_no_name: int = 0
     #: Karten ohne sicheren Treffer; sie bewirken nichts
     unmatched_cards: int = 0
+    #: Karten mit sicherem Treffer, bei dem nichts fehlt
+    unchanged_cards: int = 0
     fills: MemberListFills = MemberListFills()
     #: Größte Abweichung zuerst
     member_since_deviations: List[MemberSinceDeviation] = []
@@ -566,6 +575,7 @@ class VcfCommitRequest(BaseModel):
 class VcfCommitResponse(BaseModel):
     fills: MemberListFills = MemberListFills()
     unmatched_cards: int = 0
+    member_numbers_not_stored: List[MemberNumberConflict] = []
 
 
 # --- Punkteaufschlüsselung (Transparenz des Scorings) ---

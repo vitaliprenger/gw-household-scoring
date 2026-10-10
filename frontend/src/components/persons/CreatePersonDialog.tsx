@@ -44,8 +44,13 @@ function memberNumberKey(raw?: string | null): string {
     return digits ? String(parseInt(digits, 10)) : '';
 }
 
+/**
+ * Wie die Importe: Zwei Namen sind gleich, wenn sie aus denselben Bestandteilen
+ * bestehen, gleich in welcher Reihenfolge und Aufteilung.
+ */
 function nameKey(firstName?: string | null, lastName?: string | null): string {
-    return `${(firstName ?? '').trim().toLowerCase()}|${(lastName ?? '').trim().toLowerCase()}`;
+    const parts = `${firstName ?? ''} ${lastName ?? ''}`.toLowerCase().split(/[\s,]+/).filter(Boolean);
+    return [...new Set(parts)].sort().join(' ');
 }
 
 function describe(person: PersonWithHousehold): string {

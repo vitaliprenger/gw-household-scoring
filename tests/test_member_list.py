@@ -159,11 +159,65 @@ def test_member_number_someone_else_holds_is_not_stored():
                 [(c.person, c.member_number, c.holder) for c in analysis.member_numbers_not_stored],
                 [("Ines Ebert", "301", "Antje Vogel")])
 
-    take_over(db, INES)
+    result = take_over(db, INES)
 
     db.refresh(ines)
     check_equal("Nummer nicht gespeichert", ines.member_number, None)
     check_equal("die übrigen Lücken sind gefüllt", ines.birth_date, datetime(1991, 4, 12))
+    check_equal("auch das Ergebnis nennt Person, Nummer und Träger",
+                [(c.person, c.member_number, c.holder) for c in result.member_numbers_not_stored],
+                [("Ines Ebert", "301", "Antje Vogel")])
+    db.close()
+
+
+def test_two_cards_for_one_person_fill_nothing():
+    print("\n== Mitgliederliste: zwei Karten für eine Person füllen nichts ==")
+    db = make_session()
+    hanna = add_person(db, "Hanna", "Kern")
+    # Zwei Mitglieder gleichen Namens, im Datenbestand steht nur eines davon.
+    first = card("Hanna", "Kern", "X-WEILERID:101", "NOTE:Aufnahmegespräch am 28.01.2023")
+    second = card("Hanna", "Kern", "BDAY:19800101", "GENDER:F")
+
+    analysis = analyze(db, first, second)
+    check_equal("nichts zu füllen", analysis.fills.persons, 0)
+    check_equal("beide Karten gelten als nicht zugeordnet", analysis.unmatched_cards, 2)
+
+    take_over(db, first, second)
+
+    db.refresh(hanna)
+    check_equal("keine Angabe aus einer der Karten",
+                (hanna.member_number, hanna.member_since, hanna.birth_date, hanna.gender),
+                (None, None, None, None))
+    db.close()
+
+
+def test_additional_first_names_belong_to_the_name():
+    print("\n== Mitgliederliste: weitere Vornamen gehören zum Namen ==")
+    db = make_session()
+    anna = add_person(db, "Anna Maria", "Berger")
+    with_second_name = "\n".join([
+        "BEGIN:VCARD", "VERSION:3.0", "FN:Anna Berger", "N:Berger;Anna;Maria;;",
+        "BDAY:19920708", "END:VCARD", ""])
+
+    take_over(db, with_second_name)
+
+    db.refresh(anna)
+    check_equal("Karte trifft die Person", anna.birth_date, datetime(1992, 7, 8))
+    db.close()
+
+
+def test_cards_without_effect_are_counted():
+    print("\n== Mitgliederliste: Karten ohne Änderung werden gezählt ==")
+    db = make_session()
+    add_person(db, "Ines", "Ebert", member_number="301", gender="f",
+               birth_date=datetime(1991, 4, 12), member_since=datetime(2023, 1, 28))
+    add_person(db, "Hanna", "Kern")
+    with_gap = card("Hanna", "Kern", "BDAY:19800101")
+
+    analysis = analyze(db, INES, with_gap)
+    check_equal("eine Karte füllt, eine ändert nichts",
+                (analysis.fills.persons, analysis.unchanged_cards, analysis.unmatched_cards),
+                (1, 1, 0))
     db.close()
 
 
@@ -192,6 +246,9 @@ if __name__ == "__main__":
     test_never_overwrites()
     test_creates_nothing_and_leaves_households_alone()
     test_member_number_someone_else_holds_is_not_stored()
+    test_two_cards_for_one_person_fill_nothing()
+    test_additional_first_names_belong_to_the_name()
+    test_cards_without_effect_are_counted()
     test_second_run_changes_nothing()
 
     print("\n" + "=" * 50)

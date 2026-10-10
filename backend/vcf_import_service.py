@@ -13,7 +13,7 @@ jeder Karte werden gelesen:
 """
 
 import re
-import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Optional
@@ -24,6 +24,7 @@ from . import models, schemas
 from .import_service import (
     ImportSession,
     _cleanup_sessions,
+    _household_name,
     import_sessions,
     normalize_name,
     parse_date,
@@ -302,7 +303,8 @@ def parse_vcard_person(card) -> Optional[dict]:
 
     name_components = props["N"][0].components if props.get("N") else []
     last_name = name_components[0] if len(name_components) > 0 else ""
-    first_name = name_components[1] if len(name_components) > 1 else ""
+    # Weitere Vornamen stehen in einem eigenen Bestandteil und gehören zum Namen.
+    first_name = " ".join(part for part in name_components[1:3] if part)
     display_name = props["FN"][0].value if props.get("FN") else ""
 
     if not first_name and not last_name:
@@ -325,7 +327,6 @@ def parse_vcard_person(card) -> Optional[dict]:
         member_number = normalize_member_number(props["X-WEILERID"][0].value)
 
     return {
-        "temp_id": str(uuid.uuid4()),
         "member_number": member_number,
         "first_name": first_name,
         "last_name": last_name,
@@ -384,38 +385,40 @@ def _plan(cards: list[dict], all_persons: list) -> list[CardPlan]:
     unveränderte Mitgliederliste darf keine Korrektur der Belegungskommission
     zurückdrehen.
     """
-    plans: list[CardPlan] = []
-    # Was eine frühere Karte desselben Durchgangs schon füllt
-    planned: set[tuple[int, str]] = set()
+    hits = [find_certain_person(all_persons, card)[0] for card in cards]
+    # Treffen zwei Karten dieselbe Person, ist offen, welche sie meint: keine gilt.
+    cards_per_person = Counter(person.id for person in hits if person is not None)
+    # Nummern, die eine frühere Karte desselben Durchgangs schon vergibt
     numbers_planned: dict[str, models.Person] = {}
 
-    for card in cards:
-        person, _ = find_certain_person(all_persons, card)
+    plans: list[CardPlan] = []
+    for card, person in zip(cards, hits):
+        if person is not None and cards_per_person[person.id] > 1:
+            person = None
         plan = CardPlan(card, person)
         plans.append(plan)
         if person is None:
             continue
 
-        def fill(field_name: str, value) -> None:
-            if value and not getattr(person, field_name) and (id(person), field_name) not in planned:
-                plan.fills[field_name] = value
-                planned.add((id(person), field_name))
-
-        fill("birth_date", _as_datetime(card.get("birth_date")))
-        fill("gender", card.get("gender"))
-
         member_since = _as_datetime(card.get("member_since"))
-        fill("member_since", member_since)
+        offered = {
+            "birth_date": _as_datetime(card.get("birth_date")),
+            "gender": card.get("gender"),
+            "member_since": member_since,
+        }
+        plan.fills = {
+            field_name: value for field_name, value in offered.items()
+            if value and not getattr(person, field_name)
+        }
         if member_since and person.member_since and person.member_since.date() != member_since.date():
             plan.deviating_member_since = member_since
 
         number = card.get("member_number")
         if number and not person.member_number:
-            holder = other_member_number_holder(all_persons, number, person)
-            if holder is None and numbers_planned.get(number, person) is not person:
-                holder = numbers_planned[number]
+            holder = (other_member_number_holder(all_persons, number, person)
+                      or numbers_planned.get(number))
             if holder is None:
-                fill("member_number", number)
+                plan.fills["member_number"] = number
                 numbers_planned[number] = person
             else:
                 plan.number_holder = holder
@@ -423,19 +426,27 @@ def _plan(cards: list[dict], all_persons: list) -> list[CardPlan]:
 
 
 def _count_fills(plans: list[CardPlan]) -> schemas.MemberListFills:
-    fills = schemas.MemberListFills()
-    persons: set[int] = set()
+    # Jede Person hat höchstens eine Karte, die bei ihr etwas füllt.
+    fills = schemas.MemberListFills(persons=sum(1 for plan in plans if plan.fills))
     for plan in plans:
         for field_name in plan.fills:
             setattr(fills, field_name, getattr(fills, field_name) + 1)
-            persons.add(id(plan.person))
-    fills.persons = len(persons)
     return fills
 
 
-def _household_name(db: Session, person: models.Person) -> Optional[str]:
-    household = db.query(models.Household).get(person.household_id) if person.household_id else None
-    return household.name if household else None
+def _unmatched(plans: list[CardPlan]) -> int:
+    return sum(1 for plan in plans if plan.person is None)
+
+
+def _number_conflicts(plans: list[CardPlan]) -> list[schemas.MemberNumberConflict]:
+    return [
+        schemas.MemberNumberConflict(
+            person=full_name(plan.person),
+            member_number=plan.card["member_number"],
+            holder=full_name(plan.number_holder),
+        )
+        for plan in plans if plan.number_holder is not None
+    ]
 
 
 def analyze_vcf(file_contents: bytes, db: Session) -> schemas.VcfAnalysisResponse:
@@ -446,7 +457,7 @@ def analyze_vcf(file_contents: bytes, db: Session) -> schemas.VcfAnalysisRespons
     deviations = [
         schemas.MemberSinceDeviation(
             person=full_name(plan.person),
-            household=_household_name(db, plan.person),
+            household=_household_name(db, plan.person.household_id),
             stored=plan.person.member_since.date().isoformat(),
             member_list=plan.deviating_member_since.date().isoformat(),
             days=abs((plan.person.member_since.date() - plan.deviating_member_since.date()).days),
@@ -462,17 +473,11 @@ def analyze_vcf(file_contents: bytes, db: Session) -> schemas.VcfAnalysisRespons
         session_id=session.id,
         total_cards=parsed["total_cards"],
         skipped_no_name=parsed["skipped_no_name"],
-        unmatched_cards=sum(1 for plan in plans if plan.person is None),
+        unmatched_cards=_unmatched(plans),
+        unchanged_cards=sum(1 for plan in plans if plan.person is not None and not plan.fills),
         fills=_count_fills(plans),
         member_since_deviations=deviations,
-        member_numbers_not_stored=[
-            schemas.MemberNumberConflict(
-                person=full_name(plan.person),
-                member_number=plan.card["member_number"],
-                holder=full_name(plan.number_holder),
-            )
-            for plan in plans if plan.number_holder is not None
-        ],
+        member_numbers_not_stored=_number_conflicts(plans),
     )
 
 
@@ -498,5 +503,6 @@ def commit_vcf(request: schemas.VcfCommitRequest, db: Session) -> schemas.VcfCom
 
     return schemas.VcfCommitResponse(
         fills=_count_fills(plans),
-        unmatched_cards=sum(1 for plan in plans if plan.person is None),
+        unmatched_cards=_unmatched(plans),
+        member_numbers_not_stored=_number_conflicts(plans),
     )

@@ -80,7 +80,7 @@ def test_chain_household_then_individual_then_member_list():
     print("\n== Importkette: Haushaltsbogen → Individualbogen → Mitgliederliste ==")
     db = make_session()
 
-    # 1. Haushaltsbogen: neue Bewerbende, die Kommission wählt „Neu anlegen“.
+    # 1. Haushaltsbogen: neue Bewerbende, die Belegungskommission wählt „Neu anlegen“.
     households = import_service.analyze_household_bogen(household_xlsx({
         "Zeitstempel": "2026-09-03T08:30:00+02:00",
         "Person 1 (Name)": "Yilmaz, Deniz", "Person 1 (Mitgliedsnummer)": "501",
