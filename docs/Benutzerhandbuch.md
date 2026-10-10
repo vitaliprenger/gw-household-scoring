@@ -44,6 +44,11 @@ erreichbar.
   am Rand, um zu den übrigen Tabs zu kommen.
 - **„Punkte neu berechnen“** und **„Abmelden“** erscheinen in der Kopfzeile als Symbole: der
   Rechner berechnet die Punkte neu, das Symbol ganz rechts meldet dich ab.
+- Tabellen zeigen die wichtigsten Spalten vorn. Die übrigen erreichst du, indem du in der Tabelle
+  zur Seite wischst.
+- Die Rangliste zeigt vorn ohne Filter die Grundpunktzahl („Grund“), mit Filter die
+  Gesamtpunktzahl („Gesamt“).
+- Warnzeichen, Uhr und den Chip „nur auf Wunsch“ tippst du an, um den Hinweis dazu zu lesen.
 
 ---
 
@@ -99,7 +104,7 @@ Was die Symbole in der Rangliste bedeuten:
 | Symbol | Bedeutung |
 |--------|-----------|
 | Chip **„nur auf Wunsch“** | Der Haushalt wünscht sich diese Kategorie ausdrücklich, erfüllt laut Daten aber nicht alle Voraussetzungen (z. B. zu wenige Mitglieder). Schau genauer hin. |
-| **Warnzeichen** | Die Bewerbung ist als Sonderfall markiert; die Begründung siehst du, wenn du mit der Maus darüber fährst. |
+| **Warnzeichen** | Die Bewerbung ist als Sonderfall markiert; die Begründung siehst du, wenn du darauf zeigst oder es antippst. |
 | **Uhr** | Die Punktzahl ist veraltet – einmal neu berechnen. |
 | **Info-Symbol** | öffnet die Aufschlüsselung der Punkte dieses Haushalts. |
 

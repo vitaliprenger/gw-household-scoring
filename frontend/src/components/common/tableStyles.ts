@@ -23,6 +23,15 @@ export const zebraGridSx = {
   },
 } satisfies SxProps<Theme>;
 
+/**
+ * Zebrastreifen für eine DataGrid, deren Zeilen auf dem Handy mit umbrechendem
+ * Inhalt wachsen: Die Zellen behalten die kompakte Mindesthöhe und etwas Luft.
+ */
+export const mobileWrappingGridSx = {
+  ...zebraGridSx,
+  '& .MuiDataGrid-cell': { minHeight: 36, py: 0.5 },
+} satisfies SxProps<Theme>;
+
 /** Klasse für Zeilen einer `<Table>`, die von den Streifen ausgenommen bleiben (z. B. Summenzeilen). */
 export const NO_ZEBRA_ROW_CLASS = 'no-zebra-row';
 
