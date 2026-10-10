@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Tests für die Reihenfolge der Importe.
+"""Tests für die Importkette im Regelbetrieb (ADR 0011).
 
-1. vCard  – legt Personen an, Haushalte nur bei Wohnungszuordnung
-2. Individualbogen – ergänzt vorhandene Personen, legt keine an
-3. Haushaltsbogen  – ergänzt vorhandene Haushalte, legt keine an
+1. Haushaltsbogen  – legt auf Entscheidung Haushalt, Personen und
+                     Wartepool-Bewerbung an
+2. Individualbogen – findet diese Personen wieder und ergänzt ihre Angaben
+3. Mitgliederliste – Nebenfunktion: füllt, was dann noch fehlt
 
 Aufruf aus dem Projekt-Root:  python tests/test_import_order.py
 
@@ -12,19 +13,20 @@ Nutzt eine eigene In-Memory-SQLite-Datenbank; die Anwendungsdatenbank
 """
 import os
 import sys
-import uuid
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend import import_service, models, person_matching, schemas, services
-from backend import vcf_import_service as V
-from backend.import_service import ImportSession, import_sessions
+from backend import import_service, models, person_matching, schemas
+from backend import vcf_import_service as member_list
 
-from test_vcf_import import SAMPLE  # noqa: E402  (gleiche vCard-Beispieldatei)
+from test_household_bogen import household_xlsx  # noqa: E402
+from test_matching import individual_xlsx  # noqa: E402
+from test_member_list import card  # noqa: E402
 
 failures: list[str] = []
 
@@ -44,332 +46,148 @@ def check_equal(label: str, actual, expected):
 def make_session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     models.Base.metadata.create_all(bind=engine)
-    return sessionmaker(bind=engine)()
-
-
-def wizard_decisions(analysis: schemas.VcfAnalysisResponse) -> list[schemas.VcfDecision]:
-    """Die Vorbelegung des Import-Assistenten nachbilden."""
-    decisions = []
-    for hh in analysis.households:
-        if hh.already_imported:
-            action = "skip"
-        elif hh.match_result.matched_household_id:
-            action = "update"
-        else:
-            action = "create"
-        decisions.append(schemas.VcfDecision(
-            temp_id=hh.temp_id,
-            action=action,
-            target_household_id=hh.match_result.matched_household_id,
-            excluded_person_temp_ids=[],
-        ))
-    return decisions
-
-
-def import_sample(db) -> schemas.VcfCommitResponse:
-    analysis = V.analyze_vcf(SAMPLE.encode("utf-8"), db)
-    return V.commit_vcf(
-        schemas.VcfCommitRequest(
-            session_id=analysis.session_id,
-            decisions=wizard_decisions(analysis),
-        ),
-        db,
-    )
+    # Wie die Anwendung (backend/database.py): ohne Autoflush.
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)()
 
 
 def person(db, first_name: str):
     return db.query(models.Person).filter(models.Person.first_name == first_name).first()
 
 
-# ---------------------------------------------------------------------------
-# 1. vCard-Import
-# ---------------------------------------------------------------------------
-
-def test_vcf_creates_every_person():
-    print("\n== vCard: alle Personen anlegen ==")
-    db = make_session()
-    services.seed_apartments(db)
-    result = import_sample(db)
-
-    people = db.query(models.Person).all()
-    # Jannis, Svenja + 2 Kinder (W.202); Nina; Olaf + Karl + Emil
-    check_equal("acht Personen angelegt", len(people), 8)
-    check_equal("Zähler persons_created", result.persons_created, 8)
-
-    check_equal("genau ein Haushalt", db.query(models.Household).count(), 1)
-    check_equal("Haushalte angelegt (Zähler)", result.households_created, 1)
-
-    hh = db.query(models.Household).first()
-    check_equal("Haushalt trägt die Wohnungsnummer", hh.apartment_unit, "W.202")
-    check_equal("vier Personen im Haushalt", len(hh.people), 4)
-    check_equal(
-        "Wohnung W.202 zugeordnet",
-        db.query(models.Apartment).filter(
-            models.Apartment.unit_number == "W.202").first().household_id,
-        hh.id,
-    )
-    check("Haushalt ist Bewohner", hh.is_resident)
-
-    ohne_haushalt = [p for p in people if p.household_id is None]
-    check_equal(
-        "Personen ohne Wohnungszuordnung bleiben ohne Haushalt",
-        sorted(p.first_name for p in ohne_haushalt),
-        ["Emil", "Karl", "Nina", "Olaf"],
-    )
-    check_equal("Zähler persons_without_household", result.persons_without_household, 4)
-
-
-def test_vcf_creates_children_from_notes():
-    print("\n== vCard: Kinder aus den Kontaktnotizen ==")
-    db = make_session()
-    import_sample(db)
-
-    jakob = person(db, "Jakob Finn")
-    check("Kind aus der Notiz angelegt", jakob is not None)
-    if jakob:
-        check_equal("Geburtsdatum des Kindes", jakob.birth_date, datetime(2021, 3, 14))
-        check("Kind gehört zum Haushalt", jakob.household_id is not None)
-        check_equal("Kind ohne Mitgliedsnummer", jakob.member_number, None)
-
-    # Kinder ohne Wohnungszuordnung entstehen ebenfalls, nur ohne Haushalt
-    karl = person(db, "Karl")
-    check("Kind ohne Wohnung angelegt", karl is not None)
-    if karl:
-        check_equal("Kind ohne Wohnung hat keinen Haushalt", karl.household_id, None)
-
-
-def test_vcf_overwrites_but_keeps_missing():
-    print("\n== vCard: überschreibt, löscht aber nichts ==")
-    db = make_session()
-    db.add(models.Person(
-        first_name="Jannis", last_name="Dreyer",
-        member_number="907",
-        gender="f",                       # falsch -> wird überschrieben
-        birth_date=datetime(1970, 1, 1),  # falsch -> wird überschrieben
-        occupation_type="5",              # nicht in der vCard -> bleibt
-        education_level="7",              # nicht in der vCard -> bleibt
-    ))
-    db.commit()
-
-    result = import_sample(db)
-
-    jannis = person(db, "Jannis")
-    check_equal("keine Dublette angelegt", db.query(models.Person).filter(
-        models.Person.first_name == "Jannis").count(), 1)
-    check_equal("Geschlecht überschrieben", jannis.gender, "m")
-    check_equal("Geburtsdatum überschrieben", jannis.birth_date, datetime(1987, 9, 11))
-    check_equal("Mitglied seit ergänzt", jannis.member_since, datetime(2023, 3, 11))
-    check_equal("Haupttätigkeit bleibt erhalten", jannis.occupation_type, "5")
-    check_equal("Bildungsabschluss bleibt erhalten", jannis.education_level, "7")
-    check("vorhandene Person dem Haushalt zugeordnet", jannis.household_id is not None)
-    check_equal("Zähler persons_assigned", result.persons_assigned, 1)
-    check_equal("nur sieben Personen neu", result.persons_created, 7)
-
-
-def test_vcf_is_idempotent():
-    print("\n== vCard: zweiter Lauf legt nichts doppelt an ==")
-    db = make_session()
-    import_sample(db)
-    before = db.query(models.Person).count()
-    households_before = db.query(models.Household).count()
-
-    import_sample(db)
-
-    check_equal("Personenzahl unverändert", db.query(models.Person).count(), before)
-    check_equal("Haushaltszahl unverändert",
-                db.query(models.Household).count(), households_before)
-
-
-def test_vcf_leaves_declared_member_count():
-    print("\n== vCard: setzt die angegebene Haushaltsgröße nicht ==")
-    db = make_session()
-    import_sample(db)
-    hh = db.query(models.Household).first()
-    check_equal("neuer Haushalt ohne angegebene Haushaltsgröße",
-                hh.household_member_count, None)
-
-    # Selbstauskunft weicht von den vier Personen der vCard ab
-    hh.household_member_count = 2
-    hh.vcf_import_timestamp = None  # sonst gilt die Karte als bereits importiert
-    db.commit()
-
-    analysis = V.analyze_vcf(SAMPLE.encode("utf-8"), db)
-    preview = next(p for p in analysis.households
-                   if p.match_result.matched_household_id == hh.id)
-    changes = preview.existing_data_changes
-    fields = [c.field for c in changes.fields_to_overwrite] if changes else []
-    check("keine Änderungsanzeige zur Haushaltsgröße",
-          not any(f in ("household_member_count", "Haushaltsgroesse") for f in fields),
-          str(fields))
-
-    V.commit_vcf(schemas.VcfCommitRequest(
+def take_over_certain_individuals(db, analysis) -> schemas.IndividualCommitResponse:
+    """Die Vorbelegung des Assistenten: sichere Treffer übernehmen, alles andere überspringen."""
+    return import_service.commit_individual_bogen(schemas.IndividualCommitRequest(
         session_id=analysis.session_id,
-        decisions=[schemas.VcfDecision(
-            temp_id=preview.temp_id, action="update",
-            target_household_id=hh.id, excluded_person_temp_ids=[],
-        )],
+        decisions=[
+            schemas.IndividualDecision(
+                temp_id=preview.temp_id,
+                action="update" if preview.match_result.is_certain else "skip",
+                target_person_id=(
+                    preview.match_result.matched_household_id
+                    if preview.match_result.is_certain else None
+                ),
+            )
+            for preview in analysis.individuals
+        ],
     ), db)
-    db.refresh(hh)
-    check_equal("angegebene Haushaltsgröße bleibt erhalten", hh.household_member_count, 2)
 
 
 # ---------------------------------------------------------------------------
-# 2. Individualbogen
+# Die Kette
 # ---------------------------------------------------------------------------
 
-def individual_row(**overrides) -> dict:
-    row = {
-        "temp_id": str(uuid.uuid4()),
-        "name": "Nina Beispiel",
-        "first_name": "Nina",
-        "last_name": "Beispiel",
-        "member_number": None,
-        "birth_date": "1991-08-24",
-        "timestamp_str": "2026-02-01 10:00",
-        "timestamp": datetime(2026, 2, 1, 10, 0),
-        "gender": "f",
-        "occupation": "2",
-        "education": "6",
-        "life_situation": "nein",
-        "social_diversity": None,
-    }
-    row.update(overrides)
-    return row
-
-
-def test_individual_matches_person_without_household():
-    print("\n== Individualbogen: findet Personen ohne Haushalt ==")
+def test_chain_household_then_individual_then_member_list():
+    print("\n== Importkette: Haushaltsbogen → Individualbogen → Mitgliederliste ==")
     db = make_session()
-    import_sample(db)
 
-    nina = person(db, "Nina")
-    check_equal("Nina hat keinen Haushalt", nina.household_id, None)
+    # 1. Haushaltsbogen: neue Bewerbende, die Kommission wählt „Neu anlegen“.
+    households = import_service.analyze_household_bogen(household_xlsx({
+        "Zeitstempel": "2026-09-03T08:30:00+02:00",
+        "Person 1 (Name)": "Yilmaz, Deniz", "Person 1 (Mitgliedsnummer)": "501",
+        "Person 1 (Geburtsdatum)": "1990-05-06",
+        "Person 2 (Name)": "Anna Maria Berger",
+        "Haushaltsmitglieder": "2", "Wohnungsgröße": "3 Zimmer",
+    }), db)
+    preview = households.households[0]
+    check("Haushaltsbogen: ohne Treffer nichts vorausgewählt",
+          not preview.match_result.is_certain)
+    created = import_service.commit_household_bogen(schemas.HHCommitRequest(
+        session_id=households.session_id,
+        decisions=[schemas.HouseholdDecision(temp_id=preview.temp_id, action="create")],
+    ), db)
+    check_equal("Haushaltsbogen: Haushalt, Personen und Bewerbung angelegt",
+                (created.households_created, created.persons_created,
+                 created.applications_created), (1, 2, 1))
 
-    match = import_service.match_individual_to_person(individual_row(), db)
-    check_equal("Person ohne Haushalt wird gefunden", match.matched_household_id, nina.id)
+    # 2. Individualbogen: schreibt den Namen anders als der Haushaltsbogen.
+    individuals = import_service.analyze_individual_bogen(individual_xlsx(
+        {"Nachname, Vorname": "Yilmaz, Deniz", "Mitgliedsnummer": "501",
+         "Geschlecht": "männlich", "Mitglied seit": "2025-10-01"},
+        {"Zeitstempel": "2026-09-04T09:00:00+02:00",
+         "Nachname, Vorname": "Berger, Anna Maria", "Geschlecht": "weiblich"},
+    ), db)
+    check("Individualbogen: findet beide Personen des Haushaltsbogens sicher",
+          all(p.match_result.is_certain for p in individuals.individuals),
+          str([p.match_result.type for p in individuals.individuals]))
+    updated = take_over_certain_individuals(db, individuals)
+    check_equal("Individualbogen: beide ergänzt", updated.updated, 2)
+    check_equal("Individualbogen: keine Person angelegt", db.query(models.Person).count(), 2)
 
+    deniz, anna = person(db, "Deniz"), person(db, "Anna")
+    check_equal("Individualbogen: Geschlecht ergänzt", (deniz.gender, anna.gender), ("m", "f"))
+    check_equal("Individualbogen: „Mitglied seit“ aus der Selbstauskunft",
+                deniz.member_since, datetime(2025, 10, 1))
+
+    # 3. Mitgliederliste: füllt nur, was jetzt noch fehlt.
+    cards = "".join([
+        card("Deniz", "Yilmaz", "X-WEILERID:501", "NOTE:Aufnahmegespräch am 15.09.2025"),
+        card("Anna Maria", "Berger", "X-WEILERID:502", "BDAY:19920708",
+             "NOTE:Aufnahmegespräch am 25.03.2023"),
+    ]).encode("utf-8")
+    summary = member_list.analyze_vcf(cards, db)
+    check_equal("Mitgliederliste: genaueres Eintrittsdatum nur gelistet",
+                [(d.person, d.stored, d.member_list) for d in summary.member_since_deviations],
+                [("Deniz Yilmaz", "2025-10-01", "2025-09-15")])
+    member_list.commit_vcf(schemas.VcfCommitRequest(session_id=summary.session_id), db)
+
+    db.refresh(deniz)
+    db.refresh(anna)
+    check_equal("Mitgliederliste: Selbstauskunft nicht überschrieben",
+                deniz.member_since, datetime(2025, 10, 1))
+    check_equal("Mitgliederliste: Lücken gefüllt",
+                (anna.member_number, anna.birth_date, anna.member_since),
+                ("502", datetime(1992, 7, 8), datetime(2023, 3, 25)))
+    check_equal("am Ende ein Haushalt mit zwei Personen",
+                (db.query(models.Household).count(), db.query(models.Person).count()), (1, 2))
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# Die Fragebögen legen ohne Entscheidung nichts an
+# ---------------------------------------------------------------------------
 
 def test_individual_never_creates():
     print("\n== Individualbogen: legt keine Personen an ==")
     db = make_session()
-    import_sample(db)
-    before = db.query(models.Person).count()
+    db.add(models.Person(first_name="Ines", last_name="Ebert"))
+    db.commit()
 
-    matched = individual_row()
-    unmatched = individual_row(name="Frieda Fremd", first_name="Frieda",
-                               last_name="Fremd", birth_date="1975-03-03")
-    session = ImportSession("individual", [matched, unmatched], {})
-    import_sessions[session.id] = session
-
-    nina = person(db, "Nina")
+    analysis = import_service.analyze_individual_bogen(individual_xlsx(
+        {"Nachname, Vorname": "Ebert, Ines"},
+        {"Zeitstempel": "2026-09-04T09:00:00+02:00", "Nachname, Vorname": "Kramer, Stefan"},
+    ), db)
     result = import_service.commit_individual_bogen(schemas.IndividualCommitRequest(
-        session_id=session.id,
+        session_id=analysis.session_id,
         decisions=[
             schemas.IndividualDecision(
-                temp_id=matched["temp_id"], action="update", target_person_id=nina.id),
-            # Ohne Treffer: der Assistent kann nur noch überspringen
-            schemas.IndividualDecision(temp_id=unmatched["temp_id"], action="update"),
+                temp_id=preview.temp_id, action="update",
+                target_person_id=preview.match_result.matched_household_id)
+            for preview in analysis.individuals
         ],
     ), db)
 
-    check_equal("keine neue Person", db.query(models.Person).count(), before)
+    check_equal("keine neue Person", db.query(models.Person).count(), 1)
     check_equal("eine Person ergänzt", result.updated, 1)
     check_equal("ohne Treffer nicht übernommen", result.skipped_no_match, 1)
-
-    nina = person(db, "Nina")
-    check_equal("Geschlecht ergänzt", nina.gender, "f")
-    check_equal("Haupttätigkeit ergänzt", nina.occupation_type, "2")
-    check_equal("Bildungsabschluss ergänzt", nina.education_level, "6")
+    db.close()
 
 
-# ---------------------------------------------------------------------------
-# 3. Haushaltsbogen
-# ---------------------------------------------------------------------------
-
-def household_row(**overrides) -> dict:
-    row = {
-        "temp_id": str(uuid.uuid4()),
-        "timestamp_str": "2026-02-01 10:00",
-        "timestamp": datetime(2026, 2, 1, 10, 0),
-        "wbs_status": "WBS A",
-        "financial_status": "knapp",
-        "declared_member_count": 4,
-        "wheelchair_accessible": False,
-        "wishes": [{"size_rooms": 4, "funding_type": None, "apartment_category": None}],
-        "unparsed_wishes": [],
-        "pets_count": 1,
-        "pets_info": "Katze",
-        "persons": [
-            {"name": "Jannis Dreyer", "first_name": "Jannis", "last_name": "Dreyer",
-             "member_number": "907", "birth_date": "1987-09-11"},
-        ],
-    }
-    row.update(overrides)
-    return row
-
-
-def test_household_bogen_never_creates():
-    print("\n== Haushaltsbogen: „Aktualisieren“ legt keinen Haushalt an ==")
+def test_household_bogen_update_needs_a_household():
+    print("\n== Haushaltsbogen: „Aktualisieren“ ohne Haushalt legt nichts an ==")
     db = make_session()
-    import_sample(db)
-    before = db.query(models.Household).count()
 
-    matched = household_row()
-    unmatched = household_row(persons=[
-        {"name": "Frieda Fremd", "first_name": "Frieda", "last_name": "Fremd",
-         "member_number": None, "birth_date": None},
-    ])
-    session = ImportSession("household", [matched, unmatched], {})
-    import_sessions[session.id] = session
-
-    hh = db.query(models.Household).first()
+    analysis = import_service.analyze_household_bogen(household_xlsx({
+        "Person 1 (Name)": "Kramer, Stefan", "Wohnungsgröße": "3 Zimmer"}), db)
     result = import_service.commit_household_bogen(schemas.HHCommitRequest(
-        session_id=session.id,
-        decisions=[
-            schemas.HouseholdDecision(
-                temp_id=matched["temp_id"], action="update", target_household_id=hh.id),
-            schemas.HouseholdDecision(temp_id=unmatched["temp_id"], action="update"),
-        ],
-    ), db)
-
-    check_equal("kein neuer Haushalt", db.query(models.Household).count(), before)
-    check_equal("ein Haushalt ergänzt", result.updated, 1)
-    check_equal("ohne Treffer nicht übernommen", result.skipped_no_match, 1)
-
-    hh = db.query(models.Household).first()
-    check_equal("WBS-Status ergänzt", hh.wbs_status, "WBS A")
-    # Der Wohnungswunsch landet in der Wartepool-Bewerbung, nicht am Haushalt.
-    application = import_service.open_wartepool_application(hh, db)
-    check("Wartepool-Bewerbung angelegt", application is not None)
-    check_equal("Wohnungswunsch ergänzt", application.wishes,
-                [{"size_rooms": 4, "funding_type": None, "apartment_category": None}])
-    check_equal("Haustiere ergänzt", hh.pets_count, 1)
-    check_equal("angegebene Haushaltsgröße aus dem Bogen", hh.household_member_count, 4)
-
-
-def test_household_bogen_reuses_existing_persons():
-    print("\n== Haushaltsbogen: keine Personendubletten ==")
-    db = make_session()
-    import_sample(db)
-    hh = db.query(models.Household).first()
-    before = len(hh.people)
-
-    # Andere Schreibweise des Vornamens, gleiche Mitgliedsnummer
-    raw = household_row(persons=[
-        {"name": "J. Dreyer", "first_name": "Jannis Ludwig", "last_name": "Dreyer",
-         "member_number": "907", "birth_date": "1987-09-11"},
-    ])
-    session = ImportSession("household", [raw], {})
-    import_sessions[session.id] = session
-
-    import_service.commit_household_bogen(schemas.HHCommitRequest(
-        session_id=session.id,
+        session_id=analysis.session_id,
         decisions=[schemas.HouseholdDecision(
-            temp_id=raw["temp_id"], action="update", target_household_id=hh.id)],
+            temp_id=analysis.households[0].temp_id, action="update")],
     ), db)
 
-    db.refresh(hh)
-    check_equal("Haushaltsgröße unverändert", len(hh.people), before)
+    check_equal("kein Haushalt", db.query(models.Household).count(), 0)
+    check_equal("keine Bewerbung", db.query(models.Application).count(), 0)
+    check_equal("ohne Treffer nicht übernommen", result.skipped_no_match, 1)
+    db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -400,13 +218,11 @@ def test_member_number_leading_zeros():
 
     # Individualbogen: abweichende Schreibweise des Namens, die Nummer entscheidet
     match = import_service.match_individual_to_person(
-        individual_row(first_name="Dora", last_name="D.", member_number="003",
-                       birth_date=None), db)
+        {"first_name": "Dora", "last_name": "D.", "member_number": "003"}, db)
     check_equal("Individualbogen: 003 findet 3", match.matched_household_id, drei.id)
     check("Individualbogen: 003 ist ein sicherer Treffer", match.is_certain)
     match = import_service.match_individual_to_person(
-        individual_row(first_name="Zeno", last_name="Z.", member_number="20",
-                       birth_date=None), db)
+        {"first_name": "Zeno", "last_name": "Z.", "member_number": "20"}, db)
     check_equal("Individualbogen: 20 findet 020", match.matched_household_id, zwanzig.id)
 
     # Haushaltsbogen: Haushalt und Person über die Nummer
@@ -417,27 +233,22 @@ def test_member_number_leading_zeros():
     check_equal("Haushaltsbogen: Person im Haushalt über 003",
                 person_matching.match_household_persons(hh.people, raw["persons"]), [drei])
 
-    # vCard: Abgleich über den gesamten Bestand
-    index = V.PersonIndex(db)
-    check_equal("vCard: 20 findet 020",
-                index.find({"first_name": "X", "last_name": "Y", "member_number": "20"}, None),
-                zwanzig)
+    # Mitgliederliste: Die Karte mit „20“ trifft die Person mit „020“.
+    summary = member_list.analyze_vcf(
+        card("Zeno", "Z.", "X-WEILERID:20", "BDAY:19800101").encode("utf-8"), db)
+    check_equal("Mitgliederliste: 20 findet 020",
+                (summary.unmatched_cards, summary.fills.birth_date), (0, 1))
+    db.close()
 
 
 # ---------------------------------------------------------------------------
 
 def run_tests():
-    print("--- Tests zur Import-Reihenfolge ---")
+    print("--- Tests zur Importkette ---")
     for test in (
-        test_vcf_creates_every_person,
-        test_vcf_creates_children_from_notes,
-        test_vcf_overwrites_but_keeps_missing,
-        test_vcf_is_idempotent,
-        test_vcf_leaves_declared_member_count,
-        test_individual_matches_person_without_household,
+        test_chain_household_then_individual_then_member_list,
         test_individual_never_creates,
-        test_household_bogen_never_creates,
-        test_household_bogen_reuses_existing_persons,
+        test_household_bogen_update_needs_a_household,
         test_member_number_leading_zeros,
     ):
         test()

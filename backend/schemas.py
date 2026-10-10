@@ -528,61 +528,44 @@ class IndividualCommitResponse(BaseModel):
     skipped_no_match: int = 0
     member_numbers_not_stored: List[MemberNumberConflict] = []
 
-# --- VCF-Import Schemas ---
-class VcfPersonPreview(BaseModel):
-    temp_id: str
-    name: str
-    first_name: str
-    last_name: str
-    birth_date: Optional[str] = None
-    gender: Optional[str] = None
-    member_number: Optional[str] = None
-    member_since: Optional[str] = None
-    apartment_unit: Optional[str] = None
-    role: str
-    source: str
-    mentioned_by: Optional[str] = None
+# --- Mitgliederliste (vCard) ---
+class MemberListFills(BaseModel):
+    """Leere Angaben, die die Mitgliederliste füllt."""
+    #: Personen, bei denen mindestens eine Angabe gefüllt wird
+    persons: int = 0
+    birth_date: int = 0
+    member_since: int = 0
+    member_number: int = 0
+    gender: int = 0
 
-class VcfHouseholdPreview(BaseModel):
-    temp_id: str
-    name: str
-    apartment_unit: Optional[str] = None
-    address: Optional[str] = None
-    is_resident: bool = False
-    timestamp: Optional[str] = None
-    persons: List[VcfPersonPreview] = []
-    match_result: MatchResult
-    already_imported: bool = False
-    warnings: List[str] = []
-    existing_data_changes: Optional[ExistingDataChanges] = None
+class MemberSinceDeviation(BaseModel):
+    """„Mitglied seit“ der Mitgliederliste weicht vom gespeicherten Wert ab.
+
+    Nur zur Anzeige: Die Mitgliederliste überschreibt nichts (ADR 0011).
+    """
+    person: str
+    household: Optional[str] = None
+    stored: str
+    member_list: str
+    days: int
 
 class VcfAnalysisResponse(BaseModel):
     session_id: str
     total_cards: int
     skipped_no_name: int = 0
-    total_persons: int = 0
-    resident_households: int = 0
-    households: List[VcfHouseholdPreview] = []
-
-class VcfDecision(BaseModel):
-    temp_id: str
-    action: str
-    target_household_id: Optional[int] = None
-    excluded_person_temp_ids: List[str] = []
+    #: Karten ohne sicheren Treffer; sie bewirken nichts
+    unmatched_cards: int = 0
+    fills: MemberListFills = MemberListFills()
+    #: Größte Abweichung zuerst
+    member_since_deviations: List[MemberSinceDeviation] = []
+    member_numbers_not_stored: List[MemberNumberConflict] = []
 
 class VcfCommitRequest(BaseModel):
     session_id: str
-    decisions: List[VcfDecision]
 
 class VcfCommitResponse(BaseModel):
-    households_created: int
-    households_updated: int
-    households_skipped: int
-    persons_created: int
-    persons_updated: int
-    persons_assigned: int
-    persons_without_household: int = 0
-    created_household_ids: List[int] = []
+    fills: MemberListFills = MemberListFills()
+    unmatched_cards: int = 0
 
 
 # --- Punkteaufschlüsselung (Transparenz des Scorings) ---

@@ -17,11 +17,11 @@ from .person_matching import (
     OTHER_HOUSEHOLD,
     SAME_NAME,
     find_certain_person,
-    find_person_by_member_number,
-    resolve_household_rows,
+    full_name,
     normalize_member_number,
     other_member_number_holder,
     persons_with_member_number,
+    resolve_household_rows,
     same_member_number,
 )
 
@@ -344,49 +344,6 @@ def _deduplicate_hh(rows: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Matching
 # ---------------------------------------------------------------------------
-
-def person_name_key(first_name: Optional[str], last_name: Optional[str]) -> str:
-    return (first_name or "").strip().lower() + "|" + (last_name or "").strip().lower()
-
-
-def match_person_in(people, data: dict, loose: bool = True):
-    """Sucht zu einem Import-Datensatz die passende Person in ``people``.
-
-    Reihenfolge: Mitgliedsnummer, exakter Name, Nachname + Geburtsdatum.
-    ``loose`` erlaubt zusaetzlich den Vergleich ueber Rufname + Nachname
-    ("Jakob Finn Dreyer" vs. "Jakob Dreyer"); das ist innerhalb eines
-    Haushalts sinnvoll, ueber den gesamten Datenbestand hinweg dagegen zu
-    unscharf.
-    """
-    found = find_person_by_member_number(people, data.get("member_number"))
-    if found is not None:
-        return found
-
-    key = person_name_key(data.get("first_name"), data.get("last_name"))
-    if key != "|":
-        for person in people:
-            if person_name_key(person.first_name, person.last_name) == key:
-                return person
-
-    last = (data.get("last_name") or "").strip().lower()
-    if not last:
-        return None
-    birth = parse_date(data.get("birth_date"))
-    first_token = (data.get("first_name") or "").strip().split(" ")[0].lower()
-    for person in people:
-        if (person.last_name or "").strip().lower() != last:
-            continue
-        person_birth = (
-            person.birth_date.date() if isinstance(person.birth_date, datetime)
-            else person.birth_date
-        )
-        if birth and person_birth == birth:
-            return person
-        person_first = (person.first_name or "").strip().split(" ")[0].lower()
-        if loose and first_token and person_first == first_token:
-            return person
-    return None
-
 
 #: Die Personen des Bogens stehen sicher in verschiedenen Haushalten: kein
 #: sicherer Haushaltstreffer, nur ein Vorschlag.
@@ -858,7 +815,7 @@ def _person_previews(
 def _similar_previews(similar: list, db: Session) -> list[schemas.SimilarPerson]:
     return [
         schemas.SimilarPerson(
-            name=_full_name(person),
+            name=full_name(person),
             household=_household_name(db, person.household_id),
             reason=reason,
         )
@@ -900,7 +857,7 @@ def _update_household_from_raw(
         if resolution.status == OTHER_HOUSEHOLD:
             # Nie automatisch verschieben (ADR 0011): Die Person bleibt, wo sie ist.
             response.persons_not_taken_over.append(schemas.PersonNotTakenOver(
-                person=_full_name(person),
+                person=full_name(person),
                 household=_household_name(db, person.household_id) or "",
             ))
             continue
@@ -923,7 +880,7 @@ def _update_household_from_raw(
             response.persons_created += 1
             if resolution.similar:
                 response.similar_persons.append(schemas.SimilarPersonNotice(
-                    person=_full_name(person),
+                    person=full_name(person),
                     similar=_similar_previews(resolution.similar, db),
                 ))
         else:
@@ -938,7 +895,7 @@ def _update_household_from_raw(
 
         if resolution.number_holder is not None:
             response.member_numbers_not_stored.append(schemas.MemberNumberConflict(
-                person=_full_name(person),
+                person=full_name(person),
                 member_number=p_data["member_number"],
                 holder=resolution.number_holder,
             ))
@@ -1093,7 +1050,7 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
     ln = (ind_data.get("last_name") or "").strip().lower()
     dob_str = ind_data.get("birth_date")
 
-    # Der vCard-Import legt Personen auch ohne Haushalt an; sie muessen hier
+    # Personen gibt es auch ohne Haushalt (von Hand angelegt); sie muessen hier
     # ebenfalls als Kandidaten auftauchen.
     all_persons = db.query(models.Person).all()
 
@@ -1270,9 +1227,9 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
         updated_count += 1
         if holder is not None:
             not_stored.append(schemas.MemberNumberConflict(
-                person=_full_name(person),
+                person=full_name(person),
                 member_number=raw["member_number"],
-                holder=_full_name(holder),
+                holder=full_name(holder),
             ))
 
     db.commit()
@@ -1285,10 +1242,6 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
         skipped_no_match=skipped_no_match,
         member_numbers_not_stored=not_stored,
     )
-
-
-def _full_name(person: models.Person) -> str:
-    return f"{person.first_name or ''} {person.last_name or ''}".strip()
 
 
 def _update_person_from_individual(person: models.Person, raw: dict, all_persons: list):

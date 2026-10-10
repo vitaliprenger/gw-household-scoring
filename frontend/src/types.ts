@@ -464,69 +464,46 @@ export interface IndividualCommitResponse {
     member_numbers_not_stored: MemberNumberConflict[];
 }
 
-// --- VCF-Import Types ---
+// --- Mitgliederliste (vCard) ---
 
-export interface VcfPersonPreview {
-    temp_id: string;
-    name: string;
-    first_name: string;
-    last_name: string;
-    birth_date?: string;
-    gender?: string;
-    member_number?: string;
-    member_since?: string;
-    apartment_unit?: string;
-    role: 'member' | 'partner' | 'child';
-    source: 'vcard' | 'note';
-    mentioned_by?: string;
+/** Leere Angaben, die die Mitgliederliste füllt. */
+export interface MemberListFills {
+    /** Personen, bei denen mindestens eine Angabe gefüllt wird. */
+    persons: number;
+    birth_date: number;
+    member_since: number;
+    member_number: number;
+    gender: number;
 }
 
-export interface VcfHouseholdPreview {
-    temp_id: string;
-    name: string;
-    apartment_unit?: string;
-    address?: string;
-    is_resident: boolean;
-    timestamp?: string;
-    persons: VcfPersonPreview[];
-    match_result: MatchResult;
-    already_imported: boolean;
-    warnings: string[];
-    existing_data_changes?: ExistingDataChanges;
+/** „Mitglied seit“ der Mitgliederliste weicht vom gespeicherten Wert ab (nur Anzeige). */
+export interface MemberSinceDeviation {
+    person: string;
+    household?: string;
+    stored: string;
+    member_list: string;
+    days: number;
 }
 
 export interface VcfAnalysisResponse {
     session_id: string;
     total_cards: number;
     skipped_no_name: number;
-    total_persons: number;
-    resident_households: number;
-    households: VcfHouseholdPreview[];
-}
-
-export interface VcfDecision {
-    temp_id: string;
-    /** 'undecided': unsicherer Treffer, über den noch niemand entschieden hat. */
-    action: 'create' | 'update' | 'skip' | 'undecided';
-    target_household_id?: number;
-    excluded_person_temp_ids: string[];
+    /** Karten ohne sicheren Treffer; sie bewirken nichts. */
+    unmatched_cards: number;
+    fills: MemberListFills;
+    /** Größte Abweichung zuerst. */
+    member_since_deviations: MemberSinceDeviation[];
+    member_numbers_not_stored: MemberNumberConflict[];
 }
 
 export interface VcfCommitRequest {
     session_id: string;
-    decisions: VcfDecision[];
 }
 
 export interface VcfCommitResponse {
-    households_created: number;
-    households_updated: number;
-    households_skipped: number;
-    persons_created: number;
-    persons_updated: number;
-    persons_assigned: number;
-    /** Neu angelegte Personen ohne Haushalt (keine Wohnungszuordnung). */
-    persons_without_household: number;
-    created_household_ids: number[];
+    fills: MemberListFills;
+    unmatched_cards: number;
 }
 
 // --- Ist-Statistik ---

@@ -24,7 +24,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend import models, schemas, import_service, vcf_import_service
+from backend import models, schemas, import_service
 
 failures: list[str] = []
 
@@ -370,33 +370,6 @@ def test_undecided_action_does_nothing():
     ), db)
     check_equal("Individualbogen: nichts aktualisiert", ind_result.updated, 0)
     check("Individualbogen: Geschlecht unverändert", target.gender is None)
-    db.close()
-
-    # --- vCard ---
-    db = make_session()
-    hh = seed(db)
-    before_households = db.query(models.Household).count()
-    before_persons = db.query(models.Person).count()
-    raw = {
-        "temp_id": "t1", "name": "Neu Jemand", "apartment_unit": "W.001",
-        "address": None, "timestamp": None,
-        "persons": [{"temp_id": "p1", "first_name": "Neu", "last_name": "Jemand",
-                     "name": "Neu Jemand", "birth_date": None, "gender": None,
-                     "member_number": None, "member_since": None,
-                     "apartment_unit": "W.001", "role": "member", "source": "contact",
-                     "mentioned_by": None}],
-    }
-    session = import_service.ImportSession("vcf", [raw], {})
-    import_service.import_sessions[session.id] = session
-    vcf_result = vcf_import_service.commit_vcf(schemas.VcfCommitRequest(
-        session_id=session.id,
-        decisions=[schemas.VcfDecision(temp_id="t1", action="undecided")],
-    ), db)
-    check_equal("vCard: kein Haushalt angelegt", vcf_result.households_created, 0)
-    check_equal("vCard: als übersprungen gezählt", vcf_result.households_skipped, 1)
-    check_equal("vCard: Bestand unverändert",
-                (db.query(models.Household).count(), db.query(models.Person).count()),
-                (before_households, before_persons))
     db.close()
 
 

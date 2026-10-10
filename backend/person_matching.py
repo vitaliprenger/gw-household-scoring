@@ -60,11 +60,6 @@ def other_member_number_holder(people, member_number, person):
     return next(others, None)
 
 
-def find_person_by_member_number(people, member_number):
-    """Erste Person aus ``people`` mit derselben Mitgliedsnummer, sonst None."""
-    return next(iter(persons_with_member_number(people, member_number)), None)
-
-
 NAME_PARTICLES = {"von", "van", "de", "der", "dem", "den", "zu", "zum", "la", "le", "di", "da"}
 
 
