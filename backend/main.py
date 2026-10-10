@@ -7,7 +7,7 @@ from typing import List, Optional
 from datetime import datetime
 from . import (
     models, schemas, database, services, scoring, auth, wishes, migrate,
-    import_service, vcf_import_service, application_import_service, score_export,
+    import_service, vcf_import_service, score_export,
 )
 
 # Schema-/Datenmigrationen laufen über Alembic (``backend/migrate.py``).
@@ -814,35 +814,6 @@ def commit_individual_bogen(
 ):
     try:
         return import_service.commit_individual_bogen(request, db)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/import/applications/analyze", response_model=schemas.ApplicationAnalysisResponse)
-async def analyze_application_list(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    _=Depends(auth.require_auth),
-):
-    if not file.filename.endswith('.xlsx'):
-        raise HTTPException(status_code=400, detail="Bitte eine .xlsx-Datei hochladen.")
-    contents = await file.read()
-    try:
-        return application_import_service.analyze_application_list(contents, db)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/import/applications/commit", response_model=schemas.ApplicationCommitResponse)
-def commit_application_list(
-    request: schemas.ApplicationCommitRequest,
-    db: Session = Depends(get_db),
-    _=Depends(auth.require_auth),
-):
-    try:
-        return application_import_service.commit_application_list(request, db)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

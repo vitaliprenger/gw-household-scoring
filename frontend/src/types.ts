@@ -270,70 +270,6 @@ export interface JokerWaitEntry {
     special_case_note?: string;
 }
 
-// --- Bewerbungslisten-Import ---
-
-export interface ApplicationPersonCandidate {
-    person_id: number;
-    name: string;
-    member_number?: string;
-    score: number;
-}
-
-export interface ApplicationImportPreview {
-    temp_id: string;
-    row: number;
-    raw_household: string;
-    kind: ApplicationKind;
-    raw_kind?: string;
-    requested_at?: string;
-    wishes: ApplicationWish[];
-    /** Teile der Wunsch-Zelle, die der Parser nicht auflösen konnte. */
-    unparsed_wishes: string[];
-    status: ApplicationStatus;
-    raw_status?: string;
-    note?: string;
-    raw_current_type?: string;
-    raw_current_unit?: string;
-    raw_new_unit?: string;
-    match_result: MatchResult;
-    apartment_mismatch: boolean;
-    unknown_apartment: boolean;
-    existing_application_id?: number;
-    person_candidates: ApplicationPersonCandidate[];
-    suggested_household_name: string;
-}
-
-export interface ApplicationAnalysisResponse {
-    session_id: string;
-    total_rows: number;
-    skipped_empty: number;
-    households: ApplicationImportPreview[];
-}
-
-export interface ApplicationDecision {
-    temp_id: string;
-    /** "update" | "create" | "create_household" | "skip" */
-    action: string;
-    target_household_id?: number;
-    household_name?: string;
-    person_ids: number[];
-}
-
-export interface ApplicationCommitRequest {
-    session_id: string;
-    decisions: ApplicationDecision[];
-}
-
-export interface ApplicationCommitResponse {
-    applications_created: number;
-    applications_updated: number;
-    households_created: number;
-    persons_assigned: number;
-    skipped: number;
-    skipped_no_match: number;
-    created_household_ids: number[];
-}
-
 // --- Import Types ---
 
 export interface ImportPersonPreview {
@@ -357,7 +293,7 @@ export interface MatchResult {
     matched_household_name?: string;
     confidence: number;
     /**
-     * Eindeutiger Treffer (Mitgliedsnummer, exakter Name oder Wohnungsnummer).
+     * Eindeutiger Treffer (Mitgliedsnummer oder gleicher Name).
      * Nur dann darf ein Assistent die Zuordnung vorauswählen — siehe
      * `components/import/matching.ts`.
      */
@@ -455,8 +391,6 @@ export interface IndividualAnalysisResponse {
     skipped_not_submitted: number;
     skipped_duplicates: number;
     privacy_warnings: PrivacyWarning[];
-    /** Es existieren noch keine Personen - bitte zuerst die vCard importieren. */
-    missing_base_data_warning: boolean;
     individuals: IndividualImportPreview[];
 }
 

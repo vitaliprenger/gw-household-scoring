@@ -36,6 +36,7 @@ from .import_service import (
     normalize_name,
     parse_date,
 )
+from .person_matching import NAME_PARTICLES
 
 IMPORT_SOURCE = "VCF-Mitgliederliste"
 
@@ -344,9 +345,6 @@ def _clean_person_name(raw: str) -> Optional[str]:
     if len(name) < 2 or len(name) > 60:
         return None
     return name
-
-
-NAME_PARTICLES = {"von", "van", "de", "der", "dem", "den", "zu", "zum", "la", "le", "di", "da"}
 
 
 def split_first_last(name: str, default_last_name: str = "") -> tuple[str, str]:

@@ -102,20 +102,12 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-                {analysis.missing_base_data_warning && step === 0 && (
-                    <Alert severity="warning" sx={{ mb: 2 }}>
-                        Es sind noch keine Personen vorhanden. Bitte zuerst die
-                        Mitgliederliste (vCard) importieren — der Individualbogen
-                        ergänzt nur bestehende Personen.
-                    </Alert>
-                )}
-
                 {uncertainCount > 0 && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
-                        <strong>{uncertainCount} Datensatz/Datensätze mit nur ähnlichem Treffer.</strong>{' '}
-                        Nur ein eindeutiger Treffer wird automatisch zugeordnet —
-                        Mitgliedsnummer, exakter Name oder Wohnungsnummer. Ein nur ähnlicher
-                        Name steht auf „Überspringen"; der Vorschlag lässt sich über den
+                        <strong>{uncertainCount} Datensatz/Datensätze mit unsicherem Treffer.</strong>{' '}
+                        Automatisch zugeordnet wird nur bei gleichem Namen oder bei einer
+                        Mitgliedsnummer, zu der Name und Geburtsdatum passen. Alles andere
+                        steht auf „Überspringen"; der Vorschlag lässt sich über den
                         Treffer-Chip prüfen und übernehmen.
                     </Alert>
                 )}
@@ -177,15 +169,18 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                 <TableCell>
                                                     {(() => {
                                                         const overrideName = matchOverrides[ind.temp_id];
+                                                        const matchName = ind.match_result.matched_household_name ?? 'Match';
                                                         return (
                                                             <Chip
                                                                 label={overrideName
                                                                     ? `Zugeordnet: ${overrideName}`
                                                                     : mt === 'none'
                                                                         ? 'Kein Match'
-                                                                        : `${ind.match_result.matched_household_name ?? 'Match'}`}
+                                                                        : mt === 'member_nr_unconfirmed'
+                                                                            ? `${matchName} (nur Mitgliedsnummer)`
+                                                                            : matchName}
                                                                 size="small"
-                                                                color={overrideName ? 'info' : mt === 'exact_member_nr' || mt === 'exact_name_dob' ? 'success' : mt === 'fuzzy' ? 'warning' : 'default'}
+                                                                color={overrideName ? 'info' : isCertainMatch(ind.match_result) ? 'success' : isUncertainMatch(ind.match_result) ? 'warning' : 'default'}
                                                                 onClick={() => setMatchingFor(ind)}
                                                             />
                                                         );

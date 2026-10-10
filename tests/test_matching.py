@@ -2,8 +2,8 @@
 """Tests für die Zuordnungssicherheit beim Import.
 
 Regel: **Nur ein eindeutiger Treffer wird automatisch zugeordnet** — eindeutige
-Mitgliedsnummer, exakt übereinstimmender Name (mit oder ohne bestätigendes
-Geburtsdatum) oder die Wohnungsnummer. Ein nur *ähnlicher* Name bleibt ein
+Mitgliedsnummer oder exakt übereinstimmender Name (mit oder ohne bestätigendes
+Geburtsdatum). Ein nur *ähnlicher* Name bleibt ein
 Vorschlag, über den ein Mensch entscheidet. Maßgeblich ist
 ``schemas.MatchResult.is_certain``, abgeleitet aus
 ``schemas.CERTAIN_MATCH_TYPES``; die Commit-Endpunkte behandeln außerdem jede
@@ -12,6 +12,7 @@ versehentlich nichts bewirken kann.
 
 Aufruf aus dem Projekt-Root:  python tests/test_matching.py
 """
+import io
 import os
 import sys
 from datetime import datetime
@@ -19,11 +20,11 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend import models, schemas, import_service, vcf_import_service
-from backend import application_import_service as ais
 
 failures: list[str] = []
 
@@ -84,12 +85,6 @@ def test_is_certain_derivation():
         result = schemas.MatchResult(type="fuzzy", matched_household_id=1,
                                      confidence=confidence)
         check(f"aehnlicher Name mit {confidence} ist NICHT eindeutig", not result.is_certain)
-    check("Aehnlichkeit des Haushaltsnamens ist NICHT eindeutig",
-          not schemas.MatchResult(type="household_name", matched_household_id=1,
-                                  confidence=0.95).is_certain)
-    check("heutiger Bewohner der Wohnung ist NICHT eindeutig",
-          not schemas.MatchResult(type="apartment_occupant", matched_household_id=1,
-                                  confidence=1.0).is_certain)
 
     check("ohne Treffer nicht eindeutig",
           not schemas.MatchResult(type="exact_member_nr", confidence=1.0).is_certain)
@@ -148,87 +143,169 @@ def test_individual_matching_confidence():
     db.close()
 
 
-def test_application_matching_confidence():
-    print("\n== Bewerbungslisten-Matching ==")
+def individual_xlsx(*rows: dict) -> bytes:
+    """Export des Individualbogens mit den Spalten des Fragebogens."""
+    frame = pd.DataFrame([{
+        "Zeitstempel": "2026-09-01T10:00:00+02:00",
+        "Datenschutz": "Mir ist klar, dass meine Angaben gespeichert werden.",
+        "Mitgliedsnummer": "",
+        "Nachname, Vorname": "",
+        "Geburtsdatum": "",
+        "Geschlecht": "weiblich",
+        "Absenden?": "Ja",
+        **row,
+    } for row in rows])
+    buffer = io.BytesIO()
+    frame.to_excel(buffer, index=False)
+    return buffer.getvalue()
+
+
+def analyze_individual(db, **row) -> schemas.MatchResult:
+    """Treffer, den die Analyse des Individualbogens für eine Zeile meldet."""
+    analysis = import_service.analyze_individual_bogen(individual_xlsx(row), db)
+    return analysis.individuals[0].match_result
+
+
+def add_person(db, first_name, last_name, **fields) -> models.Person:
+    new_person = models.Person(first_name=first_name, last_name=last_name, **fields)
+    db.add(new_person)
+    db.commit()
+    return new_person
+
+
+def test_individual_same_name_in_any_spelling():
+    print("\n== Individualbogen: gleicher Name trotz anderer Schreibweise ==")
     db = make_session()
-    hh = seed(db)
-    apt = models.Apartment(unit_number="R.110", size_rooms=1, funding_type="WBS A",
-                           household_id=hh.id)
-    db.add(apt)
-    hh.is_resident = True
-    hh.apartment_unit = "R.110"
-    db.commit()
+    # So legt der Haushaltsbogen "Anna Maria Berger" an: erstes Wort = Vorname.
+    anna = add_person(db, "Anna", "Maria Berger")
+    renate = add_person(db, "Renate", "Tamm")
+    add_person(db, "Lea", "Sommer-Vogel")
 
-    by_unit = ais._match_row(
-        {"raw_current_unit": "R.110", "person_names": ["Maja Van Daal"],
-         "raw_household": "Maja Van Daal"}, db)
-    check_equal("Name + Wohnung treffen denselben Haushalt",
-                by_unit.matched_household_id, hh.id)
-    check_equal("Wohnung bestätigt den Namen", by_unit.type, "apartment_unit")
-    check("bestätigter Treffer wird zugeordnet", by_unit.is_certain)
+    split = analyze_individual(db, **{"Nachname, Vorname": "Berger, Anna Maria"})
+    check_equal("anders aufgeteilter Name trifft", split.matched_household_id, anna.id)
+    check("anders aufgeteilter Name ist sicher", split.is_certain, f"(typ {split.type})")
 
-    by_name = ais._match_row(
-        {"raw_current_unit": None, "person_names": ["Maja Van Daal"],
-         "raw_household": "Maja Van Daal"}, db)
-    check_equal("Name trifft", by_name.matched_household_id, hh.id)
-    check("exakter Name wird zugeordnet", by_name.is_certain,
-          f"(typ {by_name.type}, confidence {by_name.confidence})")
+    swapped = analyze_individual(db, **{"Nachname, Vorname": "TAMM renate"})
+    check_equal("vertauschter Name ohne Komma trifft",
+                swapped.matched_household_id, renate.id)
+    check("vertauschter Name in anderer Großschreibung ist sicher", swapped.is_certain)
 
-    fuzzy = ais._match_row(
-        {"raw_current_unit": None, "person_names": ["Maja Van Dahl"],
-         "raw_household": "Maja Van Dahl"}, db)
-    check("ähnlicher Name wird NICHT zugeordnet", not fuzzy.is_certain,
-          f"(typ {fuzzy.type}, confidence {fuzzy.confidence})")
-
-    # Haushalt ohne passende Person: der eindeutige Haushaltsname zählt.
-    db.add(models.Household(name="Familie Sonderbar"))
-    db.commit()
-    by_hh_name = ais._match_row(
-        {"raw_current_unit": None, "person_names": ["Familie Sonderbar"],
-         "raw_household": "Familie Sonderbar"}, db)
-    check_equal("eindeutiger Haushaltsname", by_hh_name.type, "exact_household_name")
-    check("eindeutiger Haushaltsname wird zugeordnet", by_hh_name.is_certain)
+    hyphen = analyze_individual(db, **{"Nachname, Vorname": "Sommer Vogel, Lea"})
+    check("Name mit Bindestrich ist ein Bestandteil, getrennt geschrieben NICHT sicher",
+          not hyphen.is_certain, f"(typ {hyphen.type})")
     db.close()
 
 
-def test_application_matching_uses_names_not_apartment():
-    print("\n== Wohnung bestätigt nur, sie identifiziert nicht ==")
+def test_individual_name_needs_unique_person_and_consistent_birth_date():
+    print("\n== Individualbogen: Name nur eindeutig und ohne Widerspruch sicher ==")
     db = make_session()
-    # Ausgangslage wie in den echten Daten: Der Bewerber ist aus R.110 in R.217
-    # gezogen (Bewerbung erfüllt), in R.110 wohnt inzwischen jemand anderes.
-    mover = seed(db)                                     # "Maja Van Daal"
-    newcomer = models.Household(name="Michaela Andere", is_resident=True)
-    db.add(newcomer)
-    db.flush()
-    db.add(models.Person(household_id=newcomer.id,
-                         first_name="Michaela", last_name="Andere"))
-    db.add(models.Apartment(unit_number="R.110", size_rooms=1,
-                            funding_type="WBS A", household_id=newcomer.id))
-    db.add(models.Apartment(unit_number="R.217", size_rooms=2,
-                            funding_type="WBS A", household_id=mover.id))
-    mover.is_resident = True
-    mover.apartment_unit = "R.217"
-    newcomer.apartment_unit = "R.110"
-    db.commit()
+    without_birth_date = add_person(db, "Ines", "Ebert")
+    with_birth_date = add_person(db, "Stefan", "Kramer", birth_date=datetime(1985, 3, 14))
+    add_person(db, "Jakob Finn", "Dreyer", birth_date=datetime(2021, 3, 14))
+    add_person(db, "Jürgen", "Hoffmann")
+    add_person(db, "Jürgen", "Hoffmann")
 
-    row = {
-        "raw_current_unit": "R.110", "raw_new_unit": "R.217", "status": "erfuellt",
-        "person_names": ["Maja Van Daal"], "raw_household": "Maja Van Daal",
-    }
-    result = ais._match_row(row, db)
-    check_equal("der Bewerber wird getroffen, nicht der heutige Bewohner",
-                result.matched_household_name, "Maja Van Daal")
-    check("Treffer ist eindeutig", result.is_certain, f"(typ {result.type})")
+    result = analyze_individual(
+        db, **{"Nachname, Vorname": "Ebert, Ines", "Geburtsdatum": "1991-04-12"})
+    check_equal("Geburtsdatum fehlt bei der Person: Treffer",
+                result.matched_household_id, without_birth_date.id)
+    check("Geburtsdatum fehlt bei der Person: sicher", result.is_certain,
+          f"(typ {result.type})")
 
-    # Passt der Name zu niemandem, bleibt der heutige Bewohner ein bloßer Hinweis.
-    unknown = ais._match_row({
-        "raw_current_unit": "R.110", "raw_new_unit": None, "status": "erfuellt",
-        "person_names": ["Voellig Unbekannt"], "raw_household": "Voellig Unbekannt",
-    }, db)
-    check_equal("heutiger Bewohner nur als Hinweis", unknown.type, "apartment_occupant")
-    check_equal("Hinweis nennt den heutigen Bewohner",
-                unknown.matched_household_name, "Michaela Andere")
-    check("Hinweis wird NICHT automatisch zugeordnet", not unknown.is_certain)
+    result = analyze_individual(db, **{"Nachname, Vorname": "Kramer, Stefan"})
+    check_equal("Geburtsdatum fehlt im Bogen: Treffer",
+                result.matched_household_id, with_birth_date.id)
+    check("Geburtsdatum fehlt im Bogen: sicher", result.is_certain)
+
+    result = analyze_individual(
+        db, **{"Nachname, Vorname": "Kramer, Stefan", "Geburtsdatum": "1990-01-01"})
+    check("widersprüchliches Geburtsdatum ist NICHT sicher", not result.is_certain,
+          f"(typ {result.type})")
+
+    result = analyze_individual(db, **{"Nachname, Vorname": "Hoffmann, Jürgen"})
+    check("Name, den zwei Personen tragen, ist NICHT sicher", not result.is_certain,
+          f"(typ {result.type})")
+
+    result = analyze_individual(
+        db, **{"Nachname, Vorname": "Dreyer, Jakob", "Geburtsdatum": "2021-03-14"})
+    check("bloßer Rufname ist NICHT sicher", not result.is_certain, f"(typ {result.type})")
+    db.close()
+
+
+def test_individual_member_number_needs_matching_name():
+    print("\n== Individualbogen: Mitgliedsnummer nur mit passendem Namen sicher ==")
+    db = make_session()
+    agathe = add_person(db, "Agathe", "Kern", member_number="412")
+
+    own_number = analyze_individual(
+        db, **{"Nachname, Vorname": "Kern, Agathe Maria", "Mitgliedsnummer": "412"})
+    check_equal("Nummer mit passendem Namen trifft", own_number.matched_household_id, agathe.id)
+    check("Nummer mit passendem Namen ist sicher", own_number.is_certain)
+
+    foreign = analyze_individual(
+        db, **{"Nachname, Vorname": "Bauer, Moritz", "Mitgliedsnummer": "412"})
+    check("Nummer mit ganz anderem Namen ist NICHT sicher", not foreign.is_certain,
+          f"(typ {foreign.type})")
+    check_equal("Nummer mit ganz anderem Namen bleibt ein Vorschlag",
+                foreign.matched_household_id, agathe.id)
+    db.close()
+
+
+def test_individual_member_number_of_a_parent():
+    print("\n== Individualbogen: Kind trägt die Nummer eines Elternteils ein ==")
+    db = make_session()
+    add_person(db, "Moritz", "Bauer", member_number="431",
+               birth_date=datetime(1984, 6, 2))
+
+    child = analyze_individual(db, **{
+        "Nachname, Vorname": "Bauer, Lina", "Mitgliedsnummer": "431",
+        "Geburtsdatum": "2015-03-02"})
+    check("gleicher Nachname, anderes Geburtsdatum ist NICHT sicher",
+          not child.is_certain, f"(typ {child.type})")
+    db.close()
+
+
+def test_individual_same_name_beats_member_number():
+    print("\n== Individualbogen: Name und Mitgliedsnummer zeigen auf verschiedene Personen ==")
+    db = make_session()
+    # Der Elternteil hat kein Geburtsdatum, das dem Kind widersprechen könnte.
+    add_person(db, "Moritz", "Bauer", member_number="431")
+    lina = add_person(db, "Lina", "Bauer")
+
+    child = analyze_individual(db, **{
+        "Nachname, Vorname": "Bauer, Lina", "Mitgliedsnummer": "431",
+        "Geburtsdatum": "2015-03-02"})
+    check_equal("die Person mit dem gleichen Namen wird getroffen",
+                child.matched_household_id, lina.id)
+    check("der gleiche Name ist sicher", child.is_certain, f"(typ {child.type})")
+    db.close()
+
+
+def test_individual_member_number_held_by_several_persons():
+    print("\n== Individualbogen: Mitgliedsnummer, die mehrere Personen tragen ==")
+    db = make_session()
+    first = add_person(db, "Antje", "Vogel", member_number="455")
+    second = add_person(db, "Björn", "Vogel", member_number="455")
+
+    result = analyze_individual(
+        db, **{"Nachname, Vorname": "Vogel, A.", "Mitgliedsnummer": "455"})
+    check("mehrfach vergebene Nummer ist NICHT sicher", not result.is_certain,
+          f"(typ {result.type})")
+    offered = {c.household_id for c in result.fuzzy_candidates}
+    check("alle Personen mit der Nummer stehen zur Auswahl",
+          {first.id, second.id} <= offered, f"(angeboten {offered})")
+    db.close()
+
+
+def test_individual_member_number_ignores_name_particles():
+    print("\n== Individualbogen: Namenszusatz bestätigt keine Mitgliedsnummer ==")
+    db = make_session()
+    add_person(db, "Dan", "Van Daal", member_number="377")
+
+    result = analyze_individual(
+        db, **{"Nachname, Vorname": "van Bergen, Ines", "Mitgliedsnummer": "377"})
+    check("nur der Zusatz „van“ gemeinsam ist NICHT sicher", not result.is_certain,
+          f"(typ {result.type})")
     db.close()
 
 
@@ -302,37 +379,18 @@ def test_undecided_action_does_nothing():
                 (before_households, before_persons))
     db.close()
 
-    # --- Bewerbungsliste ---
-    db = make_session()
-    hh = seed(db)
-    raw = {
-        "temp_id": "t1", "row": 2, "raw_household": "Maja Van Daal", "person_names": [],
-        "kind": "wartepool", "raw_kind": None, "requested_at": None,
-        "wishes": [], "unparsed_wishes": [], "status": "offen", "raw_status": None,
-        "note": None, "raw_current_type": None, "raw_current_unit": None,
-        "raw_new_unit": None,
-    }
-    session = import_service.ImportSession("applications", [raw], {})
-    import_service.import_sessions[session.id] = session
-    app_result = ais.commit_application_list(schemas.ApplicationCommitRequest(
-        session_id=session.id,
-        decisions=[schemas.ApplicationDecision(
-            temp_id="t1", action="undecided", target_household_id=hh.id)],
-    ), db)
-    check_equal("Bewerbungsliste: keine Bewerbung angelegt", app_result.applications_created, 0)
-    check_equal("Bewerbungsliste: kein Haushalt angelegt", app_result.households_created, 0)
-    check_equal("Bewerbungsliste: als übersprungen gezählt", app_result.skipped, 1)
-    check_equal("Bewerbungsliste: Bestand unverändert",
-                db.query(models.Application).count(), 0)
-    db.close()
-
 
 if __name__ == "__main__":
     test_is_certain_derivation()
     test_household_matching_confidence()
     test_individual_matching_confidence()
-    test_application_matching_confidence()
-    test_application_matching_uses_names_not_apartment()
+    test_individual_same_name_in_any_spelling()
+    test_individual_name_needs_unique_person_and_consistent_birth_date()
+    test_individual_member_number_needs_matching_name()
+    test_individual_member_number_of_a_parent()
+    test_individual_same_name_beats_member_number()
+    test_individual_member_number_held_by_several_persons()
+    test_individual_member_number_ignores_name_particles()
     test_undecided_action_does_nothing()
 
     print("\n" + "=" * 50)
