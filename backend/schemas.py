@@ -394,6 +394,9 @@ class HouseholdImportPreview(BaseModel):
     member_count_mismatch: bool = False
     already_imported: bool = False
     existing_data_changes: Optional[ExistingDataChanges] = None
+    #: Der vorgeschlagene Haushalt ist ein Bewohner-Haushalt: Sein Wunsch wird
+    #: nicht übernommen, ein Wechselwunsch wird von Hand angelegt.
+    wish_not_applied: bool = False
 
 class PrivacyWarning(BaseModel):
     row: int
@@ -422,6 +425,8 @@ class HHCommitResponse(BaseModel):
     updated: int
     skipped: int
     skipped_no_match: int = 0
+    #: Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde
+    wishes_not_applied: List[str] = []
 
 class IndividualImportPreview(BaseModel):
     temp_id: str

@@ -575,7 +575,8 @@ def compute_data_changes(
             ))
 
     # Der Wohnungswunsch steht in der offenen Wartepool-Bewerbung, nicht am Haushalt.
-    if db is not None:
+    # Bei einem Bewohner-Haushalt fasst der Bogen keine Bewerbung an.
+    if db is not None and not existing.is_resident:
         application = open_wartepool_application(existing, db)
         old_wishes = wishes_mod.normalize_wishes(application.wishes if application else [])
         new_wishes = new_data.get("wishes") or []
@@ -613,20 +614,21 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
     for hh_data in parsed["households"]:
         match_result = match_household(hh_data, db)
 
+        existing = (
+            db.query(models.Household).get(match_result.matched_household_id)
+            if match_result.matched_household_id else None
+        )
+
         # Check timestamp
         already_imported = False
-        if match_result.matched_household_id:
-            existing = db.query(models.Household).get(match_result.matched_household_id)
-            if existing and existing.import_timestamp and hh_data.get("timestamp"):
-                if existing.import_timestamp.replace(tzinfo=None) == hh_data["timestamp"]:
-                    already_imported = True
+        if existing and existing.import_timestamp and hh_data.get("timestamp"):
+            if existing.import_timestamp.replace(tzinfo=None) == hh_data["timestamp"]:
+                already_imported = True
 
         # Diff
         data_changes = None
-        if match_result.matched_household_id and not already_imported:
-            existing = db.query(models.Household).get(match_result.matched_household_id)
-            if existing:
-                data_changes = compute_data_changes(hh_data, existing, db)
+        if existing and not already_imported:
+            data_changes = compute_data_changes(hh_data, existing, db)
 
         member_count_mismatch = (
             hh_data["declared_member_count"] > 0
@@ -649,6 +651,7 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
             member_count_mismatch=member_count_mismatch,
             already_imported=already_imported,
             existing_data_changes=data_changes,
+            wish_not_applied=bool(existing and wish_stays_unapplied(existing, hh_data)),
         ))
 
     session = ImportSession("household", parsed["households"], {})
@@ -685,6 +688,7 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
     updated = 0
     skipped = 0
     skipped_no_match = 0
+    wishes_not_applied: list[str] = []
 
     for dec in request.decisions:
         # Alles außer "update" ist keine Zuordnung -- eine im Assistenten noch
@@ -708,6 +712,8 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
 
         _update_household_from_raw(existing, raw, db)
         updated += 1
+        if wish_stays_unapplied(existing, raw):
+            wishes_not_applied.append(existing.name)
 
     db.commit()
 
@@ -717,7 +723,17 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
         updated=updated,
         skipped=skipped,
         skipped_no_match=skipped_no_match,
+        wishes_not_applied=wishes_not_applied,
     )
+
+
+def wish_stays_unapplied(hh: models.Household, raw: dict) -> bool:
+    """Der Bogen eines Bewohner-Haushalts nennt einen Wunsch, der nicht übernommen wird.
+
+    Wechselwünsche kommen formlos per E-Mail und werden von Hand angelegt
+    (ADR 0011); der Bogen unterscheidet nicht zwischen Datenpflege und Wunsch.
+    """
+    return bool(hh.is_resident and raw.get("wishes"))
 
 
 def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session):
@@ -725,8 +741,11 @@ def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session):
 
     Gibt es noch keine offene Wartepool-Bewerbung, entsteht sie hier. Der
     Fragebogen-Import legt damit weiterhin **keine Haushalte** an — nur die
-    Bewerbung zu einem bereits bestehenden Haushalt.
+    Bewerbung zu einem bereits bestehenden Haushalt. Bei einem
+    Bewohner-Haushalt bleibt jede Bewerbung unberührt.
     """
+    if hh.is_resident:
+        return
     wish_list = wishes_mod.normalize_wishes(raw.get("wishes") or [])
     application = open_wartepool_application(hh, db)
     if application is None:

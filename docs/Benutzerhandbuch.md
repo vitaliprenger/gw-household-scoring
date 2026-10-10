@@ -74,6 +74,11 @@ kaputt machen.
   der Name und nicht die Nummer.
 - Zeilen des Individualbogens ohne Treffer werden übersprungen. Sie erscheinen beim nächsten
   Einlesen wieder; der Individualbogen legt nie eine Person an.
+- Der **Haushaltsbogen eines Bewohner-Haushalts** aktualisiert nur dessen Angaben. Er legt keine
+  Bewerbung an und ändert keine vorhandene. Nennt so ein Bogen einen Wunsch, siehst du den Hinweis
+  **„Wunsch nicht übernommen“**, im Assistenten und in der Zusammenfassung. Will der Haushalt
+  wirklich umziehen, leg den Wechselwunsch im Tab **Bewerbungen** von Hand an und trag dort das
+  Datum des Wunsches ein.
 - Bei der vCard stehen unsichere Zeilen auf **„Bitte entscheiden“**. Du kannst
   den Import erst abschließen, wenn alle entschieden sind – einzeln oder mit „Alle neu anlegen“ /
   „Alle überspringen“.

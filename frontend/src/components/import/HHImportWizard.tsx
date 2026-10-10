@@ -24,6 +24,9 @@ interface HHImportWizardProps {
 
 const STEPS = ['Analyse', 'Zuordnung & Entscheidungen', 'Zusammenfassung'];
 
+const WISH_NOT_APPLIED_HINT =
+    'Wunsch nicht übernommen – Bewohner-Haushalt; Wechselwunsch bitte von Hand anlegen';
+
 function matchTypeLabel(type: string): string {
     switch (type) {
         case 'exact_member_nr': return 'Mitgliedsnr.';
@@ -241,6 +244,19 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                             onClick={() => setDataChangeFor(hh)}
                                                         />
                                                     ) : null}
+                                                    {/* Gilt für den vorgeschlagenen Haushalt; nach einer
+                                                        Zuordnung von Hand zählt die Zusammenfassung. */}
+                                                    {hh.wish_not_applied && !hh.already_imported
+                                                        && !matchOverrides[hh.temp_id] && (
+                                                        <Tooltip title={WISH_NOT_APPLIED_HINT}>
+                                                            <Chip
+                                                                label="Wunsch nicht übernommen"
+                                                                size="small"
+                                                                color="warning"
+                                                                variant="outlined"
+                                                            />
+                                                        </Tooltip>
+                                                    )}
                                                 </TableCell>
                                                 <TableCell>
                                                     <FormControl size="small" sx={{ minWidth: 140 }}>
@@ -285,10 +301,20 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                             <strong>{commitResult.skipped}</strong> übersprungen.
                         </Alert>
                         {commitResult.skipped_no_match > 0 && (
-                            <Alert severity="info">
+                            <Alert severity="info" sx={{ mb: 2 }}>
                                 <strong>{commitResult.skipped_no_match}</strong> Datensätze ohne
                                 zugeordneten Haushalt wurden nicht übernommen — der Haushaltsbogen
                                 legt keine neuen Haushalte an.
+                            </Alert>
+                        )}
+                        {commitResult.wishes_not_applied.length > 0 && (
+                            <Alert severity="warning">
+                                <strong>{WISH_NOT_APPLIED_HINT}:</strong>
+                                <ul>
+                                    {commitResult.wishes_not_applied.map((name, i) => (
+                                        <li key={i}>{name}</li>
+                                    ))}
+                                </ul>
                             </Alert>
                         )}
                     </Box>
