@@ -184,7 +184,7 @@ export default function ScoreBreakdownDialog({
         Punkteaufschlüsselung{breakdown ? ` – ${breakdown.name}` : ''}
         {breakdown && (
           <Typography variant="body2" color="textSecondary">
-            {breakdown.member_count} Mitglieder
+            {breakdown.member_count} Personen
             {categoryLabel ? ` · Kategorie ${categoryLabel}` : ' · ohne Wohnungskategorie'}
             {breakdown.score_calculated_at ? ' · Stichtag der Berechnung ' : ' · Stichtag heute '}
             {new Date(breakdown.calculated_at).toLocaleDateString('de-DE')}

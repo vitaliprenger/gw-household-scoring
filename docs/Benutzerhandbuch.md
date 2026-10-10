@@ -105,7 +105,7 @@ Was die Symbole in der Rangliste bedeuten:
 
 | Symbol | Bedeutung |
 |--------|-----------|
-| Chip **„nur auf Wunsch“** | Der Haushalt wünscht sich diese Kategorie ausdrücklich, erfüllt laut Daten aber nicht alle Voraussetzungen (z. B. zu wenige Mitglieder). Schau genauer hin. |
+| Chip **„nur auf Wunsch“** | Der Haushalt wünscht sich diese Kategorie ausdrücklich, erfüllt laut Daten aber nicht alle Voraussetzungen (z. B. zu wenige Personen). Schau genauer hin. |
 | **Warnzeichen** | Die Bewerbung ist als Sonderfall markiert; die Begründung siehst du, wenn du darauf zeigst oder es antippst. |
 | **Uhr** | Die Punktzahl ist veraltet – einmal neu berechnen. |
 | **Info-Symbol** | öffnet die Aufschlüsselung der Punkte dieses Haushalts. |
@@ -152,14 +152,14 @@ Bewertungskonfiguration multipliziert.
 | **Alter, Geschlecht, Haupttätigkeit, Bildungsabschluss** | Je Person: Ist eine Gruppe unter den Bewohnern schwächer vertreten als ihr Zielwert, gibt es Punkte – umso mehr, je größer die Lücke. Fehlt die Gruppe ganz, gibt es 1 Punkt pro Person. Alle Personen im Haushalt zählen einzeln. |
 | **Mitgliedsdauer** | Je Person anteilig bis zu den „Maximalen Mitgliedsjahren“ (Standard 10): 5 von 10 Jahren = 0,5. Die Werte aller Personen werden addiert. |
 | **Engagement, Kulturelle Vielfalt, Besondere Lebenslagen** | Bewerten wir von Hand mit 0–1 im Detail-Dialog des Haushalts. |
-| **Wohnraumausnutzung** | 1, wenn der Haushalt mindestens so viele Mitglieder hat, wie die Wohnung Zimmer hat; sonst 0. |
+| **Wohnraumausnutzung** | 1, wenn der Haushalt mindestens so viele Personen hat, wie die Wohnung Zimmer hat; sonst 0. |
 
 **Ein Beispiel** (Gewichte ausgedacht): Ein Paar, 34 und 36 Jahre alt, seit 5 Jahren Mitglied.
 Für die Altersgruppe 30–39 liegt der Zielwert bei 15 %, unter den Bewohnern sind es 10 %.
 
 - Alter: je Person (15 − 10) / 15 = 0,33 → zusammen 0,67; × Gewicht 2 = **1,33**
 - Mitgliedsdauer: je Person 5 / 10 = 0,5 → zusammen 1,0; × Gewicht 1 = **1,00**
-- Wohnraumausnutzung für eine 2-Zimmer-Wohnung: 2 Mitglieder ≥ 2 Zimmer → 1; × Gewicht 1 = **1,00**
+- Wohnraumausnutzung für eine 2-Zimmer-Wohnung: 2 Personen ≥ 2 Zimmer → 1; × Gewicht 1 = **1,00**
 - Für eine 3-Zimmer-Wohnung dagegen: 2 < 3 → **0**
 
 Derselbe Haushalt hat also bei „2 Zimmer“ mehr Punkte als bei „3 Zimmer“.
@@ -167,8 +167,8 @@ Derselbe Haushalt hat also bei „2 Zimmer“ mehr Punkte als bei „3 Zimmer“
 **Wer steht in welcher Rangliste?** Ein Haushalt mit offener Wartepool-Bewerbung taucht in jeder
 Kategorie auf, für die er in Frage kommt. Das heißt:
 
-1. genug Mitglieder für die Mindestbelegung der Wohnung,
-2. nicht mehr Mitglieder als Zimmer,
+1. genug Personen für die Mindestbelegung der Wohnung,
+2. nicht mehr Personen als Zimmer,
 3. passender WBS: Mit WBS A geht WBS A, WBS B und freifinanziert; mit WBS B geht WBS B und
    freifinanziert; ohne WBS nur freifinanziert.
 
@@ -209,7 +209,7 @@ an „Punkte neu berechnen“.
 
 **Ein Haushalt fehlt in der Rangliste – warum?**
 Mögliche Gründe: Er hat keine offene Bewerbung · er ist schon einer Wohnung zugeordnet (wohnt also
-bei uns) · er ist archiviert · er kommt für die gefilterte Kategorie nicht in Frage (Mitglieder,
+bei uns) · er ist archiviert · er kommt für die gefilterte Kategorie nicht in Frage (Haushaltsgröße,
 Zimmer, WBS) · es ist ein Wechselwunsch – der steht oben im Vorrang-Block.
 
 **Ich habe Daten geändert, aber die Punkte sind gleich geblieben.**

@@ -87,7 +87,7 @@ def _write_household_sheet(ws, explanation: dict) -> dict:
     """Schreibt die Aufschluesselung eines Haushalts; liefert die Zellen der Kriterienpunkte."""
     ws["A1"] = explanation["name"]
     ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = "Mitglieder"
+    ws["A2"] = "Personen"
     ws["B2"] = explanation["member_count"]
     ws["A3"] = "Stichtag (letzte Berechnung)"
     ws["B3"] = explanation["calculated_at"]
@@ -199,7 +199,7 @@ def _write_household_sheet(ws, explanation: dict) -> dict:
     if occ:
         ws.cell(row=row, column=1, value="Wohnraumausnutzung").font = Font(bold=True, size=12)
         row += 1
-        ws.cell(row=row, column=1, value="Mitglieder")
+        ws.cell(row=row, column=1, value="Personen")
         ws.cell(row=row, column=2, value=occ["members"])
         members = f"B{row}"
         row += 1
@@ -207,7 +207,7 @@ def _write_household_sheet(ws, explanation: dict) -> dict:
         ws.cell(row=row, column=2, value=occ["size_rooms"])
         rooms = f"B{row}"
         row += 1
-        ws.cell(row=row, column=1, value="Erfüllt = WENN(ohne Zimmer; 1; Mitglieder ≥ Zimmer)")
+        ws.cell(row=row, column=1, value="Erfüllt = WENN(ohne Zimmer; 1; Personen ≥ Zimmer)")
         ws.cell(row=row, column=2, value=f'=IF({rooms}="",1,IF({members}>={rooms},1,0))')
         fulfilled = f"B{row}"
         row += 1

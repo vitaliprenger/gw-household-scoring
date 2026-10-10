@@ -38,6 +38,8 @@ const MAX_COMPARE = 5;
 const EMPTY_SELECTION: GridRowSelectionModel = { type: 'include', ids: new Set() };
 /** Hinweise am Haushalt öffnen auf Touch-Geräten beim Antippen und bleiben kurz stehen. */
 const HINT_TOOLTIP_PROPS = { enterTouchDelay: 0, leaveTouchDelay: 4000 } as const;
+/** Beschreibung der Spalte „Personen“ in Rangliste und Haushaltstabelle. */
+const HOUSEHOLD_SIZE_DESCRIPTION = 'Haushaltsgröße: Zahl der Personen im Haushalt, ohne archivierte.';
 
 const CONFIG_LABELS: Record<string, string> = {
   weight_diversity_age:            'Altersstruktur',
@@ -459,7 +461,7 @@ function App() {
                   )
                 : householdCell(params.row.name, params.row.special_case, params.row.special_case_note),
             },
-            { field: 'member_count', headerName: 'Mitglieder', width: 100, type: 'number' },
+            { field: 'member_count', headerName: 'Personen', description: HOUSEHOLD_SIZE_DESCRIPTION, width: 100, type: 'number' },
             {
               field: 'current_apartment_unit', headerName: 'Aktuelle Wohnung', width: 150,
               valueFormatter: (value: string | undefined) => value || '—',
@@ -504,14 +506,14 @@ function App() {
                 );
               },
             },
-            { field: 'member_count', headerName: 'Mitglieder', width: 100, type: 'number' },
+            { field: 'member_count', headerName: 'Personen', description: HOUSEHOLD_SIZE_DESCRIPTION, width: 100, type: 'number' },
             {
               field: 'base_score', headerName: 'Grundpunktzahl', width: 140, type: 'number',
               valueFormatter: (value: number | undefined) => value?.toFixed(2) ?? '—',
             },
             {
               field: 'occupancy_score', headerName: 'Wohnraumausnutzung', width: 170, type: 'number',
-              description: 'Punkte dafür, dass der Haushalt die Wohnung mit seinen Mitgliedern ausfüllt (Mitglieder ≥ Zimmer).',
+              description: 'Punkte dafür, dass der Haushalt die Wohnung ausfüllt (Personen ≥ Zimmer).',
               valueFormatter: (value: number | null | undefined) =>
                 value === null || value === undefined ? '—' : value.toFixed(2),
             },
@@ -614,7 +616,7 @@ function App() {
                 Gezeigt werden nur Haushalte mit offener Wartepool-Bewerbung.{" "}
                 {unfiltered
                   ? 'Ohne Filter wird nur die Grundpunktzahl gezeigt: die Wohnraumausnutzung ergibt sich erst aus der Zimmerzahl der Wohnung.'
-                  : 'Die Wohnraumausnutzung gilt je Wohnungsgröße — ein Haushalt, der die Wohnung ausfüllt (Mitglieder ≥ Zimmer), erhält hier volle Punkte, sonst 0.'}
+                  : 'Die Wohnraumausnutzung gilt je Wohnungsgröße — ein Haushalt, der die Wohnung ausfüllt (Personen ≥ Zimmer), erhält hier volle Punkte, sonst 0.'}
                 {' '}Das Info-Symbol zeigt, wie sich die Punkte eines Haushalts zusammensetzen.
               </Typography>
 
@@ -672,8 +674,8 @@ function App() {
               ),
             },
             {
-              field: 'people_count', headerName: 'Mitglieder', width: 100, type: 'number',
-              valueGetter: (_value: unknown, row: Household) => row.people.length,
+              field: 'people_count', headerName: 'Personen', description: HOUSEHOLD_SIZE_DESCRIPTION, width: 100, type: 'number',
+              valueGetter: (_value: unknown, row: Household) => row.people.filter(p => !p.archived).length,
             },
             {
               field: 'wbs_status', headerName: 'WBS', width: 100,
