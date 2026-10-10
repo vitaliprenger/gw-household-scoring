@@ -68,9 +68,11 @@ kaputt machen.
   Reihenfolge, Groß- und Kleinschreibung und die Aufteilung in Vor- und Nachname spielen keine
   Rolle: „Berger, Anna Maria“ und „Anna Maria Berger“ gelten als derselbe Name. Tragen zwei
   Personen den Namen oder widersprechen sich die Geburtsdaten, ordnen sie nicht automatisch zu.
-- Eine **Mitgliedsnummer** in einem Fragebogen zählt nur, wenn auch der Name zur Person passt und
-  sich die Geburtsdaten nicht widersprechen – oft hat jemand die Nummer eines Angehörigen
-  eingetragen oder sich vertippt. Im Individualbogen zeigt der Chip dann
+- Eine **Mitgliedsnummer** in einem Fragebogen zählt nur, wenn der Bogen auch einen Vornamen
+  dieser Person nennt und sich die Geburtsdaten nicht widersprechen – oft hat jemand die Nummer
+  eines Angehörigen eingetragen oder sich vertippt. Der gleiche Nachname allein genügt deshalb
+  nicht; ein neuer Nachname, etwa nach einer Heirat, schadet dagegen nicht. Im Individualbogen
+  zeigt der Chip sonst
   „(nur Mitgliedsnummer)“; prüf, ob wirklich diese Person gemeint ist. Trägt eine andere Person
   genau den Namen aus dem Bogen, gilt der Name und nicht die Nummer.
 - Stehen die Personen eines Haushaltsbogens in **verschiedenen Haushalten** (etwa weil zwei

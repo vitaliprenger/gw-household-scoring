@@ -265,6 +265,26 @@ def test_individual_member_number_of_a_parent():
     db.close()
 
 
+def test_individual_member_number_needs_a_shared_first_name():
+    print("\n== Individualbogen: Mitgliedsnummer braucht einen gemeinsamen Vornamen ==")
+    db = make_session()
+    # Der Elternteil hat kein Geburtsdatum, und das Kind ist noch nicht erfasst:
+    # Der gemeinsame Nachname allein darf die Nummer nicht bestätigen.
+    moritz = add_person(db, "Moritz", "Bauer", member_number="431")
+
+    child = analyze_individual(db, **{
+        "Nachname, Vorname": "Bauer, Lina", "Mitgliedsnummer": "431"})
+    check("nur der Nachname gemeinsam ist NICHT sicher", not child.is_certain,
+          f"(typ {child.type})")
+
+    renamed = analyze_individual(db, **{
+        "Nachname, Vorname": "Schulze, Moritz", "Mitgliedsnummer": "431"})
+    check_equal("neuer Nachname, gleicher Vorname trifft", renamed.matched_household_id, moritz.id)
+    check("neuer Nachname, gleicher Vorname ist sicher", renamed.is_certain,
+          f"(typ {renamed.type})")
+    db.close()
+
+
 def test_individual_same_name_beats_member_number():
     print("\n== Individualbogen: Name und Mitgliedsnummer zeigen auf verschiedene Personen ==")
     db = make_session()
@@ -388,6 +408,7 @@ if __name__ == "__main__":
     test_individual_name_needs_unique_person_and_consistent_birth_date()
     test_individual_member_number_needs_matching_name()
     test_individual_member_number_of_a_parent()
+    test_individual_member_number_needs_a_shared_first_name()
     test_individual_same_name_beats_member_number()
     test_individual_member_number_held_by_several_persons()
     test_individual_member_number_ignores_name_particles()

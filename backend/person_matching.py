@@ -99,10 +99,16 @@ def birth_dates_conflict(a, b) -> bool:
 
 
 def _number_confirms(person, data: dict, parts: frozenset[str]) -> bool:
-    """Die Mitgliedsnummer der Zeile gehört ``person``, und Name und Geburtsdatum passen."""
+    """Die Mitgliedsnummer der Zeile gehört ``person``, und Name und Geburtsdatum passen.
+
+    Der Name passt, wenn die Zeile einen Vornamen der Person nennt. Der
+    Nachname allein genügt nicht: Angehörige teilen ihn, und ein Kind, das
+    die Nummer eines Elternteils einträgt, träfe sonst dessen Datensatz. Ein
+    neuer Nachname (Heirat) spricht dagegen nicht gegen die Nummer.
+    """
     return bool(
         same_member_number(person.member_number, data.get("member_number"))
-        and (parts & name_parts(person.first_name, person.last_name)) - NAME_PARTICLES
+        and (parts & name_parts(person.first_name, None)) - NAME_PARTICLES
         and not birth_dates_conflict(data.get("birth_date"), person.birth_date)
     )
 
