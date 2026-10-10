@@ -12,9 +12,12 @@ from . import models, schemas, wishes as wishes_mod
 from .person_matching import (
     MEMBER_NUMBER,
     MEMBER_NUMBER_UNCONFIRMED,
+    SAME_NAME,
     find_certain_person,
     find_person_by_member_number,
+    match_household_persons,
     normalize_member_number,
+    other_member_number_holder,
     persons_with_member_number,
     same_member_number,
 )
@@ -105,6 +108,23 @@ def parse_date(raw) -> Optional[date]:
     except Exception:
         pass
     return None
+
+
+def parse_member_since(raw) -> tuple[Optional[date], Optional[str]]:
+    """Eintrittsdatum aus der Selbstauskunft: ``(datum, abgelehnter_wert)``.
+
+    Angenommen wird nur ein vollständiges Datum, das nicht in der Zukunft
+    liegt. Eine reine Zahl wie "2019" läse :func:`parse_date` als
+    Excel-Seriennummer; daraus würde ein Datum im Jahr 1905 und damit die
+    volle Mitgliedsdauer.
+    """
+    text = "" if raw is None else str(raw).strip()
+    if not text:
+        return None, None
+    parsed = None if text.isdigit() else parse_date(text)
+    if parsed is None or parsed > date.today():
+        return None, text
+    return parsed, None
 
 
 def parse_timestamp(raw) -> Optional[datetime]:
@@ -365,6 +385,11 @@ def match_person_in(people, data: dict, loose: bool = True):
     return None
 
 
+#: Die Personen des Bogens stehen sicher in verschiedenen Haushalten: kein
+#: sicherer Haushaltstreffer, nur ein Vorschlag.
+SEVERAL_HOUSEHOLDS = "several_households"
+
+
 def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
     persons = hh_data.get("persons", [])
     all_households = db.query(models.Household).all()
@@ -372,62 +397,45 @@ def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
     # Always compute fuzzy candidates so users can re-assign even exact matches
     candidates = _fuzzy_match(persons, all_households)
 
-    # Step 1: Exact match on member number ("3" und "003" sind dieselbe Nummer)
-    numbered = db.query(models.Person).filter(models.Person.member_number.isnot(None)).all()
+    # Personen des Bogens, die sicher gefunden werden und schon in einem
+    # Haushalt stehen, bestimmen den Haushalt (ADR 0011).
+    all_persons = db.query(models.Person).all()
+    housed = []
     for p in persons:
-        matched_person = find_person_by_member_number(numbered, p.get("member_number"))
-        if matched_person and matched_person.household_id:
-            hh = db.query(models.Household).get(matched_person.household_id)
-            if hh:
-                _ensure_hh_candidate(candidates, hh)
-                return schemas.MatchResult(
-                    type="exact_member_nr",
-                    matched_household_id=hh.id,
-                    matched_household_name=hh.name,
-                    confidence=1.0,
-                    fuzzy_candidates=candidates[:10],
-                )
+        found, match_type = find_certain_person(all_persons, p)
+        if found is not None and found.household_id:
+            housed.append((found, match_type, p))
 
-    # Step 2: Exact match on normalized name + birth date
-    for p in persons:
-        fn = (p.get("first_name") or "").strip().lower()
-        ln = (p.get("last_name") or "").strip().lower()
-        dob_str = p.get("birth_date")
-        if not fn or not ln:
-            continue
-        for hh in all_households:
-            for db_person in hh.people:
-                db_fn = (db_person.first_name or "").strip().lower()
-                db_ln = (db_person.last_name or "").strip().lower()
-                name_match = (fn == db_fn and ln == db_ln) or (fn == db_ln and ln == db_fn)
-                if not name_match:
-                    continue
-                if dob_str and db_person.birth_date:
-                    db_dob = db_person.birth_date.date() if isinstance(db_person.birth_date, datetime) else db_person.birth_date
-                    try:
-                        import_dob = date.fromisoformat(dob_str)
-                        if import_dob == db_dob:
-                            _ensure_hh_candidate(candidates, hh)
-                            return schemas.MatchResult(
-                                type="exact_name_dob",
-                                matched_household_id=hh.id,
-                                matched_household_name=hh.name,
-                                confidence=1.0,
-                                fuzzy_candidates=candidates[:10],
-                            )
-                    except Exception:
-                        pass
-                elif name_match and not dob_str:
-                    _ensure_hh_candidate(candidates, hh)
-                    return schemas.MatchResult(
-                        type="exact_name_dob",
-                        matched_household_id=hh.id,
-                        matched_household_name=hh.name,
-                        confidence=0.9,
-                        fuzzy_candidates=candidates[:10],
-                    )
+    households = {found.household_id: found.household for found, _, _ in housed}
+    for hh in households.values():
+        _ensure_hh_candidate(candidates, hh)
 
-    # Step 3: Fuzzy matching (already computed above)
+    if len(households) == 1:
+        hh = next(iter(households.values()))
+        by_number = any(match_type == MEMBER_NUMBER for _, match_type, _ in housed)
+        # Ein Geburtsdatum auf beiden Seiten bestätigt den Namen zusätzlich.
+        confirmed = by_number or any(p.get("birth_date") and found.birth_date for found, _, p in housed)
+        return schemas.MatchResult(
+            type=MEMBER_NUMBER if by_number else SAME_NAME,
+            matched_household_id=hh.id,
+            matched_household_name=hh.name,
+            confidence=1.0 if confirmed else 0.9,
+            fuzzy_candidates=candidates[:10],
+        )
+
+    # Zusammenzug oder Trennung: Der Bogen ersetzte sonst die Selbstauskunft
+    # und den Wunsch eines der bisherigen Haushalte.
+    if len(households) > 1:
+        first = housed[0][0].household
+        return schemas.MatchResult(
+            type=SEVERAL_HOUSEHOLDS,
+            matched_household_id=first.id,
+            matched_household_name=first.name,
+            confidence=0.0,
+            fuzzy_candidates=candidates[:10],
+        )
+
+    # Sonst der ähnlichste Haushalt als Vorschlag (oben schon berechnet)
     top = candidates[0] if candidates else None
     return schemas.MatchResult(
         type="fuzzy" if top else "none",
@@ -575,7 +583,8 @@ def compute_data_changes(
             ))
 
     # Der Wohnungswunsch steht in der offenen Wartepool-Bewerbung, nicht am Haushalt.
-    if db is not None:
+    # Bei einem Bewohner-Haushalt fasst der Bogen keine Bewerbung an.
+    if db is not None and not existing.is_resident:
         application = open_wartepool_application(existing, db)
         old_wishes = wishes_mod.normalize_wishes(application.wishes if application else [])
         new_wishes = new_data.get("wishes") or []
@@ -613,20 +622,21 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
     for hh_data in parsed["households"]:
         match_result = match_household(hh_data, db)
 
+        existing = (
+            db.query(models.Household).get(match_result.matched_household_id)
+            if match_result.matched_household_id else None
+        )
+
         # Check timestamp
         already_imported = False
-        if match_result.matched_household_id:
-            existing = db.query(models.Household).get(match_result.matched_household_id)
-            if existing and existing.import_timestamp and hh_data.get("timestamp"):
-                if existing.import_timestamp.replace(tzinfo=None) == hh_data["timestamp"]:
-                    already_imported = True
+        if existing and existing.import_timestamp and hh_data.get("timestamp"):
+            if existing.import_timestamp.replace(tzinfo=None) == hh_data["timestamp"]:
+                already_imported = True
 
         # Diff
         data_changes = None
-        if match_result.matched_household_id and not already_imported:
-            existing = db.query(models.Household).get(match_result.matched_household_id)
-            if existing:
-                data_changes = compute_data_changes(hh_data, existing, db)
+        if existing and not already_imported:
+            data_changes = compute_data_changes(hh_data, existing, db)
 
         member_count_mismatch = (
             hh_data["declared_member_count"] > 0
@@ -649,6 +659,7 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
             member_count_mismatch=member_count_mismatch,
             already_imported=already_imported,
             existing_data_changes=data_changes,
+            wish_not_applied=bool(existing and wish_stays_unapplied(existing, hh_data)),
         ))
 
     session = ImportSession("household", parsed["households"], {})
@@ -685,6 +696,7 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
     updated = 0
     skipped = 0
     skipped_no_match = 0
+    wishes_not_applied: list[str] = []
 
     for dec in request.decisions:
         # Alles außer "update" ist keine Zuordnung -- eine im Assistenten noch
@@ -708,6 +720,8 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
 
         _update_household_from_raw(existing, raw, db)
         updated += 1
+        if wish_stays_unapplied(existing, raw):
+            wishes_not_applied.append(existing.name)
 
     db.commit()
 
@@ -717,7 +731,17 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
         updated=updated,
         skipped=skipped,
         skipped_no_match=skipped_no_match,
+        wishes_not_applied=wishes_not_applied,
     )
+
+
+def wish_stays_unapplied(hh: models.Household, raw: dict) -> bool:
+    """Der Bogen eines Bewohner-Haushalts nennt einen Wunsch, der nicht übernommen wird.
+
+    Wechselwünsche kommen formlos per E-Mail und werden von Hand angelegt
+    (ADR 0011); der Bogen unterscheidet nicht zwischen Datenpflege und Wunsch.
+    """
+    return bool(hh.is_resident and (raw.get("wishes") or raw.get("unparsed_wishes")))
 
 
 def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session):
@@ -725,8 +749,11 @@ def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session):
 
     Gibt es noch keine offene Wartepool-Bewerbung, entsteht sie hier. Der
     Fragebogen-Import legt damit weiterhin **keine Haushalte** an — nur die
-    Bewerbung zu einem bereits bestehenden Haushalt.
+    Bewerbung zu einem bereits bestehenden Haushalt. Bei einem
+    Bewohner-Haushalt bleibt jede Bewerbung unberührt.
     """
+    if hh.is_resident:
+        return
     wish_list = wishes_mod.normalize_wishes(raw.get("wishes") or [])
     application = open_wartepool_application(hh, db)
     if application is None:
@@ -758,16 +785,14 @@ def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
 
     _apply_wishes_from_bogen(hh, raw, db)
 
-    # Personen werden ueber Mitgliedsnummer/Name/Geburtsdatum wiedergefunden,
-    # damit Schreibweisen aus dem Fragebogen keine Dubletten zu den bereits
-    # per vCard angelegten Personen erzeugen.
-    known = list(hh.people)
+    # Personen werden im Haushalt wiedergefunden, damit Schreibweisen aus dem
+    # Fragebogen keine Dubletten erzeugen.
+    in_household = match_household_persons(list(hh.people), raw["persons"])
 
-    for p_data in raw["persons"]:
+    for p_data, ep in zip(raw["persons"], in_household):
         dob = parse_date(p_data.get("birth_date"))
         dob_dt = datetime(dob.year, dob.month, dob.day) if dob else None
 
-        ep = match_person_in(known, p_data)
         if ep is not None:
             if p_data.get("member_number") and not ep.member_number:
                 ep.member_number = p_data["member_number"]
@@ -784,7 +809,6 @@ def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
                 updated_at=datetime.utcnow(),
             )
             db.add(person)
-            known.append(person)
 
 
 # ---------------------------------------------------------------------------
@@ -861,6 +885,7 @@ def parse_individual_bogen(file_contents: bytes) -> dict:
         first_name, last_name = normalize_name(name_raw)
         member_nr = normalize_member_number(row.get("Mitgliedsnummer", ""))
         dob = parse_date(row.get("Geburtsdatum", ""))
+        member_since, member_since_rejected = parse_member_since(row.get("Mitglied seit", ""))
         timestamp_str = str(row.get("Zeitstempel", "")).strip()
         timestamp = parse_timestamp(timestamp_str)
 
@@ -885,6 +910,8 @@ def parse_individual_bogen(file_contents: bytes) -> dict:
             "last_name": last_name,
             "member_number": member_nr,
             "birth_date": dob.isoformat() if dob else None,
+            "member_since": member_since.isoformat() if member_since else None,
+            "member_since_rejected": member_since_rejected,
             "timestamp_str": timestamp_str,
             "timestamp": timestamp,
             "gender": gender,
@@ -1005,20 +1032,30 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
     _cleanup_sessions()
     parsed = parse_individual_bogen(file_contents)
 
+    all_persons = db.query(models.Person).all()
+
     previews = []
     for ind_data in parsed["individuals"]:
         match_result = match_individual_to_person(ind_data, db)
+        matched_person = (
+            db.query(models.Person).get(match_result.matched_household_id)
+            if match_result.matched_household_id else None
+        )
 
         already_imported = False
         is_older = False
-        if match_result.matched_household_id and ind_data.get("timestamp"):
-            matched_person = db.query(models.Person).get(match_result.matched_household_id)
-            if matched_person and matched_person.individual_import_timestamp:
+        if matched_person and ind_data.get("timestamp"):
+            if matched_person.individual_import_timestamp:
                 db_ts = matched_person.individual_import_timestamp.replace(tzinfo=None)
                 if db_ts == ind_data["timestamp"]:
                     already_imported = True
                 elif db_ts > ind_data["timestamp"]:
                     is_older = True
+
+        number_holder = (
+            other_member_number_holder(all_persons, ind_data.get("member_number"), matched_person)
+            if matched_person else None
+        )
 
         previews.append(schemas.IndividualImportPreview(
             temp_id=ind_data["temp_id"],
@@ -1027,6 +1064,11 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
             last_name=ind_data["last_name"],
             birth_date=ind_data.get("birth_date"),
             member_number=ind_data.get("member_number"),
+            member_since=ind_data.get("member_since"),
+            member_since_rejected=ind_data.get("member_since_rejected"),
+            member_number_holder=(
+                f"{number_holder.first_name} {number_holder.last_name}" if number_holder else None
+            ),
             timestamp=ind_data.get("timestamp_str", ""),
             gender=ind_data.get("gender"),
             occupation=ind_data.get("occupation"),
@@ -1054,9 +1096,8 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
 def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Session) -> schemas.IndividualCommitResponse:
     """Ergaenzt die Angaben des Individualbogens bei vorhandenen Personen.
 
-    Neue Personen werden hier nicht angelegt: der Personenbestand kommt aus
-    dem vCard-Import. Datensaetze ohne zugeordnete Person werden als
-    ``skipped_no_match`` ausgewiesen.
+    Neue Personen werden hier nicht angelegt (ADR 0011). Datensaetze ohne
+    zugeordnete Person werden als ``skipped_no_match`` ausgewiesen.
     """
     session = import_sessions.get(request.session_id)
     if not session:
@@ -1067,6 +1108,10 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
     updated_count = 0
     skipped_count = 0
     skipped_no_match = 0
+    not_stored: list[schemas.MemberNumberConflict] = []
+    # Einmal geladen: Eine Nummer, die dieser Durchgang gerade vergeben hat,
+    # steht so auch ohne Zwischenspeichern schon bei ihrer Person.
+    all_persons = db.query(models.Person).all()
 
     for dec in request.decisions:
         # Alles außer "update" ist keine Zuordnung -- eine im Assistenten noch
@@ -1088,8 +1133,14 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
             skipped_no_match += 1
             continue
 
-        _update_person_from_individual(person, raw)
+        holder = _update_person_from_individual(person, raw, all_persons)
         updated_count += 1
+        if holder is not None:
+            not_stored.append(schemas.MemberNumberConflict(
+                person=_full_name(person),
+                member_number=raw["member_number"],
+                holder=_full_name(holder),
+            ))
 
     db.commit()
 
@@ -1099,10 +1150,21 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
         updated=updated_count,
         skipped=skipped_count,
         skipped_no_match=skipped_no_match,
+        member_numbers_not_stored=not_stored,
     )
 
 
-def _update_person_from_individual(person: models.Person, raw: dict):
+def _full_name(person: models.Person) -> str:
+    return f"{person.first_name or ''} {person.last_name or ''}".strip()
+
+
+def _update_person_from_individual(person: models.Person, raw: dict, all_persons: list):
+    """Trägt die Angaben einer Zeile bei ``person`` ein.
+
+    Gibt die Person zurück, die die Mitgliedsnummer der Zeile schon trägt,
+    wenn die Nummer deshalb nicht ergänzt wurde; sonst None.
+    """
+    holder = None
     if raw.get("gender"):
         person.gender = raw["gender"]
     if raw.get("occupation"):
@@ -1114,8 +1176,22 @@ def _update_person_from_individual(person: models.Person, raw: dict):
     if raw.get("life_situation"):
         val = raw["life_situation"].strip()
         person.special_needs = None if val.lower() in ("nein", "", "keine") else val
+    # Selbstauskunft, die es auch in der Mitgliederverwaltung gibt: nur
+    # ergänzen, nie einen vorhandenen Wert überschreiben (ADR 0011).
     if raw.get("member_number") and not person.member_number:
-        person.member_number = raw["member_number"]
+        holder = other_member_number_holder(all_persons, raw["member_number"], person)
+        if holder is None:
+            person.member_number = raw["member_number"]
+    if not person.birth_date:
+        person.birth_date = _as_datetime(raw.get("birth_date"))
+    if not person.member_since:
+        person.member_since = _as_datetime(raw.get("member_since"))
     if raw.get("timestamp"):
         person.individual_import_timestamp = raw["timestamp"]
     person.updated_at = datetime.utcnow()
+    return holder
+
+
+def _as_datetime(iso_date: Optional[str]) -> Optional[datetime]:
+    parsed = parse_date(iso_date)
+    return datetime(parsed.year, parsed.month, parsed.day) if parsed else None

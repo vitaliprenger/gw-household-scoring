@@ -61,19 +61,38 @@ kaputt machen.
 **Darauf solltest du achten:**
 
 - Automatisch zugeordnet wird nur ein **eindeutiger Treffer** (gleiche Mitgliedsnummer oder
-  genau gleicher Name). Ist ein Treffer nur *ähnlich*, siehst du einen **orangefarbenen Chip**;
+  gleicher Name). Ist ein Treffer nur *ähnlich*, siehst du einen **orangefarbenen Chip**;
   klickst du darauf, wird er übernommen.
-- Der **Individualbogen** ordnet eine Zeile automatisch zu, wenn der Name gleich ist. Reihenfolge,
-  Groß- und Kleinschreibung und die Aufteilung in Vor- und Nachname spielen keine Rolle:
-  „Berger, Anna Maria“ und „Anna Maria Berger“ gelten als derselbe Name. Tragen zwei Personen den
-  Namen oder widersprechen sich die Geburtsdaten, ordnet er nicht automatisch zu.
-- Eine **Mitgliedsnummer** im Individualbogen zählt nur, wenn auch der Name zur Person passt und
-  sich die Geburtsdaten nicht widersprechen. Sonst zeigt der Chip „(nur Mitgliedsnummer)“. Prüf
-  dann, ob wirklich diese Person gemeint ist – oft hat jemand die Nummer eines Angehörigen
-  eingetragen oder sich vertippt. Trägt eine andere Person genau den Namen aus dem Bogen, gilt
-  der Name und nicht die Nummer.
+- **Individualbogen und Haushaltsbogen** ordnen automatisch zu, wenn der Name gleich ist.
+  Reihenfolge, Groß- und Kleinschreibung und die Aufteilung in Vor- und Nachname spielen keine
+  Rolle: „Berger, Anna Maria“ und „Anna Maria Berger“ gelten als derselbe Name. Tragen zwei
+  Personen den Namen oder widersprechen sich die Geburtsdaten, ordnen sie nicht automatisch zu.
+- Eine **Mitgliedsnummer** in einem Fragebogen zählt nur, wenn auch der Name zur Person passt und
+  sich die Geburtsdaten nicht widersprechen – oft hat jemand die Nummer eines Angehörigen
+  eingetragen oder sich vertippt. Im Individualbogen zeigt der Chip dann
+  „(nur Mitgliedsnummer)“; prüf, ob wirklich diese Person gemeint ist. Trägt eine andere Person
+  genau den Namen aus dem Bogen, gilt der Name und nicht die Nummer.
+- Stehen die Personen eines Haushaltsbogens in **verschiedenen Haushalten** (etwa weil zwei
+  Haushalte zusammenziehen oder sich einer trennt), zeigt der Chip **„Mehrere Haushalte“**, und
+  die Zeile steht auf „Überspringen“. Der Bogen würde sonst die Angaben und den Wunsch eines der
+  bisherigen Haushalte ersetzen. Entscheide selbst, zu welchem Haushalt der Bogen gehört.
+- Der Individualbogen **überschreibt** Geschlecht, Haupttätigkeit, Bildungsabschluss, kulturelle
+  Vielfalt und besondere Lebenslagen, wenn er dazu eine Angabe enthält. Geburtsdatum,
+  Mitgliedsnummer und **„Mitglied seit“** trägt er **nur ein, wenn sie noch fehlen**; den Namen
+  ändert er nie. Stimmt ein vorhandener Wert nicht, berichtige ihn von Hand bei der Person.
+- Ein „Mitglied seit“, das kein vollständiges Datum ist (etwa nur „2019“) oder in der Zukunft
+  liegt, übernimmt der Individualbogen nicht; der Assistent markiert es mit **„nicht übernommen“**.
+  Trag das Datum dann von Hand ein.
+- Trägt schon eine andere Person die Mitgliedsnummer aus dem Bogen, steht daneben **„vergeben“**,
+  und die Nummer wird nicht eingetragen. Die Zusammenfassung nennt solche Fälle noch einmal, auch
+  wenn du die Zeile von Hand einer anderen Person zugeordnet hast. Klär, wem die Nummer gehört.
 - Zeilen des Individualbogens ohne Treffer werden übersprungen. Sie erscheinen beim nächsten
   Einlesen wieder; der Individualbogen legt nie eine Person an.
+- Der **Haushaltsbogen eines Bewohner-Haushalts** aktualisiert nur dessen Angaben. Er legt keine
+  Bewerbung an und ändert keine vorhandene. Nennt so ein Bogen einen Wunsch, siehst du den Hinweis
+  **„Wunsch nicht übernommen“**, im Assistenten und in der Zusammenfassung. Will der Haushalt
+  wirklich umziehen, leg den Wechselwunsch im Tab **Bewerbungen** von Hand an und trag dort das
+  Datum des Wunsches ein.
 - Bei der vCard stehen unsichere Zeilen auf **„Bitte entscheiden“**. Du kannst
   den Import erst abschließen, wenn alle entschieden sind – einzeln oder mit „Alle neu anlegen“ /
   „Alle überspringen“.

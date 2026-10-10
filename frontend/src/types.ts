@@ -329,6 +329,8 @@ export interface HouseholdImportPreview {
     member_count_mismatch: boolean;
     already_imported: boolean;
     existing_data_changes?: ExistingDataChanges;
+    /** Der vorgeschlagene Haushalt ist ein Bewohner-Haushalt: sein Wunsch wird nicht übernommen. */
+    wish_not_applied: boolean;
 }
 
 export interface PrivacyWarning {
@@ -364,6 +366,8 @@ export interface HHCommitResponse {
     skipped: number;
     /** Ohne zugeordneten Haushalt - der Import legt keine Haushalte an. */
     skipped_no_match: number;
+    /** Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde. */
+    wishes_not_applied: string[];
 }
 
 export interface IndividualImportPreview {
@@ -373,6 +377,11 @@ export interface IndividualImportPreview {
     last_name: string;
     birth_date?: string;
     member_number?: string;
+    member_since?: string;
+    /** Wert der Spalte „Mitglied seit“, der nicht als Datum angenommen wurde. */
+    member_since_rejected?: string;
+    /** Eine andere Person trägt die Mitgliedsnummer schon; sie wird nicht ergänzt. */
+    member_number_holder?: string;
     timestamp: string;
     gender?: string;
     occupation?: string;
@@ -406,11 +415,20 @@ export interface IndividualCommitRequest {
     decisions: IndividualDecision[];
 }
 
+/** Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde. */
+export interface MemberNumberConflict {
+    person: string;
+    member_number: string;
+    /** Wer die Nummer schon trägt. */
+    holder: string;
+}
+
 export interface IndividualCommitResponse {
     updated: number;
     skipped: number;
     /** Ohne zugeordnete Person - der Import legt keine Personen an. */
     skipped_no_match: number;
+    member_numbers_not_stored: MemberNumberConflict[];
 }
 
 // --- VCF-Import Types ---

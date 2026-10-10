@@ -141,6 +141,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                         <TableCell>Name</TableCell>
                                         <TableCell>MitglNr.</TableCell>
                                         <TableCell>Geburtsdatum</TableCell>
+                                        <TableCell>Mitglied seit</TableCell>
                                         <TableCell>Match</TableCell>
                                         <TableCell>Status</TableCell>
                                         <TableCell>Aktion</TableCell>
@@ -162,8 +163,27 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                 sx={inactive ? { opacity: 0.5, bgcolor: 'action.hover' } : undefined}
                                             >
                                                 <TableCell>{ind.name}</TableCell>
-                                                <TableCell>{ind.member_number || '—'}</TableCell>
+                                                <TableCell>
+                                                    {ind.member_number || '—'}
+                                                    {/* Gilt für die vorgeschlagene Person; nach der Zuordnung
+                                                        zu einer anderen zählt die Zusammenfassung. */}
+                                                    {ind.member_number_holder
+                                                        && (dec?.target_person_id ?? ind.match_result.matched_household_id)
+                                                            === ind.match_result.matched_household_id && (
+                                                        <Tooltip title={`Diese Mitgliedsnummer trägt schon ${ind.member_number_holder}. Sie wird hier nicht ergänzt.`}>
+                                                            <Chip label="vergeben" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
+                                                        </Tooltip>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell>{ind.birth_date || '—'}</TableCell>
+                                                <TableCell>
+                                                    {ind.member_since || '—'}
+                                                    {ind.member_since_rejected && (
+                                                        <Tooltip title={`„${ind.member_since_rejected}“ ist kein vollständiges Datum oder liegt in der Zukunft. Der Wert wird nicht übernommen.`}>
+                                                            <Chip label="nicht übernommen" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
+                                                        </Tooltip>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell>
                                                     {(() => {
                                                         const overrideName = matchOverrides[ind.temp_id];
@@ -241,6 +261,19 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                 <strong>{commitResult.skipped_no_match}</strong> Datensätze ohne
                                 zugeordnete Person wurden nicht übernommen — der Individualbogen
                                 legt keine neuen Personen an.
+                            </Alert>
+                        )}
+                        {commitResult.member_numbers_not_stored.length > 0 && (
+                            <Alert severity="warning" sx={{ mt: 2 }}>
+                                <strong>Mitgliedsnummer nicht eingetragen, weil sie schon vergeben ist:</strong>
+                                <ul>
+                                    {commitResult.member_numbers_not_stored.map((conflict, i) => (
+                                        <li key={i}>
+                                            {conflict.person}: Nummer {conflict.member_number} trägt
+                                            schon {conflict.holder}
+                                        </li>
+                                    ))}
+                                </ul>
                             </Alert>
                         )}
                     </Box>

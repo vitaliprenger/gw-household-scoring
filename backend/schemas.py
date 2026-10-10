@@ -394,6 +394,9 @@ class HouseholdImportPreview(BaseModel):
     member_count_mismatch: bool = False
     already_imported: bool = False
     existing_data_changes: Optional[ExistingDataChanges] = None
+    #: Der vorgeschlagene Haushalt ist ein Bewohner-Haushalt: Sein Wunsch wird
+    #: nicht übernommen, ein Wechselwunsch wird von Hand angelegt.
+    wish_not_applied: bool = False
 
 class PrivacyWarning(BaseModel):
     row: int
@@ -422,6 +425,8 @@ class HHCommitResponse(BaseModel):
     updated: int
     skipped: int
     skipped_no_match: int = 0
+    #: Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde
+    wishes_not_applied: List[str] = []
 
 class IndividualImportPreview(BaseModel):
     temp_id: str
@@ -430,6 +435,12 @@ class IndividualImportPreview(BaseModel):
     last_name: str
     birth_date: Optional[str] = None
     member_number: Optional[str] = None
+    member_since: Optional[str] = None
+    #: Wert der Spalte „Mitglied seit“, der nicht als Datum angenommen wurde
+    member_since_rejected: Optional[str] = None
+    #: Eine andere Person trägt die Mitgliedsnummer der Zeile schon; sie wird
+    #: bei der vorgeschlagenen Person nicht ergänzt.
+    member_number_holder: Optional[str] = None
     timestamp: str
     gender: Optional[str] = None
     occupation: Optional[str] = None
@@ -460,10 +471,18 @@ class IndividualCommitRequest(BaseModel):
     session_id: str
     decisions: List[IndividualDecision]
 
+class MemberNumberConflict(BaseModel):
+    """Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde."""
+    person: str
+    member_number: str
+    #: Wer die Nummer schon trägt
+    holder: str
+
 class IndividualCommitResponse(BaseModel):
     updated: int
     skipped: int
     skipped_no_match: int = 0
+    member_numbers_not_stored: List[MemberNumberConflict] = []
 
 # --- VCF-Import Schemas ---
 class VcfPersonPreview(BaseModel):

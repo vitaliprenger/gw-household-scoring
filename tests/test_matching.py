@@ -201,7 +201,7 @@ def test_individual_name_needs_unique_person_and_consistent_birth_date():
     db = make_session()
     without_birth_date = add_person(db, "Ines", "Ebert")
     with_birth_date = add_person(db, "Stefan", "Kramer", birth_date=datetime(1985, 3, 14))
-    add_person(db, "Jakob Finn", "Dreyer", birth_date=datetime(2021, 3, 14))
+    add_person(db, "Jonas Emil", "Sommer", birth_date=datetime(2020, 2, 2))
     add_person(db, "Jürgen", "Hoffmann")
     add_person(db, "Jürgen", "Hoffmann")
 
@@ -227,7 +227,7 @@ def test_individual_name_needs_unique_person_and_consistent_birth_date():
           f"(typ {result.type})")
 
     result = analyze_individual(
-        db, **{"Nachname, Vorname": "Dreyer, Jakob", "Geburtsdatum": "2021-03-14"})
+        db, **{"Nachname, Vorname": "Sommer, Jonas", "Geburtsdatum": "2020-02-02"})
     check("bloßer Rufname ist NICHT sicher", not result.is_certain, f"(typ {result.type})")
     db.close()
 

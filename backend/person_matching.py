@@ -49,6 +49,16 @@ def persons_with_member_number(people, member_number) -> list:
     return [p for p in people if same_member_number(p.member_number, member_number)]
 
 
+def other_member_number_holder(people, member_number, person):
+    """Wer außer ``person`` die Mitgliedsnummer schon trägt, sonst None.
+
+    Kein Import speichert eine Nummer ein zweites Mal (ADR 0011): Sie wäre
+    danach für beide Personen kein sicherer Treffer mehr.
+    """
+    others = (p for p in persons_with_member_number(people, member_number) if p is not person)
+    return next(others, None)
+
+
 def find_person_by_member_number(people, member_number):
     """Erste Person aus ``people`` mit derselben Mitgliedsnummer, sonst None."""
     return next(iter(persons_with_member_number(people, member_number)), None)
@@ -87,6 +97,69 @@ def birth_dates_conflict(a, b) -> bool:
     return first is not None and second is not None and first != second
 
 
+def _number_confirms(person, data: dict, parts: frozenset[str]) -> bool:
+    """Die Mitgliedsnummer der Zeile gehört ``person``, und Name und Geburtsdatum passen."""
+    return bool(
+        same_member_number(person.member_number, data.get("member_number"))
+        and (parts & name_parts(person.first_name, person.last_name)) - NAME_PARTICLES
+        and not birth_dates_conflict(data.get("birth_date"), person.birth_date)
+    )
+
+
+def _same_name(person, data: dict) -> bool:
+    parts = name_parts(data.get("first_name"), data.get("last_name"))
+    return bool(parts) and name_parts(person.first_name, person.last_name) == parts
+
+
+def _same_call_name(person, data: dict) -> bool:
+    """Gleicher Rufname (erster Vorname) und gleicher Nachname."""
+    last_name = (data.get("last_name") or "").strip().lower()
+    call_name = (data.get("first_name") or "").strip().lower().split(" ")[0]
+    return bool(
+        last_name and call_name
+        and (person.last_name or "").strip().lower() == last_name
+        and (person.first_name or "").strip().lower().split(" ")[0] == call_name
+    )
+
+
+def match_household_persons(people, rows: list[dict]) -> list:
+    """Ordnet den Zeilen eines Haushaltsbogens die Personen seines Haushalts zu.
+
+    Gibt je Zeile die gemeinte Person zurück oder None. Jede Person nimmt
+    höchstens eine Zeile auf, und jede Regel zählt nur, wenn genau eine noch
+    freie Person passt und sich die Geburtsdaten nicht widersprechen.
+
+    Die Regeln laufen nacheinander über den ganzen Bogen: erst der gleiche
+    Name, dann die Mitgliedsnummer, dann der Rufname mit gleichem Nachnamen
+    ("Jonas Sommer" für "Jonas Emil Sommer"). So nimmt der Elternteil seine
+    eigene Zeile auf, bevor die Zeile eines Kindes mit seiner Nummer ihn
+    trifft. Gleicher Nachname mit gleichem Geburtsdatum ist bewusst kein
+    Treffer: Er verschmilzt Zwillinge (ADR 0011).
+    """
+    free = list(people)
+    matched: list = [None] * len(rows)
+
+    rules = (
+        _same_name,
+        lambda person, data: _number_confirms(
+            person, data, name_parts(data.get("first_name"), data.get("last_name"))),
+        _same_call_name,
+    )
+    for rule in rules:
+        for index, data in enumerate(rows):
+            if matched[index] is not None:
+                continue
+            hits = [
+                person for person in free
+                if rule(person, data)
+                and not birth_dates_conflict(data.get("birth_date"), person.birth_date)
+            ]
+            if len(hits) == 1:
+                matched[index] = hits[0]
+                free.remove(hits[0])
+    return matched
+
+
 def find_certain_person(people, data: dict):
     """Sucht zu einem Import-Datensatz die sicher passende Person in ``people``.
 
@@ -103,8 +176,7 @@ def find_certain_person(people, data: dict):
     holders = persons_with_member_number(people, data.get("member_number"))
     if (
         len(holders) == 1
-        and (parts & name_parts(holders[0].first_name, holders[0].last_name)) - NAME_PARTICLES
-        and not birth_dates_conflict(data.get("birth_date"), holders[0].birth_date)
+        and _number_confirms(holders[0], data, parts)
         and (not same_name or holders[0] in same_name)
     ):
         return holders[0], MEMBER_NUMBER
