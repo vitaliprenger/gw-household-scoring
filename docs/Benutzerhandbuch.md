@@ -76,6 +76,24 @@ kaputt machen.
   Haushalte zusammenziehen oder sich einer trennt), zeigt der Chip **„Mehrere Haushalte“**, und
   die Zeile steht auf „Überspringen“. Der Bogen würde sonst die Angaben und den Wunsch eines der
   bisherigen Haushalte ersetzen. Entscheide selbst, zu welchem Haushalt der Bogen gehört.
+- Der Assistent des **Haushaltsbogens** zeigt jede Person mit Vor- und Nachnamen so, wie sie
+  gespeichert würde, und sagt dir, was mit ihr geschieht:
+  - **im Haushalt** – die Person steht schon dort; fehlende Angaben werden ergänzt.
+  - **wird zugeordnet** – die Person steht ohne Haushalt in der Anwendung und kommt in diesen
+    Haushalt. Ihre Angaben, etwa „Mitglied seit“, behält sie.
+  - **bleibt in „…“** – die Person gehört schon zu einem anderen Haushalt. Der Import verschiebt
+    niemanden: Sie wird nicht übernommen, und die Zusammenfassung nennt sie. Zieh sie bei Bedarf
+    im Tab **Personen** von Hand um.
+  - **neu** – die Person wird angelegt.
+- Steht bei einer neuen Person **„ähnliche Person im Datenbestand“**, gibt es schon jemanden mit
+  derselben Mitgliedsnummer, demselben Namen oder demselben Geburtsdatum und einem gemeinsamen
+  Namensteil. Fahr mit der Maus über den Hinweis, um zu sehen, wer das ist. Ist es dieselbe
+  Person, überspring die Zeile, ordne die Person im Tab **Personen** dem Haushalt zu und lies den
+  Bogen noch einmal ein. Ist es jemand anderes, übernimm die Zeile.
+- Stimmt die Aufteilung in Vor- und Nachname nicht (aus „Berger Anna“ wird der Vorname „Berger“),
+  berichtige den Namen nach dem Import bei der Person.
+- **„Nummer vergeben“** heißt: Die Mitgliedsnummer aus dem Bogen trägt schon eine andere Person.
+  Die Nummer wird dann nicht gespeichert; die Zusammenfassung nennt beide Personen.
 - Der Individualbogen **überschreibt** Geschlecht, Haupttätigkeit, Bildungsabschluss, kulturelle
   Vielfalt und besondere Lebenslagen, wenn er dazu eine Angabe enthält. Geburtsdatum,
   Mitgliedsnummer und **„Mitglied seit“** trägt er **nur ein, wenn sie noch fehlen**; den Namen

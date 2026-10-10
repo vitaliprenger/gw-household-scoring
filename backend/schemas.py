@@ -318,12 +318,46 @@ class PersonMissingData(BaseModel):
     missing: List[MissingValue] = []
 
 # --- Import Schemas ---
+class SimilarPerson(BaseModel):
+    """Person des Datenbestands, die einer neu anzulegenden ähnlich ist."""
+    name: str
+    household: Optional[str] = None
+    #: ``member_number`` | ``same_name`` | ``birth_date``
+    reason: str
+
+class MemberNumberConflict(BaseModel):
+    """Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde."""
+    person: str
+    member_number: str
+    #: Wer die Nummer schon trägt
+    holder: str
+
 class ImportPersonPreview(BaseModel):
     name: str
+    #: Vor- und Nachname so, wie sie gespeichert würden
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     member_number: Optional[str] = None
     birth_date: Optional[str] = None
+    #: Was mit der Person geschieht, bezogen auf den vorgeschlagenen Haushalt:
+    #: ``in_household`` | ``assign`` | ``other_household`` | ``new``
+    status: str = "new"
+    #: Bei ``other_household``: der Haushalt, in dem die Person bleibt
+    other_household: Optional[str] = None
+    #: Bei ``new``: ähnliche Personen im Datenbestand
+    similar: List[SimilarPerson] = []
+    #: Wer die Mitgliedsnummer schon trägt; sie wird dann nicht gespeichert
+    member_number_holder: Optional[str] = None
+
+class PersonNotTakenOver(BaseModel):
+    """Person eines Bogens, die in ihrem bisherigen Haushalt bleibt."""
+    person: str
+    household: str
+
+class SimilarPersonNotice(BaseModel):
+    """Neu angelegte Person, zu der es ähnliche im Datenbestand gibt."""
+    person: str
+    similar: List[SimilarPerson]
 
 class FuzzyCandidate(BaseModel):
     household_id: int
@@ -427,6 +461,12 @@ class HHCommitResponse(BaseModel):
     skipped_no_match: int = 0
     #: Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde
     wishes_not_applied: List[str] = []
+    persons_created: int = 0
+    #: Personen, die ohne Haushalt im Datenbestand standen und zugeordnet wurden
+    persons_assigned: int = 0
+    persons_not_taken_over: List[PersonNotTakenOver] = []
+    member_numbers_not_stored: List[MemberNumberConflict] = []
+    similar_persons: List[SimilarPersonNotice] = []
 
 class IndividualImportPreview(BaseModel):
     temp_id: str
@@ -470,13 +510,6 @@ class IndividualDecision(BaseModel):
 class IndividualCommitRequest(BaseModel):
     session_id: str
     decisions: List[IndividualDecision]
-
-class MemberNumberConflict(BaseModel):
-    """Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde."""
-    person: str
-    member_number: str
-    #: Wer die Nummer schon trägt
-    holder: str
 
 class IndividualCommitResponse(BaseModel):
     updated: int

@@ -386,6 +386,150 @@ def test_wartepool_wish_is_replaced():
     db.close()
 
 
+def add_person(db, first_name, last_name, **fields) -> models.Person:
+    """Person ohne Haushalt, wie sie von Hand oder aus der Mitgliederliste entsteht."""
+    person = models.Person(first_name=first_name, last_name=last_name, **fields)
+    db.add(person)
+    db.commit()
+    return person
+
+
+def test_person_without_household_is_assigned():
+    print("\n== Haushaltsbogen: Person ohne Haushalt wird zugeordnet statt dupliziert ==")
+    db = make_session()
+    household = sommer_household(db)
+    partner = add_person(db, "Nele", "Sommer", member_number="361",
+                         member_since=datetime(2023, 3, 11))
+
+    result = update_household(db, household, **PARENT, **{
+        "Person 2 (Name)": "Sommer, Nele", "Person 2 (Mitgliedsnummer)": "361"})
+
+    db.refresh(partner)
+    check_equal("die vorhandene Person gehört jetzt zum Haushalt",
+                partner.household_id, household.id)
+    check_equal("keine Dublette", db.query(models.Person).count(), 2)
+    check_equal("Eintrittsdatum bleibt", partner.member_since, datetime(2023, 3, 11))
+    check_equal("Zähler: zugeordnet", result.persons_assigned, 1)
+    check_equal("Zähler: neu angelegt", result.persons_created, 0)
+    db.close()
+
+
+def person_previews(db, **row) -> dict:
+    """Vorschau je Person des Bogens, nach dem Namen im Bogen."""
+    return {p.name: p for p in analyze(db, row).households[0].persons}
+
+
+def test_person_of_another_household_stays_there():
+    print("\n== Haushaltsbogen: Person aus einem anderen Haushalt bleibt dort ==")
+    db = make_session()
+    household = sommer_household(db)
+    parents = add_household(
+        db, "Vogel", {"first_name": "Antje", "last_name": "Vogel", "member_number": "455"})
+    antje = parents.people[0]
+    row = {**PARENT, "Person 2 (Name)": "Vogel, Antje", "Person 2 (Mitgliedsnummer)": "455"}
+
+    preview = person_previews(db, **row)["Vogel, Antje"]
+    check_equal("Vorschau: steht in einem anderen Haushalt", preview.status, "other_household")
+    check_equal("Vorschau nennt den Haushalt", preview.other_household, "Vogel")
+
+    # Von Hand dem Haushalt Sommer zugeordnet, obwohl Antje im Haushalt Vogel steht.
+    result = update_household(db, household, **row)
+
+    db.refresh(antje)
+    check_equal("die Person ist nicht verschoben", antje.household_id, parents.id)
+    check_equal("und nicht doppelt angelegt", db.query(models.Person).count(), 2)
+    check_equal("Zusammenfassung nennt Person und bisherigen Haushalt",
+                [(n.person, n.household) for n in result.persons_not_taken_over],
+                [("Antje Vogel", "Vogel")])
+    db.close()
+
+
+def test_preview_shows_what_happens_to_each_person():
+    print("\n== Haushaltsbogen: Vorschau je Person ==")
+    db = make_session()
+    sommer_household(db)
+    add_person(db, "Nele", "Sommer", member_number="361")
+
+    previews = person_previews(db, **PARENT, **{
+        "Person 2 (Name)": "Sommer, Nele", "Person 2 (Mitgliedsnummer)": "361",
+        "Person 3 (Name)": "Mia Lotta Sommer"})
+
+    check_equal("steht schon im Haushalt", previews["Sommer, Ole"].status, "in_household")
+    check_equal("steht ohne Haushalt im Datenbestand", previews["Sommer, Nele"].status, "assign")
+    child = previews["Mia Lotta Sommer"]
+    check_equal("wird neu angelegt", child.status, "new")
+    check_equal("Vor- und Nachname so, wie sie gespeichert würden",
+                (child.first_name, child.last_name), ("Mia", "Lotta Sommer"))
+    db.close()
+
+
+def test_similar_person_is_pointed_out():
+    print("\n== Haushaltsbogen: ähnliche Person im Datenbestand ==")
+    db = make_session()
+    household = sommer_household(db)
+    add_household(db, "Kern", {
+        "first_name": "Agathe", "last_name": "Kern", "member_number": "412"})
+    add_person(db, "Jürgen", "Hoffmann")
+    add_person(db, "Jürgen", "Hoffmann")
+    add_person(db, "Mia-Sophie", "Sommer", birth_date=datetime(2019, 4, 4))
+    add_person(db, "Lars", "Sommer")
+    row = {
+        **PARENT,
+        # Nummer einer Person mit ganz anderem Namen
+        "Person 2 (Name)": "Bauer, Moritz", "Person 2 (Mitgliedsnummer)": "412",
+        # Name, den zwei Personen tragen
+        "Person 3 (Name)": "Hoffmann, Jürgen",
+        # gleiches Geburtsdatum und gemeinsamer Namensbestandteil
+        "Person 4 (Name)": "Sommer, Mia", "Person 4 (Geburtsdatum)": "2019-04-04",
+        # nur der Nachname gemeinsam
+        "Person 5 (Name)": "Sommer, Finn",
+    }
+
+    previews = person_previews(db, **row)
+    def similar(name):
+        return [(s.reason, s.name, s.household) for s in previews[name].similar]
+
+    check_equal("Nummer mit unpassendem Namen",
+                similar("Bauer, Moritz"), [("member_number", "Agathe Kern", "Kern")])
+    check_equal("mehrdeutiger Name", similar("Hoffmann, Jürgen"),
+                [("same_name", "Jürgen Hoffmann", None), ("same_name", "Jürgen Hoffmann", None)])
+    check_equal("gleiches Geburtsdatum und gemeinsamer Namensbestandteil",
+                similar("Sommer, Mia"), [("birth_date", "Mia-Sophie Sommer", None)])
+    check_equal("gleicher Nachname allein ist kein Hinweis", similar("Sommer, Finn"), [])
+    check_equal("alle vier werden neu angelegt",
+                [previews[name].status for name in
+                 ("Bauer, Moritz", "Hoffmann, Jürgen", "Sommer, Mia", "Sommer, Finn")],
+                ["new"] * 4)
+
+    result = update_household(db, household, **row)
+    check_equal("die Personen sind trotzdem angelegt", result.persons_created, 4)
+    check_equal("Zusammenfassung nennt die Personen mit ähnlichen im Datenbestand",
+                sorted(n.person for n in result.similar_persons),
+                ["Jürgen Hoffmann", "Mia Sommer", "Moritz Bauer"])
+    db.close()
+
+
+def test_member_number_someone_else_holds_is_not_stored():
+    print("\n== Haushaltsbogen: vergebene Mitgliedsnummer wird nicht gespeichert ==")
+    db = make_session()
+    household = sommer_household(db)
+    add_household(db, "Kern", {
+        "first_name": "Agathe", "last_name": "Kern", "member_number": "412"})
+    row = {**PARENT, "Person 2 (Name)": "Bauer, Moritz", "Person 2 (Mitgliedsnummer)": "412"}
+
+    check_equal("Vorschau nennt, wer die Nummer trägt",
+                person_previews(db, **row)["Bauer, Moritz"].member_number_holder, "Agathe Kern")
+
+    result = update_household(db, household, **row)
+
+    moritz = next(p for p in household.people if p.first_name == "Moritz")
+    check_equal("die neue Person entsteht ohne Nummer", moritz.member_number, None)
+    check_equal("Zusammenfassung nennt Person, Nummer und Träger",
+                [(c.person, c.member_number, c.holder) for c in result.member_numbers_not_stored],
+                [("Moritz Bauer", "412", "Agathe Kern")])
+    db.close()
+
+
 if __name__ == "__main__":
     test_resident_household_gets_no_application()
     test_resident_household_keeps_existing_application()
@@ -399,6 +543,11 @@ if __name__ == "__main__":
     test_call_name_matches_within_the_household()
     test_name_beats_member_number_within_the_household()
     test_wartepool_wish_is_replaced()
+    test_person_without_household_is_assigned()
+    test_person_of_another_household_stays_there()
+    test_preview_shows_what_happens_to_each_person()
+    test_similar_person_is_pointed_out()
+    test_member_number_someone_else_holds_is_not_stored()
 
     print("\n" + "=" * 50)
     if failures:

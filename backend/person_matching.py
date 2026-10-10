@@ -6,6 +6,7 @@ Name. Was hier als gleich gilt, steht in ADR 0011.
 """
 
 import re
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Optional
 
@@ -158,6 +159,107 @@ def match_household_persons(people, rows: list[dict]) -> list:
                 matched[index] = hits[0]
                 free.remove(hits[0])
     return matched
+
+
+#: Was mit der Person einer Zeile des Haushaltsbogens geschieht.
+IN_HOUSEHOLD = "in_household"        # steht schon im Haushalt
+ASSIGN = "assign"                    # steht ohne Haushalt im Datenbestand, wird zugeordnet
+OTHER_HOUSEHOLD = "other_household"  # steht in einem anderen Haushalt, bleibt dort
+NEW = "new"                          # wird neu angelegt
+
+#: Warum eine Person des Datenbestands einer neuen ähnlich ist.
+SIMILAR_BY_MEMBER_NUMBER = "member_number"  # trägt die Nummer, aber Name oder Geburtsdatum passen nicht
+SIMILAR_BY_NAME = "same_name"                # mehrere Personen tragen den Namen
+SIMILAR_BY_BIRTH_DATE = "birth_date"         # gleiches Geburtsdatum, gemeinsamer Namensbestandteil
+
+
+@dataclass
+class RowResolution:
+    """Ergebnis der Suche für eine Zeile des Haushaltsbogens."""
+    status: str
+    #: Gefundene Person; None, wenn die Person neu angelegt wird
+    person: object = None
+    #: Nur bei ``NEW``: ``(grund, person)`` für jede ähnliche Person
+    similar: list = field(default_factory=list)
+    #: Wer die Mitgliedsnummer der Zeile schon trägt, sodass sie nicht
+    #: gespeichert wird
+    number_holder: object = None
+
+
+def _similar_persons(pool, data: dict) -> list:
+    """Personen, die einer neu anzulegenden ähnlich sind (ADR 0011).
+
+    Bewusst nur drei Fälle und kein Ähnlichkeitswert: Angehörige teilen den
+    Nachnamen, ein Hinweis bei jedem gleichen Nachnamen sagte nichts.
+    """
+    parts = name_parts(data.get("first_name"), data.get("last_name"))
+    birth_date = _as_date(data.get("birth_date"))
+    same_name = [p for p in pool if parts and name_parts(p.first_name, p.last_name) == parts]
+
+    similar: list = []
+
+    def add(reason: str, people) -> None:
+        for person in people:
+            if all(person is not known for _, known in similar):
+                similar.append((reason, person))
+
+    add(SIMILAR_BY_MEMBER_NUMBER, persons_with_member_number(pool, data.get("member_number")))
+    if len(same_name) > 1:
+        add(SIMILAR_BY_NAME, same_name)
+    if birth_date is not None:
+        add(SIMILAR_BY_BIRTH_DATE, [
+            p for p in pool
+            if _as_date(p.birth_date) == birth_date
+            and (parts & name_parts(p.first_name, p.last_name)) - NAME_PARTICLES
+        ])
+    return similar
+
+
+def resolve_household_rows(household_people, rows: list[dict], all_people) -> list[RowResolution]:
+    """Sucht zu jeder Zeile eines Haushaltsbogens die gemeinte Person.
+
+    Erst im Haushalt (``household_people``, leer bei einem neuen Haushalt),
+    dann im gesamten Datenbestand (``all_people``). Eine Person ohne Haushalt
+    wird bei sicherem Treffer zugeordnet; eine Person aus einem anderen
+    Haushalt bleibt dort. Jede Person nimmt höchstens eine Zeile auf.
+    """
+    members = list(household_people)
+    in_household = match_household_persons(members, rows)
+    claimed = [person for person in in_household if person is not None]
+
+    def unclaimed() -> list:
+        return [p for p in all_people if all(p is not c for c in claimed)]
+
+    resolutions: list[RowResolution] = []
+    for data, member in zip(rows, in_household):
+        if member is not None:
+            resolutions.append(RowResolution(IN_HOUSEHOLD, member))
+            continue
+        found, _ = find_certain_person(unclaimed(), data)
+        if found is None:
+            resolutions.append(RowResolution(NEW))
+            continue
+        claimed.append(found)
+        if any(found is m for m in members):
+            status = IN_HOUSEHOLD
+        elif found.household_id is None:
+            status = ASSIGN
+        else:
+            status = OTHER_HOUSEHOLD
+        resolutions.append(RowResolution(status, found))
+
+    pool = unclaimed()
+    for data, resolution in zip(rows, resolutions):
+        if resolution.status == NEW:
+            resolution.similar = _similar_persons(pool, data)
+        # Die Nummer wird nur gespeichert, wenn die Person noch keine hat.
+        stores_number = resolution.status in (NEW, IN_HOUSEHOLD, ASSIGN) and not (
+            resolution.person is not None and resolution.person.member_number
+        )
+        if stores_number:
+            resolution.number_holder = other_member_number_holder(
+                all_people, data.get("member_number"), resolution.person)
+    return resolutions
 
 
 def find_certain_person(people, data: dict):

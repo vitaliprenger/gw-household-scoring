@@ -14,6 +14,7 @@ import { commitHHBogen } from '../../api';
 import MatchingDialog from './MatchingDialog';
 import { isCertainMatch, isUncertainMatch } from './matching';
 import DataChangeDialog from './DataChangeDialog';
+import BogenPersons, { similarPersonText } from './BogenPersons';
 
 interface HHImportWizardProps {
     open: boolean;
@@ -178,9 +179,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                             <Table size="small">
                                 <TableHead>
                                     <TableRow>
-                                        <TableCell>Person 1</TableCell>
-                                        <TableCell>MitglNr.</TableCell>
-                                        <TableCell>Mitglieder</TableCell>
+                                        <TableCell>Personen (Vorname | Nachname)</TableCell>
                                         <TableCell>Match</TableCell>
                                         <TableCell>Status</TableCell>
                                         <TableCell>Hinweise</TableCell>
@@ -189,19 +188,26 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                 </TableHead>
                                 <TableBody>
                                     {analysis.households.map((hh) => {
-                                        const p1 = hh.persons[0];
                                         const dec = decisions[hh.temp_id];
+                                        const proposed = hh.match_result.matched_household_id;
+                                        // Vorschau und Hinweise gelten für den vorgeschlagenen
+                                        // Haushalt; nach der Zuordnung zu einem anderen zählt
+                                        // die Zusammenfassung.
+                                        const forProposed = (dec?.target_household_id ?? proposed) === proposed;
                                         return (
                                             <TableRow
                                                 key={hh.temp_id}
                                                 sx={hh.already_imported ? { opacity: 0.5, bgcolor: 'action.hover' } : undefined}
                                             >
-                                                <TableCell>{p1?.name ?? '—'}</TableCell>
-                                                <TableCell>{p1?.member_number ?? '—'}</TableCell>
                                                 <TableCell>
-                                                    {hh.persons.length}
+                                                    <BogenPersons
+                                                        persons={hh.persons}
+                                                        showOutcome={!hh.already_imported && !!proposed && forProposed}
+                                                    />
                                                     {hh.member_count_mismatch && !hh.already_imported && (
-                                                        <Chip label="Abweichung" size="small" color="warning" sx={{ ml: 1 }} />
+                                                        <Tooltip title={`Der Bogen nennt ${hh.declared_member_count} Personen, führt aber ${hh.persons.length} auf.`}>
+                                                            <Chip label="Abweichung der Personenzahl" size="small" color="warning" sx={{ mt: 0.5 }} />
+                                                        </Tooltip>
                                                     )}
                                                 </TableCell>
                                                 <TableCell>
@@ -242,11 +248,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                             onClick={() => setDataChangeFor(hh)}
                                                         />
                                                     ) : null}
-                                                    {/* Gilt für den vorgeschlagenen Haushalt; nach der Zuordnung
-                                                        zu einem anderen zählt die Zusammenfassung. */}
-                                                    {hh.wish_not_applied && !hh.already_imported
-                                                        && (dec?.target_household_id ?? hh.match_result.matched_household_id)
-                                                            === hh.match_result.matched_household_id && (
+                                                    {hh.wish_not_applied && !hh.already_imported && forProposed && (
                                                         <Tooltip title={WISH_NOT_APPLIED_HINT}>
                                                             <Chip
                                                                 label="Wunsch nicht übernommen"
@@ -297,8 +299,45 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                         <Typography variant="h6" gutterBottom>Import abgeschlossen</Typography>
                         <Alert severity="success" sx={{ mb: 2 }}>
                             <strong>{commitResult.updated}</strong> Haushalte ergänzt,{' '}
-                            <strong>{commitResult.skipped}</strong> übersprungen.
+                            <strong>{commitResult.skipped}</strong> übersprungen.{' '}
+                            <strong>{commitResult.persons_created}</strong> Personen neu angelegt,{' '}
+                            <strong>{commitResult.persons_assigned}</strong> aus dem Datenbestand zugeordnet.
                         </Alert>
+                        {commitResult.persons_not_taken_over.length > 0 && (
+                            <Alert severity="warning" sx={{ mb: 2 }}>
+                                <strong>Nicht übernommen – bitte von Hand umziehen:</strong>
+                                <ul>
+                                    {commitResult.persons_not_taken_over.map((entry, i) => (
+                                        <li key={i}>{entry.person} bleibt im Haushalt „{entry.household}“</li>
+                                    ))}
+                                </ul>
+                            </Alert>
+                        )}
+                        {commitResult.similar_persons.length > 0 && (
+                            <Alert severity="warning" sx={{ mb: 2 }}>
+                                <strong>Neu angelegt, obwohl es eine ähnliche Person im Datenbestand gibt:</strong>
+                                <ul>
+                                    {commitResult.similar_persons.map((entry, i) => (
+                                        <li key={i}>
+                                            {entry.person} – {entry.similar.map(similarPersonText).join('; ')}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </Alert>
+                        )}
+                        {commitResult.member_numbers_not_stored.length > 0 && (
+                            <Alert severity="warning" sx={{ mb: 2 }}>
+                                <strong>Mitgliedsnummer nicht gespeichert, weil sie schon vergeben ist:</strong>
+                                <ul>
+                                    {commitResult.member_numbers_not_stored.map((conflict, i) => (
+                                        <li key={i}>
+                                            {conflict.person}: Nummer {conflict.member_number} trägt
+                                            schon {conflict.holder}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </Alert>
+                        )}
                         {commitResult.skipped_no_match > 0 && (
                             <Alert severity="info" sx={{ mb: 2 }}>
                                 <strong>{commitResult.skipped_no_match}</strong> Datensätze ohne

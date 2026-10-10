@@ -272,12 +272,36 @@ export interface JokerWaitEntry {
 
 // --- Import Types ---
 
+/** Person des Datenbestands, die einer neu anzulegenden ähnlich ist. */
+export interface SimilarPerson {
+    name: string;
+    household?: string;
+    reason: 'member_number' | 'same_name' | 'birth_date';
+}
+
+/** Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde. */
+export interface MemberNumberConflict {
+    person: string;
+    member_number: string;
+    /** Wer die Nummer schon trägt. */
+    holder: string;
+}
+
 export interface ImportPersonPreview {
     name: string;
+    /** Vor- und Nachname so, wie sie gespeichert würden. */
     first_name?: string;
     last_name?: string;
     member_number?: string;
     birth_date?: string;
+    /** Was mit der Person geschieht, bezogen auf den vorgeschlagenen Haushalt. */
+    status: 'in_household' | 'assign' | 'other_household' | 'new';
+    /** Bei `other_household`: der Haushalt, in dem die Person bleibt. */
+    other_household?: string;
+    /** Bei `new`: ähnliche Personen im Datenbestand. */
+    similar: SimilarPerson[];
+    /** Wer die Mitgliedsnummer schon trägt; sie wird dann nicht gespeichert. */
+    member_number_holder?: string;
 }
 
 export interface FuzzyCandidate {
@@ -368,6 +392,14 @@ export interface HHCommitResponse {
     skipped_no_match: number;
     /** Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde. */
     wishes_not_applied: string[];
+    persons_created: number;
+    /** Personen, die ohne Haushalt im Datenbestand standen und zugeordnet wurden. */
+    persons_assigned: number;
+    /** Personen, die in ihrem bisherigen Haushalt bleiben. */
+    persons_not_taken_over: { person: string; household: string }[];
+    member_numbers_not_stored: MemberNumberConflict[];
+    /** Neu angelegte Personen, zu denen es ähnliche im Datenbestand gibt. */
+    similar_persons: { person: string; similar: SimilarPerson[] }[];
 }
 
 export interface IndividualImportPreview {
@@ -413,14 +445,6 @@ export interface IndividualDecision {
 export interface IndividualCommitRequest {
     session_id: string;
     decisions: IndividualDecision[];
-}
-
-/** Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde. */
-export interface MemberNumberConflict {
-    person: string;
-    member_number: string;
-    /** Wer die Nummer schon trägt. */
-    holder: string;
 }
 
 export interface IndividualCommitResponse {
