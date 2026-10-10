@@ -435,6 +435,12 @@ class IndividualImportPreview(BaseModel):
     last_name: str
     birth_date: Optional[str] = None
     member_number: Optional[str] = None
+    member_since: Optional[str] = None
+    #: Wert der Spalte „Mitglied seit“, der nicht als Datum angenommen wurde
+    member_since_rejected: Optional[str] = None
+    #: Eine andere Person trägt die Mitgliedsnummer der Zeile schon; sie wird
+    #: bei der vorgeschlagenen Person nicht ergänzt.
+    member_number_holder: Optional[str] = None
     timestamp: str
     gender: Optional[str] = None
     occupation: Optional[str] = None

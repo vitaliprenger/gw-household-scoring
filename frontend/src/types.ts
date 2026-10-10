@@ -377,6 +377,11 @@ export interface IndividualImportPreview {
     last_name: string;
     birth_date?: string;
     member_number?: string;
+    member_since?: string;
+    /** Wert der Spalte „Mitglied seit“, der nicht als Datum angenommen wurde. */
+    member_since_rejected?: string;
+    /** Eine andere Person trägt die Mitgliedsnummer schon; sie wird nicht ergänzt. */
+    member_number_holder?: string;
     timestamp: string;
     gender?: string;
     occupation?: string;

@@ -15,6 +15,7 @@ from .person_matching import (
     find_certain_person,
     find_person_by_member_number,
     normalize_member_number,
+    other_member_number_holder,
     persons_with_member_number,
     same_member_number,
 )
@@ -105,6 +106,23 @@ def parse_date(raw) -> Optional[date]:
     except Exception:
         pass
     return None
+
+
+def parse_member_since(raw) -> tuple[Optional[date], Optional[str]]:
+    """Eintrittsdatum aus der Selbstauskunft: ``(datum, abgelehnter_wert)``.
+
+    Angenommen wird nur ein vollständiges Datum, das nicht in der Zukunft
+    liegt. Eine reine Zahl wie "2019" läse :func:`parse_date` als
+    Excel-Seriennummer; daraus würde ein Datum im Jahr 1905 und damit die
+    volle Mitgliedsdauer.
+    """
+    text = "" if raw is None else str(raw).strip()
+    if not text:
+        return None, None
+    parsed = None if text.isdigit() else parse_date(text)
+    if parsed is None or parsed > date.today():
+        return None, text
+    return parsed, None
 
 
 def parse_timestamp(raw) -> Optional[datetime]:
@@ -880,6 +898,7 @@ def parse_individual_bogen(file_contents: bytes) -> dict:
         first_name, last_name = normalize_name(name_raw)
         member_nr = normalize_member_number(row.get("Mitgliedsnummer", ""))
         dob = parse_date(row.get("Geburtsdatum", ""))
+        member_since, member_since_rejected = parse_member_since(row.get("Mitglied seit", ""))
         timestamp_str = str(row.get("Zeitstempel", "")).strip()
         timestamp = parse_timestamp(timestamp_str)
 
@@ -904,6 +923,8 @@ def parse_individual_bogen(file_contents: bytes) -> dict:
             "last_name": last_name,
             "member_number": member_nr,
             "birth_date": dob.isoformat() if dob else None,
+            "member_since": member_since.isoformat() if member_since else None,
+            "member_since_rejected": member_since_rejected,
             "timestamp_str": timestamp_str,
             "timestamp": timestamp,
             "gender": gender,
@@ -1024,20 +1045,30 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
     _cleanup_sessions()
     parsed = parse_individual_bogen(file_contents)
 
+    all_persons = db.query(models.Person).all()
+
     previews = []
     for ind_data in parsed["individuals"]:
         match_result = match_individual_to_person(ind_data, db)
+        matched_person = (
+            db.query(models.Person).get(match_result.matched_household_id)
+            if match_result.matched_household_id else None
+        )
 
         already_imported = False
         is_older = False
-        if match_result.matched_household_id and ind_data.get("timestamp"):
-            matched_person = db.query(models.Person).get(match_result.matched_household_id)
-            if matched_person and matched_person.individual_import_timestamp:
+        if matched_person and ind_data.get("timestamp"):
+            if matched_person.individual_import_timestamp:
                 db_ts = matched_person.individual_import_timestamp.replace(tzinfo=None)
                 if db_ts == ind_data["timestamp"]:
                     already_imported = True
                 elif db_ts > ind_data["timestamp"]:
                     is_older = True
+
+        number_holder = (
+            other_member_number_holder(all_persons, ind_data.get("member_number"), matched_person)
+            if matched_person else None
+        )
 
         previews.append(schemas.IndividualImportPreview(
             temp_id=ind_data["temp_id"],
@@ -1046,6 +1077,11 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
             last_name=ind_data["last_name"],
             birth_date=ind_data.get("birth_date"),
             member_number=ind_data.get("member_number"),
+            member_since=ind_data.get("member_since"),
+            member_since_rejected=ind_data.get("member_since_rejected"),
+            member_number_holder=(
+                f"{number_holder.first_name} {number_holder.last_name}" if number_holder else None
+            ),
             timestamp=ind_data.get("timestamp_str", ""),
             gender=ind_data.get("gender"),
             occupation=ind_data.get("occupation"),
@@ -1107,7 +1143,7 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
             skipped_no_match += 1
             continue
 
-        _update_person_from_individual(person, raw)
+        _update_person_from_individual(person, raw, db)
         updated_count += 1
 
     db.commit()
@@ -1121,7 +1157,7 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
     )
 
 
-def _update_person_from_individual(person: models.Person, raw: dict):
+def _update_person_from_individual(person: models.Person, raw: dict, db: Session):
     if raw.get("gender"):
         person.gender = raw["gender"]
     if raw.get("occupation"):
@@ -1133,8 +1169,21 @@ def _update_person_from_individual(person: models.Person, raw: dict):
     if raw.get("life_situation"):
         val = raw["life_situation"].strip()
         person.special_needs = None if val.lower() in ("nein", "", "keine") else val
+    # Selbstauskunft, die es auch in der Mitgliederverwaltung gibt: nur
+    # ergänzen, nie einen vorhandenen Wert überschreiben (ADR 0011).
     if raw.get("member_number") and not person.member_number:
-        person.member_number = raw["member_number"]
+        numbered = db.query(models.Person).filter(models.Person.member_number.isnot(None)).all()
+        if other_member_number_holder(numbered, raw["member_number"], person) is None:
+            person.member_number = raw["member_number"]
+    if not person.birth_date:
+        person.birth_date = _as_datetime(raw.get("birth_date"))
+    if not person.member_since:
+        person.member_since = _as_datetime(raw.get("member_since"))
     if raw.get("timestamp"):
         person.individual_import_timestamp = raw["timestamp"]
     person.updated_at = datetime.utcnow()
+
+
+def _as_datetime(iso_date: Optional[str]) -> Optional[datetime]:
+    parsed = parse_date(iso_date)
+    return datetime(parsed.year, parsed.month, parsed.day) if parsed else None

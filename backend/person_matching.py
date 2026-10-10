@@ -49,6 +49,16 @@ def persons_with_member_number(people, member_number) -> list:
     return [p for p in people if same_member_number(p.member_number, member_number)]
 
 
+def other_member_number_holder(people, member_number, person):
+    """Wer außer ``person`` die Mitgliedsnummer schon trägt, sonst None.
+
+    Kein Import speichert eine Nummer ein zweites Mal (ADR 0011): Sie wäre
+    danach für beide Personen kein sicherer Treffer mehr.
+    """
+    others = (p for p in persons_with_member_number(people, member_number) if p is not person)
+    return next(others, None)
+
+
 def find_person_by_member_number(people, member_number):
     """Erste Person aus ``people`` mit derselben Mitgliedsnummer, sonst None."""
     return next(iter(persons_with_member_number(people, member_number)), None)

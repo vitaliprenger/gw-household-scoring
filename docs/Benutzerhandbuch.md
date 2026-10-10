@@ -72,6 +72,15 @@ kaputt machen.
   dann, ob wirklich diese Person gemeint ist – oft hat jemand die Nummer eines Angehörigen
   eingetragen oder sich vertippt. Trägt eine andere Person genau den Namen aus dem Bogen, gilt
   der Name und nicht die Nummer.
+- Der Individualbogen **überschreibt** Geschlecht, Haupttätigkeit, Bildungsabschluss, kulturelle
+  Vielfalt und besondere Lebenslagen, wenn er dazu eine Angabe enthält. Geburtsdatum,
+  Mitgliedsnummer und **„Mitglied seit“** trägt er **nur ein, wenn sie noch fehlen**; den Namen
+  ändert er nie. Stimmt ein vorhandener Wert nicht, berichtige ihn von Hand bei der Person.
+- Ein „Mitglied seit“, das kein vollständiges Datum ist (etwa nur „2019“) oder in der Zukunft
+  liegt, übernimmt der Individualbogen nicht; der Assistent markiert es mit **„nicht übernommen“**.
+  Trag das Datum dann von Hand ein.
+- Trägt schon eine andere Person die Mitgliedsnummer aus dem Bogen, steht daneben **„vergeben“**,
+  und die Nummer wird nicht eingetragen. Klär, wem sie gehört.
 - Zeilen des Individualbogens ohne Treffer werden übersprungen. Sie erscheinen beim nächsten
   Einlesen wieder; der Individualbogen legt nie eine Person an.
 - Der **Haushaltsbogen eines Bewohner-Haushalts** aktualisiert nur dessen Angaben. Er legt keine
