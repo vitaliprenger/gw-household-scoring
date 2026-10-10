@@ -13,6 +13,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import HistoryIcon from '@mui/icons-material/History';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import LogoutIcon from '@mui/icons-material/Logout';
 import { DataGrid, GridColDef, GridRenderCellParams, GridRowId, GridRowSelectionModel } from '@mui/x-data-grid';
 import { deDE } from '@mui/x-data-grid/locales';
 import { getHouseholds, getScoringConfig, updateScoringConfig, calculateScores, login, getRanking, getApplications } from './api';
@@ -25,7 +26,9 @@ import StatisticsTab from './components/statistics/StatisticsTab';
 import ApplicationsTab from './components/applications/ApplicationsTab';
 import { formatDate } from './components/applications/wishes';
 import CreateHouseholdDialog from './components/household/CreateHouseholdDialog';
-import { zebraGridSx, zebraRowClassName } from './components/common/tableStyles';
+import { mobileWrappingGridSx, zebraGridSx, zebraRowClassName } from './components/common/tableStyles';
+import { flexCell, mobileColumns, mobileGridProps, mobileWrappingGridProps } from './components/common/mobileColumns';
+import { useIsMobile } from './components/common/useIsMobile';
 import ScoreBreakdownDialog from './components/scoring/ScoreBreakdownDialog';
 import ScoreComparisonDialog, { ComparisonEntry } from './components/scoring/ScoreComparisonDialog';
 import HelpDialog from './components/help/HelpDialog';
@@ -33,6 +36,8 @@ import HelpDialog from './components/help/HelpDialog';
 /** Höchstens so viele Haushalte lassen sich nebeneinander vergleichen. */
 const MAX_COMPARE = 5;
 const EMPTY_SELECTION: GridRowSelectionModel = { type: 'include', ids: new Set() };
+/** Hinweise am Haushalt öffnen auf Touch-Geräten beim Antippen und bleiben kurz stehen. */
+const HINT_TOOLTIP_PROPS = { enterTouchDelay: 0, leaveTouchDelay: 4000 } as const;
 /** Beschreibung der Spalte „Personen“ in Rangliste und Haushaltstabelle. */
 const HOUSEHOLD_SIZE_DESCRIPTION = 'Haushaltsgröße: Zahl der Personen im Haushalt, ohne archivierte.';
 
@@ -104,6 +109,7 @@ const sizeLabel = (value: number | null): string =>
   value === null || value === undefined ? 'ohne Zimmerangabe' : `${value} Zimmer`;
 
 function App() {
+  const isMobile = useIsMobile();
   const [tabValue, setTabValue] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [households, setHouseholds] = useState<Household[]>([]);
@@ -269,31 +275,53 @@ function App() {
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
         <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+          <Typography variant="h6" component="div" noWrap sx={{ flexGrow: 1 }}>
             GW Haushalts-Scoring
           </Typography>
-          <Button
-            color="inherit"
-            variant="outlined"
-            startIcon={<CalculateIcon />}
-            onClick={handleCalculate}
-            sx={{ mr: 2 }}
-          >
-            Punkte neu berechnen
-          </Button>
+          {isMobile ? (
+            <Tooltip title="Punkte neu berechnen">
+              <IconButton color="inherit" onClick={handleCalculate} aria-label="Punkte neu berechnen">
+                <CalculateIcon />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Button
+              color="inherit"
+              variant="outlined"
+              startIcon={<CalculateIcon />}
+              onClick={handleCalculate}
+              sx={{ mr: 2 }}
+            >
+              Punkte neu berechnen
+            </Button>
+          )}
           <Tooltip title="Hilfe zu diesem Tab">
-            <IconButton color="inherit" onClick={() => setHelpOpen(true)} sx={{ mr: 1 }} aria-label="Hilfe">
+            <IconButton color="inherit" onClick={() => setHelpOpen(true)} sx={{ mr: isMobile ? 0 : 1 }} aria-label="Hilfe">
               <HelpOutlineIcon />
             </IconButton>
           </Tooltip>
-          <Button color="inherit" onClick={handleLogout}>Abmelden</Button>
+          {isMobile ? (
+            <Tooltip title="Abmelden">
+              <IconButton color="inherit" edge="end" onClick={handleLogout} aria-label="Abmelden">
+                <LogoutIcon />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Button color="inherit" onClick={handleLogout}>Abmelden</Button>
+          )}
         </Toolbar>
       </AppBar>
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} section={HELP_SECTIONS[tabValue]} />
 
       <Container maxWidth="lg" sx={{ mt: 4 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-          <Tabs value={tabValue} onChange={handleTabChange}>
+          <Tabs
+            value={tabValue}
+            onChange={handleTabChange}
+            variant="scrollable"
+            scrollButtons="auto"
+            allowScrollButtonsMobile
+          >
             <Tab label="Rangliste" />
             <Tab label="Bewerbungen" />
             <Tab label="Alle Haushalte" />
@@ -380,20 +408,44 @@ function App() {
             .sort((a, b) => (a.requested_at ?? '9999').localeCompare(b.requested_at ?? '9999'))
             .map((e, index) => ({ ...e, rank: index + 1 }));
 
+          const specialCaseHint = (note?: string) => (
+            <Tooltip key="special" title={note || 'Sonderfall beachten'} {...HINT_TOOLTIP_PROPS}>
+              <WarningAmberIcon color="warning" fontSize="small" />
+            </Tooltip>
+          );
+          const byWishHint = (
+            <Tooltip key="wish" title="Der Haushalt wünscht diese Kategorie ausdrücklich; die Eignungsprüfung würde ihn hier ausschließen." {...HINT_TOOLTIP_PROPS}>
+              <Chip label="nur auf Wunsch" size="small" variant="outlined" color="info" />
+            </Tooltip>
+          );
+          const staleHint = (
+            <Tooltip key="stale" title="Gespeicherte Punktzahl ist veraltet: Daten des Haushalts, der Bewohner oder die Bewertungskonfiguration haben sich seit der letzten Berechnung geändert. „Punkte neu berechnen“ aktualisiert sie." {...HINT_TOOLTIP_PROPS}>
+              <HistoryIcon color="warning" fontSize="small" />
+            </Tooltip>
+          );
+
           const householdCell = (
             name: string, specialCase?: boolean, note?: string, byWishOnly?: boolean,
           ) => (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
               <span>{name}</span>
-              {specialCase && (
-                <Tooltip title={note || 'Sonderfall beachten'}>
-                  <WarningAmberIcon color="warning" fontSize="small" />
-                </Tooltip>
-              )}
-              {byWishOnly && (
-                <Tooltip title="Der Haushalt wünscht diese Kategorie ausdrücklich; die Eignungsprüfung würde ihn hier ausschließen.">
-                  <Chip label="nur auf Wunsch" size="small" variant="outlined" color="info" />
-                </Tooltip>
+              {specialCase && specialCaseHint(note)}
+              {byWishOnly && byWishHint}
+            </Box>
+          );
+
+          // Auf dem Handy ist die Namensspalte schmal: Der Name bricht um, die
+          // Hinweise stehen in einer eigenen Zeile darunter statt abgeschnitten zu werden.
+          const mobileHouseholdCell = (name: string, hints: React.ReactNode[], lead?: React.ReactNode) => (
+            <Box sx={{ minWidth: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                {lead}
+                <Box component="span" sx={{ overflowWrap: 'anywhere' }}>{name}</Box>
+              </Box>
+              {hints.length > 0 && (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5, pb: 0.5 }}>
+                  {hints}
+                </Box>
               )}
             </Box>
           );
@@ -402,8 +454,12 @@ function App() {
             { field: 'rank', headerName: 'Rang', width: 80, type: 'number' },
             {
               field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180,
-              renderCell: (params: GridRenderCellParams<PriorityEntry>) =>
-                householdCell(params.row.name, params.row.special_case, params.row.special_case_note),
+              renderCell: (params: GridRenderCellParams<PriorityEntry>) => isMobile
+                ? mobileHouseholdCell(
+                    params.row.name,
+                    params.row.special_case ? [specialCaseHint(params.row.special_case_note)] : [],
+                  )
+                : householdCell(params.row.name, params.row.special_case, params.row.special_case_note),
             },
             { field: 'member_count', headerName: 'Personen', description: HOUSEHOLD_SIZE_DESCRIPTION, width: 100, type: 'number' },
             {
@@ -420,24 +476,35 @@ function App() {
             { field: 'rank', headerName: 'Rang', width: 80, type: 'number' },
             {
               field: 'name', headerName: 'Haushaltsname', flex: 1, minWidth: 180,
-              renderCell: (params: GridRenderCellParams<RankedHousehold>) => (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
+              renderCell: (params: GridRenderCellParams<RankedHousehold>) => {
+                const row = params.row;
+                const breakdownButton = (
                   <Tooltip title="Punkteaufschlüsselung">
-                    <IconButton size="small" onClick={() => setBreakdownEntry(entryFor(params.row))}>
+                    <IconButton size="small" onClick={() => setBreakdownEntry(entryFor(row))}>
                       <InfoOutlinedIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  {householdCell(
-                    params.row.name, params.row.special_case, params.row.special_case_note,
-                    params.row.by_wish_only,
-                  )}
-                  {staleIds.has(params.row.id) && (
-                    <Tooltip title="Gespeicherte Punktzahl ist veraltet: Daten des Haushalts, der Bewohner oder die Bewertungskonfiguration haben sich seit der letzten Berechnung geändert. „Punkte neu berechnen“ aktualisiert sie.">
-                      <HistoryIcon color="warning" fontSize="small" />
-                    </Tooltip>
-                  )}
-                </Box>
-              ),
+                );
+                const stale = staleIds.has(row.id);
+                if (isMobile) {
+                  return mobileHouseholdCell(
+                    row.name,
+                    [
+                      row.special_case && specialCaseHint(row.special_case_note),
+                      stale && staleHint,
+                      row.by_wish_only && byWishHint,
+                    ].filter(Boolean),
+                    breakdownButton,
+                  );
+                }
+                return (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
+                    {breakdownButton}
+                    {householdCell(row.name, row.special_case, row.special_case_note, row.by_wish_only)}
+                    {stale && staleHint}
+                  </Box>
+                );
+              },
             },
             { field: 'member_count', headerName: 'Personen', description: HOUSEHOLD_SIZE_DESCRIPTION, width: 100, type: 'number' },
             {
@@ -456,9 +523,27 @@ function App() {
             },
           ];
 
+          // Handy: Rang, Name und Punkte passen nebeneinander (bei 360 px bleiben
+          // 326 px), alle weiteren Spalten folgen dahinter. Ohne Filter steht die
+          // Grundpunktzahl vorn -- unter ihrem eigenen Namen, weil es ohne
+          // Zimmerzahl keine Wohnraumausnutzung gibt (ADR 0003).
+          const mobilePriorityColumns = mobileColumns(
+            priorityColumns, ['rank', 'name', 'requested_at'],
+            { rank: { width: 60 }, name: { minWidth: 156 }, requested_at: { width: 110 } },
+          ).map(flexCell);
+          const mobileRankingColumns = mobileColumns(
+            rankingColumns, ['rank', 'name', unfiltered ? 'base_score' : 'total_score'],
+            {
+              rank: { width: 60 },
+              name: { minWidth: 140 },
+              base_score: { width: 76, headerName: 'Grund', description: 'Grundpunktzahl' },
+              total_score: { width: 76, headerName: 'Gesamt', description: 'Gesamtpunktzahl' },
+            },
+          ).map(flexCell);
+
           return (
             <Box>
-              <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+              <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
                 <FormControl sx={{ minWidth: 200 }}>
                   <InputLabel>Wohnungsgröße</InputLabel>
                   <Select
@@ -496,14 +581,17 @@ function App() {
                   </Typography>
                   <DataGrid
                     rows={priorityRows}
-                    columns={priorityColumns}
+                    columns={isMobile ? mobilePriorityColumns : priorityColumns}
                     autoHeight
                     density="compact"
                     disableRowSelectionOnClick
                     hideFooter={priorityRows.length <= 10}
-                    initialState={{ sorting: { sortModel: [{ field: 'rank', sort: 'asc' }] } }}
+                    // Die Zeilen kommen schon in Rangfolge; auf dem Handy bleibt
+                    // der Kopf „Rang“ so ohne Sortierpfeil lesbar.
+                    initialState={isMobile ? undefined : { sorting: { sortModel: [{ field: 'rank', sort: 'asc' }] } }}
+                    {...(isMobile ? mobileWrappingGridProps : {})}
                     getRowClassName={zebraRowClassName}
-                    sx={zebraGridSx}
+                    sx={isMobile ? mobileWrappingGridSx : zebraGridSx}
                     localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
                   />
                 </Box>
@@ -535,7 +623,7 @@ function App() {
               {rankingRows.length > 0 ? (
                 <DataGrid
                   rows={rankingRows}
-                  columns={rankingColumns}
+                  columns={isMobile ? mobileRankingColumns : rankingColumns}
                   autoHeight
                   density="compact"
                   disableRowSelectionOnClick
@@ -545,12 +633,13 @@ function App() {
                   isRowSelectable={(params) =>
                     selectedIds.length < MAX_COMPARE || selectedIds.includes(params.id)}
                   initialState={{
-                    sorting: { sortModel: [{ field: 'rank', sort: 'asc' }] },
+                    ...(isMobile ? {} : { sorting: { sortModel: [{ field: 'rank', sort: 'asc' }] } }),
                     pagination: { paginationModel: { pageSize: 100 } },
                   }}
+                  {...(isMobile ? mobileWrappingGridProps : {})}
                   pageSizeOptions={[10, 25, 50, 100]}
                   getRowClassName={zebraRowClassName}
-                  sx={zebraGridSx}
+                  sx={isMobile ? mobileWrappingGridSx : zebraGridSx}
                   localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
                 />
               ) : (
@@ -606,6 +695,15 @@ function App() {
               valueFormatter: (value: string | undefined) => formatDateTime(value),
             },
           ];
+
+          // Handy: Haushaltsname, Haushaltsgröße und Wohnung passen nebeneinander.
+          const householdGridColumns = isMobile
+            ? mobileColumns(householdColumns, ['name', 'people_count', 'assigned_apartment_unit'], {
+                name: { minWidth: 154 },
+                people_count: { width: 88 },
+                assigned_apartment_unit: { width: 84 },
+              })
+            : householdColumns;
 
           let visibleHouseholds = households;
           if (filterNoApartment) {
@@ -669,15 +767,18 @@ function App() {
               </Typography>
               <DataGrid
                 rows={visibleHouseholds}
-                columns={householdColumns}
+                columns={householdGridColumns}
                 autoHeight
                 density="compact"
                 disableRowSelectionOnClick
                 onRowClick={(params) => setDetailHouseholdId(params.row.id)}
+                // Die Haushalte kommen schon nach Namen sortiert; auf dem Handy
+                // bleibt der Spaltenkopf so ohne Sortierpfeil.
                 initialState={{
-                  sorting: { sortModel: [{ field: 'name', sort: 'asc' }] },
+                  ...(isMobile ? {} : { sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }),
                   pagination: { paginationModel: { pageSize: 100 } },
                 }}
+                {...(isMobile ? mobileGridProps : {})}
                 pageSizeOptions={[10, 25, 50, 100]}
                 getRowClassName={(params) =>
                   [zebraRowClassName(params), params.row.archived ? 'archived-row' : ''].filter(Boolean).join(' ')

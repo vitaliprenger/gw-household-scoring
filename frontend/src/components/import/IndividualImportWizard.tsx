@@ -13,6 +13,7 @@ import {
 import { commitIndividualBogen } from '../../api';
 import MatchingDialog from './MatchingDialog';
 import { isCertainMatch, isUncertainMatch } from './matching';
+import { useIsMobile } from '../common/useIsMobile';
 
 interface IndividualImportWizardProps {
     open: boolean;
@@ -24,6 +25,7 @@ interface IndividualImportWizardProps {
 const STEPS = ['Analyse', 'Zuordnung', 'Zusammenfassung'];
 
 export default function IndividualImportWizard({ open, analysis, onClose, onComplete }: IndividualImportWizardProps) {
+    const isMobile = useIsMobile();
     const [step, setStep] = useState(0);
     const [decisions, setDecisions] = useState<Record<string, IndividualDecision>>(() => {
         const init: Record<string, IndividualDecision> = {};
@@ -94,7 +96,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
         <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
             <DialogTitle>Individualbogen importieren</DialogTitle>
             <DialogContent dividers>
-                <Stepper activeStep={step} sx={{ mb: 3 }}>
+                <Stepper activeStep={step} alternativeLabel={isMobile} sx={{ mb: 3 }}>
                     {STEPS.map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
                 </Stepper>
 

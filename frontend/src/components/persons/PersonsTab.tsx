@@ -18,6 +18,8 @@ import { PersonWithHousehold } from '../../types';
 import AssignHouseholdDialog from './AssignHouseholdDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { zebraGridSx, zebraRowClassName } from '../common/tableStyles';
+import { mobileColumns, mobileGridProps } from '../common/mobileColumns';
+import { useIsMobile } from '../common/useIsMobile';
 
 interface PersonsTabProps {
   onShowHousehold: (householdId: number) => void;
@@ -37,6 +39,7 @@ function formatDateTime(val?: string | null): string {
 }
 
 export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
+  const isMobile = useIsMobile();
   const [persons, setPersons] = useState<PersonWithHousehold[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -200,6 +203,14 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
       ),
     },
   ], [onShowHousehold]);
+  // Handy: Name und Haushalt passen nebeneinander, die Aktionen schließen an.
+  const gridColumns = isMobile
+    ? mobileColumns(columns, ['last_name', 'first_name', 'household_name', 'actions'], {
+        last_name: { minWidth: 120 },
+        first_name: { minWidth: 96 },
+        household_name: { minWidth: 110 },
+      })
+    : columns;
 
   if (loading) return <Typography>Lade Personen...</Typography>;
 
@@ -245,10 +256,11 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
 
       <DataGrid
         rows={filtered}
-        columns={columns}
+        columns={gridColumns}
         autoHeight
         density="compact"
         disableRowSelectionOnClick
+        {...(isMobile ? mobileGridProps : {})}
         initialState={{
           sorting: { sortModel: [{ field: 'last_name', sort: 'asc' }] },
           pagination: { paginationModel: { pageSize: 100 } },
