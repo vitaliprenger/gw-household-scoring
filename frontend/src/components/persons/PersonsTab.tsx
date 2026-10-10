@@ -11,11 +11,13 @@ import UnarchiveIcon from '@mui/icons-material/Unarchive';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import DeleteIcon from '@mui/icons-material/Delete';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import {
   getAllPersons, toggleArchivePerson, unassignPerson, deletePerson, deleteUnassignedPersons,
 } from '../../api';
 import { PersonWithHousehold } from '../../types';
 import AssignHouseholdDialog from './AssignHouseholdDialog';
+import CreatePersonDialog from './CreatePersonDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { zebraGridSx, zebraRowClassName } from '../common/tableStyles';
 
@@ -49,6 +51,7 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
   const [deleteDeleting, setDeleteDeleting] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => { loadPersons(); }, [showArchived]);
 
@@ -230,6 +233,14 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
         />
         <Button
           size="small"
+          variant="contained"
+          startIcon={<PersonAddIcon />}
+          onClick={() => setCreateOpen(true)}
+        >
+          Person anlegen
+        </Button>
+        <Button
+          size="small"
           color="error"
           variant="outlined"
           startIcon={<DeleteIcon />}
@@ -259,6 +270,12 @@ export default function PersonsTab({ onShowHousehold }: PersonsTabProps) {
         }
         sx={{ ...zebraGridSx, '& .archived-row': { opacity: 0.5 } }}
         localeText={deDE.components.MuiDataGrid.defaultProps.localeText}
+      />
+
+      <CreatePersonDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={loadPersons}
       />
 
       <AssignHouseholdDialog

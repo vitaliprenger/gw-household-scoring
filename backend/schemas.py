@@ -16,7 +16,8 @@ class PersonBase(BaseModel):
     member_since: Optional[datetime] = None
 
 class PersonCreate(PersonBase):
-    pass
+    #: Haushalt, in dem die Person sofort steht; ohne Angabe hat sie keinen
+    household_id: Optional[int] = None
 
 class PersonUpdate(BaseModel):
     first_name: Optional[str] = None

@@ -29,7 +29,7 @@ der Regel abweichen, halten wir das an der Bewerbung als Sonderfall fest.
 | **Rangliste** | Wechselwünsche (Vorrang) und Wartepool-Rangliste je Kategorie; Punkte prüfen und vergleichen |
 | **Bewerbungen** | Bewerbungen anlegen, bearbeiten, Status pflegen; darunter die Joker-Warteliste |
 | **Alle Haushalte** | Haushalte suchen und im Detail-Dialog bearbeiten |
-| **Personen** | Personen suchen, Haushalten zuordnen oder aus ihnen entfernen |
+| **Personen** | Personen suchen, von Hand anlegen, Haushalten zuordnen oder aus ihnen entfernen |
 | **Wohnungen** | Wohnungsdaten pflegen, Haushalte einer Wohnung zuordnen |
 | **Ist-Statistik** | Wie setzen sich die aktuellen Bewohner zusammen – verglichen mit den Zielwerten; Prüfliste fehlender Angaben |
 | **Bewertungskonfiguration** | Gewichte, Zielwerte und „Maximale Mitgliedsjahre“ einstellen |
@@ -277,6 +277,13 @@ Wegen der Wohnraumausnutzung – die hängt von der Zimmerzahl ab (siehe Abschni
 **Warum zeigt der Tab „Alle Haushalte“ keine Punkte?**
 Die Grundpunktzahl allein sagt ohne Wohnungsgröße wenig aus. Punkte findest du deshalb nur in der
 Rangliste.
+
+**Wie lege ich eine Person von Hand an?**
+Im Tab **Personen** über **„Person anlegen“**; die Person hat dann noch keinen Haushalt. Soll sie
+gleich zu einem Haushalt gehören, öffne den Haushalt, klick auf „Person hinzufügen“ und dort auf
+**„Neue Person anlegen“**. Pflicht sind nur Vor- und Nachname, alles andere kannst du später
+nachtragen. Gibt es schon jemanden mit demselben Namen oder derselben Mitgliedsnummer, warnt dich
+der Dialog. Ist es wirklich eine andere Person, leg sie mit „Trotzdem anlegen“ an.
 
 **Was ist der Unterschied zwischen Archivieren und Löschen?**
 Archivieren blendet Haushalte oder Personen aus, und du kannst es rückgängig machen; archivierte

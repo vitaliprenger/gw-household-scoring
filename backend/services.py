@@ -1,6 +1,6 @@
 import pandas as pd
 from sqlalchemy.orm import Session, selectinload
-from . import models, apartment_seed_data, scoring, wishes as wishes_mod
+from . import models, schemas, apartment_seed_data, scoring, wishes as wishes_mod
 from datetime import datetime, date
 from typing import NamedTuple
 import io
@@ -227,6 +227,22 @@ def funding_matches(household_wbs: str | None, apartment_funding: str | None) ->
     """WBS A darf A/B/freifinanziert, WBS B darf B/freifinanziert, sonst nur freifinanziert."""
     return (_FUNDING_ORDER[wbs_level(household_wbs)]
             >= _FUNDING_ORDER[wbs_level(apartment_funding)])
+
+
+def create_person(db: Session, data: schemas.PersonCreate) -> models.Person:
+    """Legt eine Person von Hand an, wahlweise direkt in einem Haushalt."""
+    if data.household_id is not None:
+        household = db.query(models.Household).filter(
+            models.Household.id == data.household_id
+        ).first()
+        if not household:
+            raise ValueError(f"Haushalt {data.household_id} nicht gefunden")
+
+    person = models.Person(**data.model_dump(), updated_at=datetime.utcnow())
+    db.add(person)
+    db.commit()
+    db.refresh(person)
+    return person
 
 
 def member_count(household: models.Household) -> int:

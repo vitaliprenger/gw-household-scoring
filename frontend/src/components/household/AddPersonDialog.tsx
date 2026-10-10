@@ -5,6 +5,7 @@ import {
 } from '@mui/material';
 import { Person } from '../../types';
 import { getUnassignedPersons, assignPerson } from '../../api';
+import CreatePersonDialog from '../persons/CreatePersonDialog';
 
 interface AddPersonDialogProps {
     open: boolean;
@@ -27,6 +28,7 @@ export default function AddPersonDialog({
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [createOpen, setCreateOpen] = useState(false);
 
     useEffect(() => {
         if (!open) return;
@@ -60,7 +62,8 @@ export default function AddPersonDialog({
             <DialogContent>
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Es können nur Personen ohne Haushaltszuordnung hinzugefügt werden.
+                    Hinzufügen lassen sich Personen ohne Haushaltszuordnung. Gibt es die Person
+                    noch nicht, leg sie neu an.
                 </Typography>
                 {!loading && persons.length === 0 ? (
                     <Alert severity="info">Es gibt derzeit keine Personen ohne Haushalt.</Alert>
@@ -82,11 +85,22 @@ export default function AddPersonDialog({
                 )}
             </DialogContent>
             <DialogActions>
+                <Button onClick={() => setCreateOpen(true)} sx={{ mr: 'auto' }}>
+                    Neue Person anlegen
+                </Button>
                 <Button onClick={onClose}>Abbrechen</Button>
                 <Button variant="contained" onClick={handleAdd} disabled={!selected || saving}>
                     {saving ? 'Speichere...' : 'Hinzufügen'}
                 </Button>
             </DialogActions>
+
+            <CreatePersonDialog
+                open={createOpen}
+                householdId={householdId}
+                householdName={householdName}
+                onClose={() => setCreateOpen(false)}
+                onCreated={() => { onAdded(); onClose(); }}
+            />
         </Dialog>
     );
 }
