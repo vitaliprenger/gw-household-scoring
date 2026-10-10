@@ -132,6 +132,20 @@ _Avoid_: berechtigt, geeignet, passend
 Ein Haushalt steht in einer Rangliste, weil er die Wohnungskategorie wünscht, obwohl er laut Daten nicht für sie in Frage kommt.
 _Avoid_: Ausnahme, nicht berechtigt
 
+### Datenquellen
+
+**Haushaltsbogen**:
+Der Fragebogen, mit dem sich ein Haushalt bewirbt; er nennt seine Personen, seine Selbstauskunft und seinen Wunsch und ist der Weg, auf dem neue Haushalte und Wartepool-Bewerbungen entstehen.
+_Avoid_: HH-Bogen, Haushaltsfragebogen
+
+**Individualbogen**:
+Der Fragebogen, den jede Person einzeln ausfüllt; er liefert die Angaben zur Durchmischung wie Geschlecht, Haupttätigkeit und Bildungsabschluss sowie das Eintrittsdatum für die Mitgliedsdauer.
+_Avoid_: Personenbogen, Einzelbogen
+
+**Mitgliederliste**:
+Die Mitgliederdaten der Genossenschaft; sie ergänzt nur Angaben vorhandener Personen wie Geburtsdatum und Mitgliedsdauer und legt nichts an.
+_Avoid_: vCard (das ist das Dateiformat), Adressliste
+
 ### Punkte und Ranglisten
 
 **Kriterium**:
