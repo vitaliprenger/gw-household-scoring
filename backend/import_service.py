@@ -9,6 +9,15 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from . import models, schemas, wishes as wishes_mod
+from .person_matching import (
+    MEMBER_NUMBER,
+    MEMBER_NUMBER_UNCONFIRMED,
+    find_certain_person,
+    find_person_by_member_number,
+    normalize_member_number,
+    persons_with_member_number,
+    same_member_number,
+)
 
 # ---------------------------------------------------------------------------
 # Session store
@@ -60,44 +69,6 @@ def normalize_name(raw: str) -> tuple[str, str]:
         last_name = " ".join(tokens[1:])
 
     return (first_name.strip(), last_name.strip())
-
-
-def normalize_member_number(raw) -> Optional[str]:
-    """Mitgliedsnummer in kanonischer Form: mindestens dreistellig mit fuehrenden Nullen.
-
-    Die Quellen schreiben Nummern mal mit, mal ohne fuehrende Nullen
-    ("3" / "003", "20" / "020"); die vCard nutzt die dreistellige Form.
-    Laengere Nummern bleiben unveraendert ("1234").
-    """
-    if raw is None:
-        return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    digits = re.findall(r"\d+", s)
-    if digits:
-        return f"{int(digits[0]):03d}"
-    return None
-
-
-def same_member_number(a, b) -> bool:
-    """True, wenn beide Werte dieselbe Mitgliedsnummer bezeichnen (3 == 003).
-
-    Normalisiert beide Seiten, damit auch vor der Vereinheitlichung
-    gespeicherte Nummern ohne fuehrende Nullen wiedergefunden werden.
-    """
-    na = normalize_member_number(a)
-    return na is not None and na == normalize_member_number(b)
-
-
-def find_person_by_member_number(people, member_number):
-    """Erste Person aus ``people`` mit derselben Mitgliedsnummer, sonst None."""
-    if not normalize_member_number(member_number):
-        return None
-    for person in people:
-        if same_member_number(person.member_number, member_number):
-            return person
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -958,7 +929,6 @@ def _deduplicate_individual(rows: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResult:
-    member_nr = ind_data.get("member_number")
     fn = (ind_data.get("first_name") or "").strip().lower()
     ln = (ind_data.get("last_name") or "").strip().lower()
     dob_str = ind_data.get("birth_date")
@@ -969,69 +939,54 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
 
     # Always compute fuzzy candidates so users can re-assign even exact matches
     import_name = f"{fn} {ln}".strip()
-    candidates = []
-    for p in all_persons:
+
+    def candidate(p: models.Person) -> schemas.FuzzyCandidate:
         p_name = f"{(p.first_name or '').lower()} {(p.last_name or '').lower()}".strip()
         score = SequenceMatcher(None, import_name, p_name).ratio()
         hh = db.query(models.Household).get(p.household_id) if p.household_id else None
-        candidates.append(schemas.FuzzyCandidate(
+        return schemas.FuzzyCandidate(
             household_id=p.id,
             name=f"{p.first_name} {p.last_name}" + (f" ({hh.name})" if hh else ""),
             score=round(score, 3),
             member_numbers=[p.member_number] if p.member_number else [],
-        ))
-    candidates = [c for c in candidates if c.score >= 0.7]
+        )
+
+    candidates = [c for c in map(candidate, all_persons) if c.score >= 0.7]
     candidates.sort(key=lambda c: c.score, reverse=True)
 
-    # Step 1: exact member number ("3" und "003" sind dieselbe Nummer)
-    if member_nr:
-        matched = find_person_by_member_number(all_persons, member_nr)
-        if matched:
-            hh = db.query(models.Household).get(matched.household_id) if matched.household_id else None
-            _ensure_person_candidate(candidates, matched, hh)
-            return schemas.MatchResult(
-                type="exact_member_nr",
-                matched_household_id=matched.id,
-                matched_household_name=hh.name if hh else None,
-                confidence=1.0,
-                fuzzy_candidates=candidates[:10],
-            )
+    # Sicherer Treffer: Mitgliedsnummer oder gleicher Name (ADR 0011)
+    matched, match_type = find_certain_person(all_persons, ind_data)
+    if matched is not None:
+        hh = db.query(models.Household).get(matched.household_id) if matched.household_id else None
+        _ensure_person_candidate(candidates, matched, hh)
+        # Ein Geburtsdatum auf beiden Seiten bestätigt den Namen zusätzlich.
+        confirmed = match_type == MEMBER_NUMBER or bool(dob_str and matched.birth_date)
+        return schemas.MatchResult(
+            type=match_type,
+            matched_household_id=matched.id,
+            matched_household_name=hh.name if hh else None,
+            confidence=1.0 if confirmed else 0.9,
+            fuzzy_candidates=candidates[:10],
+        )
 
-    # Step 2: exact name + DOB
-    for p in all_persons:
-        p_fn = (p.first_name or "").strip().lower()
-        p_ln = (p.last_name or "").strip().lower()
-        name_match = (fn == p_fn and ln == p_ln) or (fn == p_ln and ln == p_fn)
-        if not name_match:
-            continue
-        if dob_str and p.birth_date:
-            p_dob = p.birth_date.date() if isinstance(p.birth_date, datetime) else p.birth_date
-            try:
-                import_dob = date.fromisoformat(dob_str)
-                if import_dob == p_dob:
-                    hh = db.query(models.Household).get(p.household_id) if p.household_id else None
-                    _ensure_person_candidate(candidates, p, hh)
-                    return schemas.MatchResult(
-                        type="exact_name_dob",
-                        matched_household_id=p.id,
-                        matched_household_name=hh.name if hh else None,
-                        confidence=1.0,
-                        fuzzy_candidates=candidates[:10],
-                    )
-            except Exception:
-                pass
-        elif name_match and not dob_str:
-            hh = db.query(models.Household).get(p.household_id) if p.household_id else None
-            _ensure_person_candidate(candidates, p, hh)
-            return schemas.MatchResult(
-                type="exact_name_dob",
-                matched_household_id=p.id,
-                matched_household_name=hh.name if hh else None,
-                confidence=0.9,
-                fuzzy_candidates=candidates[:10],
-            )
+    # Eine Mitgliedsnummer, die den sicheren Treffer verfehlt, bleibt ein
+    # Vorschlag: Die Person wird angeboten, aber nicht vorausgewählt.
+    holders = persons_with_member_number(all_persons, ind_data.get("member_number"))
+    if holders:
+        # Alle, die die Nummer tragen, stehen zur Auswahl, auch bei ganz
+        # anderem Namen.
+        listed = {c.household_id for c in candidates}
+        candidates = [candidate(p) for p in holders if p.id not in listed] + candidates
+        suggestion = candidate(holders[0])
+        return schemas.MatchResult(
+            type=MEMBER_NUMBER_UNCONFIRMED,
+            matched_household_id=holders[0].id,
+            matched_household_name=suggestion.name,
+            confidence=suggestion.score,
+            fuzzy_candidates=candidates[:10],
+        )
 
-    # Step 3: fuzzy (already computed above)
+    # Sonst der ähnlichste Name als Vorschlag (oben schon berechnet)
     top = candidates[0] if candidates else None
     return schemas.MatchResult(
         type="fuzzy" if top else "none",
@@ -1049,9 +1004,6 @@ def match_individual_to_person(ind_data: dict, db: Session) -> schemas.MatchResu
 def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.IndividualAnalysisResponse:
     _cleanup_sessions()
     parsed = parse_individual_bogen(file_contents)
-
-    # Ohne vorher importierte Personen (vCard) kann nichts zugeordnet werden.
-    persons_present = db.query(models.Person).count() > 0
 
     previews = []
     for ind_data in parsed["individuals"]:
@@ -1095,7 +1047,6 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
         skipped_not_submitted=parsed["skipped_not_submitted"],
         skipped_duplicates=parsed.get("skipped_duplicates", 0),
         privacy_warnings=[schemas.PrivacyWarning(**w) for w in parsed["privacy_warnings"]],
-        missing_base_data_warning=not persons_present,
         individuals=previews,
     )
 

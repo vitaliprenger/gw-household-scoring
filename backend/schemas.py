@@ -447,7 +447,6 @@ class IndividualAnalysisResponse(BaseModel):
     skipped_not_submitted: int
     skipped_duplicates: int = 0
     privacy_warnings: List[PrivacyWarning] = []
-    missing_base_data_warning: bool = False
     individuals: List[IndividualImportPreview] = []
 
 class IndividualDecision(BaseModel):

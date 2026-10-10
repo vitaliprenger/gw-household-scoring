@@ -293,7 +293,7 @@ export interface MatchResult {
     matched_household_name?: string;
     confidence: number;
     /**
-     * Eindeutiger Treffer (Mitgliedsnummer, exakter Name oder Wohnungsnummer).
+     * Eindeutiger Treffer (Mitgliedsnummer oder gleicher Name).
      * Nur dann darf ein Assistent die Zuordnung vorauswählen — siehe
      * `components/import/matching.ts`.
      */
@@ -391,8 +391,6 @@ export interface IndividualAnalysisResponse {
     skipped_not_submitted: number;
     skipped_duplicates: number;
     privacy_warnings: PrivacyWarning[];
-    /** Es existieren noch keine Personen - bitte zuerst die vCard importieren. */
-    missing_base_data_warning: boolean;
     individuals: IndividualImportPreview[];
 }
 

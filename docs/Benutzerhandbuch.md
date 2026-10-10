@@ -63,6 +63,17 @@ kaputt machen.
 - Automatisch zugeordnet wird nur ein **eindeutiger Treffer** (gleiche Mitgliedsnummer oder
   genau gleicher Name). Ist ein Treffer nur *ähnlich*, siehst du einen **orangefarbenen Chip**;
   klickst du darauf, wird er übernommen.
+- Der **Individualbogen** ordnet eine Zeile automatisch zu, wenn der Name gleich ist. Reihenfolge,
+  Groß- und Kleinschreibung und die Aufteilung in Vor- und Nachname spielen keine Rolle:
+  „Berger, Anna Maria“ und „Anna Maria Berger“ gelten als derselbe Name. Tragen zwei Personen den
+  Namen oder widersprechen sich die Geburtsdaten, ordnet er nicht automatisch zu.
+- Eine **Mitgliedsnummer** im Individualbogen zählt nur, wenn auch der Name zur Person passt und
+  sich die Geburtsdaten nicht widersprechen. Sonst zeigt der Chip „(nur Mitgliedsnummer)“. Prüf
+  dann, ob wirklich diese Person gemeint ist – oft hat jemand die Nummer eines Angehörigen
+  eingetragen oder sich vertippt. Trägt eine andere Person genau den Namen aus dem Bogen, gilt
+  der Name und nicht die Nummer.
+- Zeilen des Individualbogens ohne Treffer werden übersprungen. Sie erscheinen beim nächsten
+  Einlesen wieder; der Individualbogen legt nie eine Person an.
 - Bei der vCard stehen unsichere Zeilen auf **„Bitte entscheiden“**. Du kannst
   den Import erst abschließen, wenn alle entschieden sind – einzeln oder mit „Alle neu anlegen“ /
   „Alle überspringen“.
