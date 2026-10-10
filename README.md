@@ -3,7 +3,10 @@
 Scoring-Anwendung zur Vergabe freier Wohnungen in einem genossenschaftlichen Wohnprojekt.
 
 - **Bedienung** der Anwendung: [docs/Benutzerhandbuch.md](docs/Benutzerhandbuch.md)
-- **Fachliche und technische Anforderungen** (für Entwicklung und LLMs): [Instructions.md](Instructions.md)
+- **Fachsprache**: [GLOSSARY.md](GLOSSARY.md)
+- **Fachliche Grundlage** (Beschluss der Generalversammlung): [docs/Vergabegrundsaetze.md](docs/Vergabegrundsaetze.md)
+- **Architekturentscheidungen**: [docs/adr/](docs/adr/)
+- **Regeln für die Entwicklung** (für Menschen und LLMs): [CLAUDE.md](CLAUDE.md)
 - **Betrieb** (Betriebsvertrag: was die Anwendung in Produktion benötigt): [docs/Betrieb.md](docs/Betrieb.md)
 
 ## Voraussetzungen
@@ -18,8 +21,8 @@ Scoring-Anwendung zur Vergabe freier Wohnungen in einem genossenschaftlichen Woh
 py -3.13 -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# Backend-Abhängigkeiten
-pip install -r backend/requirements.txt
+# Backend-Abhängigkeiten (inkl. Testwerkzeug)
+pip install -r backend/requirements-dev.txt
 
 # Frontend-Abhängigkeiten
 cd frontend
@@ -47,18 +50,16 @@ alembic revision --autogenerate -m "kurze beschreibung"   # erzeugt backend/migr
 python tests/test_migrations.py
 ```
 
-Regeln dazu: [Instructions.md](Instructions.md#betrieb-und-migrationen).
+Regeln dazu: [CLAUDE.md](CLAUDE.md#migrationen).
 
 ## Test
 
-Die Tests laufen ohne Server gegen eine In-Memory-Datenbank, z. B.:
+Die Tests laufen ohne Server gegen eine In-Memory-Datenbank:
 
 ```powershell
-python tests/test_scoring.py
-python tests/test_ranking.py
+python -m pytest                              # alle Tests
+python -m pytest tests/test_ranking.py        # eine Datei
 ```
-
-Die vollständige Liste steht in [Instructions.md](Instructions.md#konventionen) unter „Konventionen“.
 
 Zusätzlich gibt es einen Integrationstest gegen das laufende Backend:
 

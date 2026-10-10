@@ -181,7 +181,7 @@ export default function ScoreComparisonDialog({
                         </Tooltip>
                       )}
                       <Typography variant="caption" display="block" color="textSecondary">
-                        {b.member_count} Mitgl.{entries[index]?.categoryLabel ? ` · ${entries[index].categoryLabel}` : ''}
+                        {b.member_count} Pers.{entries[index]?.categoryLabel ? ` · ${entries[index].categoryLabel}` : ''}
                       </Typography>
                     </TableCell>
                   ))}

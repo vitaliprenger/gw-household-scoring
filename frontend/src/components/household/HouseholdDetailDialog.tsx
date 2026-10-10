@@ -303,7 +303,7 @@ export default function HouseholdDetailDialog({
                                     value={currentHH.assigned_apartment_unit ?? undefined}
                                 />
                             </Grid>
-                            <GridField label="Deklarierte Mitglieder" value={currentHH.household_member_count != null ? String(currentHH.household_member_count) : ''} editing={editing}
+                            <GridField label="Angegebene Haushaltsgröße"value={currentHH.household_member_count != null ? String(currentHH.household_member_count) : ''} editing={editing}
                                 onChange={(v) => handleHHChange('household_member_count', parseInt(v) || 0)} />
                         </Grid>
 

@@ -15,6 +15,7 @@ import {
 import { commitVcf } from '../../api';
 import MatchingDialog from './MatchingDialog';
 import { isCertainMatch, isUncertainMatch, UNDECIDED, UNDECIDED_LABEL } from './matching';
+import { useIsMobile } from '../common/useIsMobile';
 
 interface VcfImportWizardProps {
     open: boolean;
@@ -38,6 +39,7 @@ function formatDate(value?: string): string {
 }
 
 export default function VcfImportWizard({ open, analysis, onClose, onComplete }: VcfImportWizardProps) {
+    const isMobile = useIsMobile();
     const [step, setStep] = useState(0);
     const [decisions, setDecisions] = useState<Record<string, VcfDecision>>(() => {
         const init: Record<string, VcfDecision> = {};
@@ -155,7 +157,7 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
         <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
             <DialogTitle>Mitgliederliste (vCard) importieren</DialogTitle>
             <DialogContent dividers>
-                <Stepper activeStep={step} sx={{ mb: 3 }}>
+                <Stepper activeStep={step} alternativeLabel={isMobile} sx={{ mb: 3 }}>
                     {STEPS.map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
                 </Stepper>
 
@@ -219,7 +221,7 @@ export default function VcfImportWizard({ open, analysis, onClose, onComplete }:
                             <TextField
                                 label="Suche (Name, Wohnung, Mitgliedsnummer)"
                                 size="small"
-                                sx={{ minWidth: 320 }}
+                                sx={{ minWidth: { xs: 0, sm: 320 }, width: { xs: '100%', sm: 'auto' } }}
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                             />

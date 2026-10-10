@@ -587,7 +587,6 @@ def _create_household(
         person.updated_at = datetime.utcnow()
         assigned += 1
     response.persons_assigned += assigned
-    household.household_member_count = assigned or None
     return household
 
 

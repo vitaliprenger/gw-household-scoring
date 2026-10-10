@@ -538,7 +538,7 @@ FIELD_LABELS = {
     "pets_info": "Haustiere (Info)",
     "wheelchair_accessible": "Rollstuhlgerecht?",
     "financial_status": "Finanzielle Rahmenbedingungen",
-    "household_member_count": "Deklarierte Mitglieder",
+    "household_member_count": "Angegebene Haushaltsgröße",
 }
 
 WISH_LABEL = "Wohnungswunsch"
