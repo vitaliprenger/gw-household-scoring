@@ -15,7 +15,7 @@ from .person_matching import (
     SAME_NAME,
     find_certain_person,
     find_person_by_member_number,
-    find_person_in_household,
+    match_household_persons,
     normalize_member_number,
     other_member_number_holder,
     persons_with_member_number,
@@ -741,7 +741,7 @@ def wish_stays_unapplied(hh: models.Household, raw: dict) -> bool:
     Wechselwünsche kommen formlos per E-Mail und werden von Hand angelegt
     (ADR 0011); der Bogen unterscheidet nicht zwischen Datenpflege und Wunsch.
     """
-    return bool(hh.is_resident and raw.get("wishes"))
+    return bool(hh.is_resident and (raw.get("wishes") or raw.get("unparsed_wishes")))
 
 
 def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session):
@@ -786,17 +786,14 @@ def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
     _apply_wishes_from_bogen(hh, raw, db)
 
     # Personen werden im Haushalt wiedergefunden, damit Schreibweisen aus dem
-    # Fragebogen keine Dubletten erzeugen. Jede Person nimmt höchstens eine
-    # Zeile des Bogens auf; sonst fiele ein Zwilling auf den anderen.
-    unmatched = list(hh.people)
+    # Fragebogen keine Dubletten erzeugen.
+    in_household = match_household_persons(list(hh.people), raw["persons"])
 
-    for p_data in raw["persons"]:
+    for p_data, ep in zip(raw["persons"], in_household):
         dob = parse_date(p_data.get("birth_date"))
         dob_dt = datetime(dob.year, dob.month, dob.day) if dob else None
 
-        ep = find_person_in_household(unmatched, p_data)
         if ep is not None:
-            unmatched.remove(ep)
             if p_data.get("member_number") and not ep.member_number:
                 ep.member_number = p_data["member_number"]
             if dob_dt and not ep.birth_date:
@@ -1099,9 +1096,8 @@ def analyze_individual_bogen(file_contents: bytes, db: Session) -> schemas.Indiv
 def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Session) -> schemas.IndividualCommitResponse:
     """Ergaenzt die Angaben des Individualbogens bei vorhandenen Personen.
 
-    Neue Personen werden hier nicht angelegt: der Personenbestand kommt aus
-    dem vCard-Import. Datensaetze ohne zugeordnete Person werden als
-    ``skipped_no_match`` ausgewiesen.
+    Neue Personen werden hier nicht angelegt (ADR 0011). Datensaetze ohne
+    zugeordnete Person werden als ``skipped_no_match`` ausgewiesen.
     """
     session = import_sessions.get(request.session_id)
     if not session:
@@ -1112,6 +1108,10 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
     updated_count = 0
     skipped_count = 0
     skipped_no_match = 0
+    not_stored: list[schemas.MemberNumberConflict] = []
+    # Einmal geladen: Eine Nummer, die dieser Durchgang gerade vergeben hat,
+    # steht so auch ohne Zwischenspeichern schon bei ihrer Person.
+    all_persons = db.query(models.Person).all()
 
     for dec in request.decisions:
         # Alles außer "update" ist keine Zuordnung -- eine im Assistenten noch
@@ -1133,8 +1133,14 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
             skipped_no_match += 1
             continue
 
-        _update_person_from_individual(person, raw, db)
+        holder = _update_person_from_individual(person, raw, all_persons)
         updated_count += 1
+        if holder is not None:
+            not_stored.append(schemas.MemberNumberConflict(
+                person=_full_name(person),
+                member_number=raw["member_number"],
+                holder=_full_name(holder),
+            ))
 
     db.commit()
 
@@ -1144,10 +1150,21 @@ def commit_individual_bogen(request: schemas.IndividualCommitRequest, db: Sessio
         updated=updated_count,
         skipped=skipped_count,
         skipped_no_match=skipped_no_match,
+        member_numbers_not_stored=not_stored,
     )
 
 
-def _update_person_from_individual(person: models.Person, raw: dict, db: Session):
+def _full_name(person: models.Person) -> str:
+    return f"{person.first_name or ''} {person.last_name or ''}".strip()
+
+
+def _update_person_from_individual(person: models.Person, raw: dict, all_persons: list):
+    """Trägt die Angaben einer Zeile bei ``person`` ein.
+
+    Gibt die Person zurück, die die Mitgliedsnummer der Zeile schon trägt,
+    wenn die Nummer deshalb nicht ergänzt wurde; sonst None.
+    """
+    holder = None
     if raw.get("gender"):
         person.gender = raw["gender"]
     if raw.get("occupation"):
@@ -1162,8 +1179,8 @@ def _update_person_from_individual(person: models.Person, raw: dict, db: Session
     # Selbstauskunft, die es auch in der Mitgliederverwaltung gibt: nur
     # ergänzen, nie einen vorhandenen Wert überschreiben (ADR 0011).
     if raw.get("member_number") and not person.member_number:
-        numbered = db.query(models.Person).filter(models.Person.member_number.isnot(None)).all()
-        if other_member_number_holder(numbered, raw["member_number"], person) is None:
+        holder = other_member_number_holder(all_persons, raw["member_number"], person)
+        if holder is None:
             person.member_number = raw["member_number"]
     if not person.birth_date:
         person.birth_date = _as_datetime(raw.get("birth_date"))
@@ -1172,6 +1189,7 @@ def _update_person_from_individual(person: models.Person, raw: dict, db: Session
     if raw.get("timestamp"):
         person.individual_import_timestamp = raw["timestamp"]
     person.updated_at = datetime.utcnow()
+    return holder
 
 
 def _as_datetime(iso_date: Optional[str]) -> Optional[datetime]:

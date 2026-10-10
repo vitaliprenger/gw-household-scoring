@@ -165,7 +165,11 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                 <TableCell>{ind.name}</TableCell>
                                                 <TableCell>
                                                     {ind.member_number || '—'}
-                                                    {ind.member_number_holder && (
+                                                    {/* Gilt für die vorgeschlagene Person; nach der Zuordnung
+                                                        zu einer anderen zählt die Zusammenfassung. */}
+                                                    {ind.member_number_holder
+                                                        && (dec?.target_person_id ?? ind.match_result.matched_household_id)
+                                                            === ind.match_result.matched_household_id && (
                                                         <Tooltip title={`Diese Mitgliedsnummer trägt schon ${ind.member_number_holder}. Sie wird hier nicht ergänzt.`}>
                                                             <Chip label="vergeben" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
                                                         </Tooltip>
@@ -257,6 +261,19 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                 <strong>{commitResult.skipped_no_match}</strong> Datensätze ohne
                                 zugeordnete Person wurden nicht übernommen — der Individualbogen
                                 legt keine neuen Personen an.
+                            </Alert>
+                        )}
+                        {commitResult.member_numbers_not_stored.length > 0 && (
+                            <Alert severity="warning" sx={{ mt: 2 }}>
+                                <strong>Mitgliedsnummer nicht eingetragen, weil sie schon vergeben ist:</strong>
+                                <ul>
+                                    {commitResult.member_numbers_not_stored.map((conflict, i) => (
+                                        <li key={i}>
+                                            {conflict.person}: Nummer {conflict.member_number} trägt
+                                            schon {conflict.holder}
+                                        </li>
+                                    ))}
+                                </ul>
                             </Alert>
                         )}
                     </Box>

@@ -15,11 +15,21 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from backend import import_service, schemas
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-from test_matching import add_person, individual_xlsx, make_session  # noqa: E402
+from backend import import_service, models, schemas
+
+from test_matching import add_person, individual_xlsx  # noqa: E402
 
 failures: list[str] = []
+
+
+def make_session():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    models.Base.metadata.create_all(bind=engine)
+    # Wie die Anwendung (backend/database.py): ohne Autoflush.
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)()
 
 
 def check(label: str, condition: bool, detail: str = ""):
@@ -133,6 +143,26 @@ def test_does_not_store_a_member_number_someone_else_holds():
     db.close()
 
 
+def test_reports_a_member_number_that_was_not_stored():
+    print("\n== Individualbogen: Zusammenfassung nennt die nicht gespeicherte Nummer ==")
+    db = make_session()
+    add_person(db, "Moritz", "Bauer", member_number="431", birth_date=datetime(1984, 6, 2))
+    child = add_person(db, "Lina", "Baumann")
+
+    # Der Name im Bogen trifft niemanden sicher; die Zeile wird von Hand zugeordnet.
+    analysis = analyze(db, {
+        "Nachname, Vorname": "Bauer, Lina", "Mitgliedsnummer": "431",
+        "Geburtsdatum": "2015-03-02"})
+    result = commit_to(db, analysis, child)
+
+    db.refresh(child)
+    check_equal("Nummer nicht gespeichert", child.member_number, None)
+    check_equal("Zusammenfassung nennt Person, Nummer und Träger",
+                [(c.person, c.member_number, c.holder) for c in result.member_numbers_not_stored],
+                [("Lina Baumann", "431", "Moritz Bauer")])
+    db.close()
+
+
 def test_without_member_since_column():
     print("\n== Individualbogen: Datei ohne Spalte „Mitglied seit“ ==")
     db = make_session()
@@ -155,6 +185,7 @@ if __name__ == "__main__":
     test_keeps_existing_values()
     test_rejects_implausible_member_since()
     test_does_not_store_a_member_number_someone_else_holds()
+    test_reports_a_member_number_that_was_not_stored()
     test_without_member_since_column()
 
     print("\n" + "=" * 50)

@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend import import_service, models, schemas, services
+from backend import import_service, models, person_matching, schemas, services
 from backend import vcf_import_service as V
 from backend.import_service import ImportSession, import_sessions
 
@@ -398,22 +398,24 @@ def test_member_number_leading_zeros():
     db.add_all([drei, zwanzig])
     db.commit()
 
-    # Individualbogen: anderer Name, nur die Nummer passt
+    # Individualbogen: abweichende Schreibweise des Namens, die Nummer entscheidet
     match = import_service.match_individual_to_person(
-        individual_row(first_name="X", last_name="Y", member_number="003",
+        individual_row(first_name="Dora", last_name="D.", member_number="003",
                        birth_date=None), db)
     check_equal("Individualbogen: 003 findet 3", match.matched_household_id, drei.id)
+    check("Individualbogen: 003 ist ein sicherer Treffer", match.is_certain)
     match = import_service.match_individual_to_person(
-        individual_row(first_name="X", last_name="Y", member_number="20",
+        individual_row(first_name="Zeno", last_name="Z.", member_number="20",
                        birth_date=None), db)
     check_equal("Individualbogen: 20 findet 020", match.matched_household_id, zwanzig.id)
 
     # Haushaltsbogen: Haushalt und Person über die Nummer
-    raw = {"persons": [{"first_name": "X", "last_name": "Y", "member_number": "003"}]}
-    check_equal("Haushaltsbogen: Haushalt über 003",
-                import_service.match_household(raw, db).matched_household_id, hh.id)
+    raw = {"persons": [{"first_name": "Dora", "last_name": "D.", "member_number": "003"}]}
+    household_match = import_service.match_household(raw, db)
+    check_equal("Haushaltsbogen: Haushalt über 003", household_match.matched_household_id, hh.id)
+    check("Haushaltsbogen: 003 ist ein sicherer Treffer", household_match.is_certain)
     check_equal("Haushaltsbogen: Person im Haushalt über 003",
-                import_service.match_person_in(hh.people, raw["persons"][0]), drei)
+                person_matching.match_household_persons(hh.people, raw["persons"]), [drei])
 
     # vCard: Abgleich über den gesamten Bestand
     index = V.PersonIndex(db)

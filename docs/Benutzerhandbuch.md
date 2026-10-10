@@ -84,7 +84,8 @@ kaputt machen.
   liegt, übernimmt der Individualbogen nicht; der Assistent markiert es mit **„nicht übernommen“**.
   Trag das Datum dann von Hand ein.
 - Trägt schon eine andere Person die Mitgliedsnummer aus dem Bogen, steht daneben **„vergeben“**,
-  und die Nummer wird nicht eingetragen. Klär, wem sie gehört.
+  und die Nummer wird nicht eingetragen. Die Zusammenfassung nennt solche Fälle noch einmal, auch
+  wenn du die Zeile von Hand einer anderen Person zugeordnet hast. Klär, wem die Nummer gehört.
 - Zeilen des Individualbogens ohne Treffer werden übersprungen. Sie erscheinen beim nächsten
   Einlesen wieder; der Individualbogen legt nie eine Person an.
 - Der **Haushaltsbogen eines Bewohner-Haushalts** aktualisiert nur dessen Angaben. Er legt keine

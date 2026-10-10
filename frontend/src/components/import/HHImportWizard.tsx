@@ -242,10 +242,11 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                             onClick={() => setDataChangeFor(hh)}
                                                         />
                                                     ) : null}
-                                                    {/* Gilt für den vorgeschlagenen Haushalt; nach einer
-                                                        Zuordnung von Hand zählt die Zusammenfassung. */}
+                                                    {/* Gilt für den vorgeschlagenen Haushalt; nach der Zuordnung
+                                                        zu einem anderen zählt die Zusammenfassung. */}
                                                     {hh.wish_not_applied && !hh.already_imported
-                                                        && !matchOverrides[hh.temp_id] && (
+                                                        && (dec?.target_household_id ?? hh.match_result.matched_household_id)
+                                                            === hh.match_result.matched_household_id && (
                                                         <Tooltip title={WISH_NOT_APPLIED_HINT}>
                                                             <Chip
                                                                 label="Wunsch nicht übernommen"

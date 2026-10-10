@@ -39,7 +39,9 @@ def check_equal(label: str, actual, expected):
 def make_session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     models.Base.metadata.create_all(bind=engine)
-    return sessionmaker(bind=engine)()
+    # Wie die Anwendung (backend/database.py): ohne Autoflush. Was ein Import
+    # im selben Durchgang anlegt, sieht eine Abfrage erst nach dem Speichern.
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)()
 
 
 def household_xlsx(*rows: dict) -> bytes:
@@ -264,6 +266,7 @@ def test_household_match_persons_in_two_households():
         "Person 2 (Name)": "Kramer, Stefan", "Person 2 (Mitgliedsnummer)": "302"})
     check("kein sicherer Haushaltstreffer", not moving_in.is_certain,
           f"(typ {moving_in.type})")
+    check_equal("Treffer-Art nennt den Grund", moving_in.type, "several_households")
     db.close()
 
 
@@ -281,72 +284,105 @@ def first_names(household) -> list[str]:
     return sorted(p.first_name for p in household.people)
 
 
+PARENT = {"Person 1 (Name)": "Sommer, Ole", "Person 1 (Mitgliedsnummer)": "360"}
 TWINS = {
-    "Person 2 (Name)": "Dreyer, Karl", "Person 2 (Geburtsdatum)": "2019-04-04",
-    "Person 3 (Name)": "Dreyer, Emil", "Person 3 (Geburtsdatum)": "2019-04-04",
+    "Person 2 (Name)": "Sommer, Mia", "Person 2 (Geburtsdatum)": "2019-04-04",
+    "Person 3 (Name)": "Sommer, Jule", "Person 3 (Geburtsdatum)": "2019-04-04",
 }
+
+
+def sommer_household(db, *more_people: dict) -> models.Household:
+    return add_household(
+        db, "Sommer",
+        {"first_name": "Ole", "last_name": "Sommer", "member_number": "360"}, *more_people)
 
 
 def test_twins_stay_two_persons():
     print("\n== Haushaltsbogen: Zwillinge bleiben zwei Personen ==")
     db = make_session()
-    household = add_household(
-        db, "Dreyer", {"first_name": "Olaf", "last_name": "Dreyer", "member_number": "360"})
+    household = sommer_household(db)
 
-    update_household(db, household, **{
-        "Person 1 (Name)": "Dreyer, Olaf", "Person 1 (Mitgliedsnummer)": "360", **TWINS})
+    update_household(db, household, **PARENT, **TWINS)
 
-    check_equal("beide Zwillinge angelegt", first_names(household), ["Emil", "Karl", "Olaf"])
+    check_equal("beide Zwillinge angelegt", first_names(household), ["Jule", "Mia", "Ole"])
     db.close()
 
 
 def test_twin_of_an_existing_person_is_added():
     print("\n== Haushaltsbogen: ein Zwilling steht schon im Haushalt ==")
     db = make_session()
-    household = add_household(
-        db, "Dreyer",
-        {"first_name": "Olaf", "last_name": "Dreyer", "member_number": "360"},
-        {"first_name": "Karl", "last_name": "Dreyer", "birth_date": datetime(2019, 4, 4),
-         "gender": "m"})
+    household = sommer_household(
+        db, {"first_name": "Mia", "last_name": "Sommer", "birth_date": datetime(2019, 4, 4)})
+    mia_id = next(p.id for p in household.people if p.first_name == "Mia")
 
     # Der neue Zwilling steht im Bogen vor dem vorhandenen.
-    update_household(db, household, **{
-        "Person 1 (Name)": "Dreyer, Olaf", "Person 1 (Mitgliedsnummer)": "360",
-        "Person 2 (Name)": "Dreyer, Emil", "Person 2 (Geburtsdatum)": "2019-04-04",
-        "Person 3 (Name)": "Dreyer, Karl", "Person 3 (Geburtsdatum)": "2019-04-04"})
+    update_household(db, household, **PARENT, **{
+        "Person 2 (Name)": "Sommer, Jule", "Person 2 (Geburtsdatum)": "2019-04-04",
+        "Person 3 (Name)": "Sommer, Mia", "Person 3 (Geburtsdatum)": "2019-04-04"})
 
     check_equal("der andere Zwilling ist neu angelegt",
-                first_names(household), ["Emil", "Karl", "Olaf"])
-    karl = next(p for p in household.people if p.first_name == "Karl")
-    check_equal("die Angaben des vorhandenen Zwillings bleiben seine", karl.gender, "m")
+                first_names(household), ["Jule", "Mia", "Ole"])
+    check_equal("der vorhandene Zwilling ist dieselbe Person geblieben",
+                [p.id for p in household.people if p.first_name == "Mia"], [mia_id])
     db.close()
 
 
 def test_call_name_matches_within_the_household():
     print("\n== Haushaltsbogen: Rufname trifft im Haushalt, wenn er eindeutig ist ==")
     db = make_session()
-    household = add_household(
-        db, "Dreyer",
-        {"first_name": "Olaf", "last_name": "Dreyer", "member_number": "360"},
-        {"first_name": "Jakob Finn", "last_name": "Dreyer"})
+    household = sommer_household(db, {"first_name": "Jonas Emil", "last_name": "Sommer"})
 
-    update_household(db, household, **{
-        "Person 1 (Name)": "Dreyer, Olaf", "Person 1 (Mitgliedsnummer)": "360",
-        "Person 2 (Name)": "Dreyer, Jakob", "Person 2 (Geburtsdatum)": "2021-03-14"})
+    update_household(db, household, **PARENT, **{
+        "Person 2 (Name)": "Sommer, Jonas", "Person 2 (Geburtsdatum)": "2020-02-02"})
 
-    check_equal("keine Dublette zum Rufnamen", first_names(household), ["Jakob Finn", "Olaf"])
-    jakob = next(p for p in household.people if p.first_name == "Jakob Finn")
-    check_equal("Geburtsdatum ergänzt", jakob.birth_date, datetime(2021, 3, 14))
+    check_equal("keine Dublette zum Rufnamen", first_names(household), ["Jonas Emil", "Ole"])
+    jonas = next(p for p in household.people if p.first_name == "Jonas Emil")
+    check_equal("Geburtsdatum ergänzt", jonas.birth_date, datetime(2020, 2, 2))
 
     # Zwei Personen mit demselben Rufnamen: Der Bogen meint keine eindeutig.
-    db.add(models.Person(household_id=household.id, first_name="Jakob Bo", last_name="Dreyer"))
+    db.add(models.Person(household_id=household.id, first_name="Jonas Finn", last_name="Sommer"))
     db.commit()
-    update_household(db, household, **{
-        "Zeitstempel": "2026-09-02T10:00:00+02:00",
-        "Person 1 (Name)": "Dreyer, Olaf", "Person 1 (Mitgliedsnummer)": "360",
-        "Person 2 (Name)": "Dreyer, Jakob"})
+    update_household(db, household, **PARENT, **{
+        "Zeitstempel": "2026-09-02T10:00:00+02:00", "Person 2 (Name)": "Sommer, Jonas"})
     check_equal("mehrdeutiger Rufname wird nicht zugeordnet", first_names(household),
-                ["Jakob", "Jakob Bo", "Jakob Finn", "Olaf"])
+                ["Jonas", "Jonas Emil", "Jonas Finn", "Ole"])
+    db.close()
+
+
+def test_name_beats_member_number_within_the_household():
+    print("\n== Haushaltsbogen: Kind trägt im Bogen die Nummer des Elternteils ==")
+    db = make_session()
+    household = sommer_household(db)
+
+    # Das Kind steht vor dem Elternteil, dessen Geburtsdatum nicht bekannt ist.
+    update_household(db, household, **{
+        "Person 1 (Name)": "Sommer, Mia", "Person 1 (Mitgliedsnummer)": "360",
+        "Person 1 (Geburtsdatum)": "2019-04-04",
+        "Person 2 (Name)": "Sommer, Ole", "Person 2 (Mitgliedsnummer)": "360"})
+
+    check_equal("das Kind ist eine eigene Person", first_names(household), ["Mia", "Ole"])
+    ole = next(p for p in household.people if p.first_name == "Ole")
+    check_equal("der Elternteil bekommt nicht das Geburtsdatum des Kindes", ole.birth_date, None)
+    db.close()
+
+
+def test_wartepool_wish_is_replaced():
+    print("\n== Haushaltsbogen: Wunsch der offenen Wartepool-Bewerbung wird ersetzt ==")
+    db = make_session()
+    waiting = add_household(
+        db, "Kramer", {"first_name": "Stefan", "last_name": "Kramer", "member_number": "302"})
+    db.add(models.Application(
+        household_id=waiting.id, kind="wartepool", status="offen",
+        wishes=[{"size_rooms": 2, "funding_type": None, "apartment_category": None}]))
+    db.commit()
+
+    update_household(db, waiting, **{
+        "Person 1 (Name)": "Kramer, Stefan", "Person 1 (Mitgliedsnummer)": "302",
+        "Wohnungsgröße": "4 Zimmer"})
+
+    applications = applications_of(db, waiting)
+    check_equal("keine zweite Bewerbung", len(applications), 1)
+    check_equal("Wunsch ersetzt", [w["size_rooms"] for w in applications[0].wishes], [4])
     db.close()
 
 
@@ -361,6 +397,8 @@ if __name__ == "__main__":
     test_twins_stay_two_persons()
     test_twin_of_an_existing_person_is_added()
     test_call_name_matches_within_the_household()
+    test_name_beats_member_number_within_the_household()
+    test_wartepool_wish_is_replaced()
 
     print("\n" + "=" * 50)
     if failures:

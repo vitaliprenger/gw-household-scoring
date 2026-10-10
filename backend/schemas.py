@@ -471,10 +471,18 @@ class IndividualCommitRequest(BaseModel):
     session_id: str
     decisions: List[IndividualDecision]
 
+class MemberNumberConflict(BaseModel):
+    """Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde."""
+    person: str
+    member_number: str
+    #: Wer die Nummer schon trägt
+    holder: str
+
 class IndividualCommitResponse(BaseModel):
     updated: int
     skipped: int
     skipped_no_match: int = 0
+    member_numbers_not_stored: List[MemberNumberConflict] = []
 
 # --- VCF-Import Schemas ---
 class VcfPersonPreview(BaseModel):

@@ -106,40 +106,58 @@ def _number_confirms(person, data: dict, parts: frozenset[str]) -> bool:
     )
 
 
-def find_person_in_household(candidates, data: dict):
-    """Sucht die Person eines Haushalts, die eine Zeile des Haushaltsbogens meint.
-
-    ``candidates`` sind die Personen des Haushalts, denen im selben Bogen noch
-    keine Zeile zugeordnet wurde. Innerhalb eines Haushalts genügt zusätzlich
-    der Rufname mit gleichem Nachnamen ("Jakob Dreyer" für "Jakob Finn
-    Dreyer"). Jede Regel zählt nur, wenn genau eine Person passt. Gleicher
-    Nachname mit gleichem Geburtsdatum ist bewusst kein Treffer: Er
-    verschmilzt Zwillinge (ADR 0011).
-    """
+def _same_name(person, data: dict) -> bool:
     parts = name_parts(data.get("first_name"), data.get("last_name"))
+    return bool(parts) and name_parts(person.first_name, person.last_name) == parts
+
+
+def _same_call_name(person, data: dict) -> bool:
+    """Gleicher Rufname (erster Vorname) und gleicher Nachname."""
     last_name = (data.get("last_name") or "").strip().lower()
     call_name = (data.get("first_name") or "").strip().lower().split(" ")[0]
+    return bool(
+        last_name and call_name
+        and (person.last_name or "").strip().lower() == last_name
+        and (person.first_name or "").strip().lower().split(" ")[0] == call_name
+    )
 
-    def same_call_name(person) -> bool:
-        return bool(
-            last_name and call_name
-            and (person.last_name or "").strip().lower() == last_name
-            and (person.first_name or "").strip().lower().split(" ")[0] == call_name
-        )
+
+def match_household_persons(people, rows: list[dict]) -> list:
+    """Ordnet den Zeilen eines Haushaltsbogens die Personen seines Haushalts zu.
+
+    Gibt je Zeile die gemeinte Person zurück oder None. Jede Person nimmt
+    höchstens eine Zeile auf, und jede Regel zählt nur, wenn genau eine noch
+    freie Person passt und sich die Geburtsdaten nicht widersprechen.
+
+    Die Regeln laufen nacheinander über den ganzen Bogen: erst der gleiche
+    Name, dann die Mitgliedsnummer, dann der Rufname mit gleichem Nachnamen
+    ("Jonas Sommer" für "Jonas Emil Sommer"). So nimmt der Elternteil seine
+    eigene Zeile auf, bevor die Zeile eines Kindes mit seiner Nummer ihn
+    trifft. Gleicher Nachname mit gleichem Geburtsdatum ist bewusst kein
+    Treffer: Er verschmilzt Zwillinge (ADR 0011).
+    """
+    free = list(people)
+    matched: list = [None] * len(rows)
 
     rules = (
-        lambda person: _number_confirms(person, data, parts),
-        lambda person: bool(parts) and name_parts(person.first_name, person.last_name) == parts,
-        same_call_name,
+        _same_name,
+        lambda person, data: _number_confirms(
+            person, data, name_parts(data.get("first_name"), data.get("last_name"))),
+        _same_call_name,
     )
     for rule in rules:
-        hits = [
-            person for person in candidates
-            if rule(person) and not birth_dates_conflict(data.get("birth_date"), person.birth_date)
-        ]
-        if len(hits) == 1:
-            return hits[0]
-    return None
+        for index, data in enumerate(rows):
+            if matched[index] is not None:
+                continue
+            hits = [
+                person for person in free
+                if rule(person, data)
+                and not birth_dates_conflict(data.get("birth_date"), person.birth_date)
+            ]
+            if len(hits) == 1:
+                matched[index] = hits[0]
+                free.remove(hits[0])
+    return matched
 
 
 def find_certain_person(people, data: dict):

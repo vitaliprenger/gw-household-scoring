@@ -415,11 +415,20 @@ export interface IndividualCommitRequest {
     decisions: IndividualDecision[];
 }
 
+/** Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde. */
+export interface MemberNumberConflict {
+    person: string;
+    member_number: string;
+    /** Wer die Nummer schon trägt. */
+    holder: string;
+}
+
 export interface IndividualCommitResponse {
     updated: number;
     skipped: number;
     /** Ohne zugeordnete Person - der Import legt keine Personen an. */
     skipped_no_match: number;
+    member_numbers_not_stored: MemberNumberConflict[];
 }
 
 // --- VCF-Import Types ---
