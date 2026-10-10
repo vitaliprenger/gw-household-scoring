@@ -87,10 +87,10 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
             <Alert severity="info" sx={{ mb: 3 }}>
-                Die Reihenfolge ist verbindlich: Die <strong>Mitgliederliste (vCard)</strong> legt
-                Personen und — bei erkannter Wohnungszuordnung — Haushalte an. Die beiden
-                Fragebögen <strong>ergänzen anschließend nur noch</strong> vorhandene Personen
-                bzw. Haushalte; sie legen selbst nichts Neues an.
+                Die <strong>Mitgliederliste (vCard)</strong> legt Personen und — bei erkannter
+                Wohnungszuordnung — Haushalte an. Die beiden Fragebögen ergänzen vorhandene
+                Personen und Haushalte; der <strong>Haushaltsbogen</strong> kann außerdem neue
+                Haushalte samt Personen und Wartepool-Bewerbung anlegen.
             </Alert>
 
             <Paper sx={{ p: 3, mb: 3 }}>
@@ -132,7 +132,8 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
                     Ergänzt bestehende Haushalte um die Angaben aus dem Haushaltsbogen-Fragebogen
                     (Excel .xlsx): WBS-Status, Wohnungswunsch, Haustiere und finanzielle
                     Rahmenbedingungen. Erkennt automatisch das alte (LimeSurvey) und neue
-                    (Nextcloud Forms) Format. Neue Haushalte werden nicht angelegt.
+                    (Nextcloud Forms) Format. Für Bögen ohne passenden Haushalt lässt sich im
+                    Assistenten je Zeile ein neuer Haushalt anlegen.
                 </Typography>
                 <Button variant="contained" component="label" disabled={hhLoading}>
                     {hhLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}

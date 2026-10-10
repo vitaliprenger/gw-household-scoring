@@ -530,6 +530,134 @@ def test_member_number_someone_else_holds_is_not_stored():
     db.close()
 
 
+NEWCOMERS = {
+    "Zeitstempel": "2026-09-03T08:30:00+02:00",
+    "Person 1 (Name)": "Yilmaz, Deniz", "Person 1 (Mitgliedsnummer)": "501",
+    "Person 1 (Geburtsdatum)": "1990-05-06",
+    "Person 2 (Name)": "Berger, Anna",
+    "Haushaltsmitglieder": "2",
+    "Wohnberechtigungsschein": "Einkommensgruppe B",
+    "Wohnungsgröße": "3 Zimmer",
+}
+
+
+def create_household(db, **row) -> schemas.HHCommitResponse:
+    """Liest eine Zeile ein und wählt für sie „Neu anlegen“."""
+    analysis = analyze(db, row)
+    return commit(db, analysis, {
+        "temp_id": analysis.households[0].temp_id, "action": "create"})
+
+
+def test_row_without_match_does_nothing_until_decided():
+    print("\n== Haushaltsbogen: Zeile ohne Treffer bewirkt ohne Entscheidung nichts ==")
+    db = make_session()
+    analysis = analyze(db, NEWCOMERS)
+    preview = analysis.households[0]
+    check("kein Treffer", preview.match_result.matched_household_id is None)
+    check("„Neu anlegen“ ist zulässig", preview.create_allowed)
+
+    # Der Assistent belegt solche Zeilen mit „Überspringen“ vor; auch eine
+    # unbekannte Aktion wirkt so.
+    unknown = analyze(db, NEWCOMERS)
+    commit(db, unknown, {"temp_id": unknown.households[0].temp_id, "action": "undecided"})
+    result = commit(db, analysis, {"temp_id": preview.temp_id, "action": "skip"})
+
+    check_equal("kein Haushalt", db.query(models.Household).count(), 0)
+    check_equal("keine Person", db.query(models.Person).count(), 0)
+    check_equal("als übersprungen gezählt", result.skipped, 1)
+    db.close()
+
+
+def test_create_household_from_bogen():
+    print("\n== Haushaltsbogen: „Neu anlegen“ ==")
+    db = make_session()
+    known = add_person(db, "Anna", "Berger", member_since=datetime(2024, 3, 1))
+
+    preview = analyze(db, NEWCOMERS).households[0]
+    check_equal("vorgeschlagener Haushaltsname", preview.suggested_household_name,
+                "Yilmaz / Berger")
+    check_equal("Vorschau für den neuen Haushalt",
+                [p.status for p in preview.persons_if_created], ["new", "assign"])
+
+    result = create_household(db, **NEWCOMERS)
+
+    household = db.query(models.Household).one()
+    check_equal("Haushaltsname aus den Nachnamen", household.name, "Yilmaz / Berger")
+    check_equal("Selbstauskunft übernommen", household.wbs_status, "WBS B")
+    check_equal("angegebene Haushaltsgröße", household.household_member_count, 2)
+    check_equal("Import-Zeitstempel des Bogens",
+                household.import_timestamp, datetime(2026, 9, 3, 8, 30))
+    check("kein Bewohner-Haushalt", not household.is_resident)
+    check_equal("beide Personen im Haushalt", first_names(household), ["Anna", "Deniz"])
+    deniz = next(p for p in household.people if p.first_name == "Deniz")
+    check_equal("neue Person mit Mitgliedsnummer und Geburtsdatum",
+                (deniz.member_number, deniz.birth_date), ("501", datetime(1990, 5, 6)))
+    db.refresh(known)
+    check_equal("vorhandene Person zugeordnet, nicht dupliziert",
+                (known.household_id, db.query(models.Person).count()), (household.id, 2))
+    check_equal("ihr Eintrittsdatum bleibt", known.member_since, datetime(2024, 3, 1))
+
+    application = applications_of(db, household)[0]
+    check_equal("Wartepool-Bewerbung", (application.kind, application.status),
+                ("wartepool", "offen"))
+    check_equal("Datum des Wunsches ist der Zeitstempel des Bogens",
+                application.requested_at, datetime(2026, 9, 3, 8, 30))
+    check_equal("Wunsch aus dem Bogen", [w["size_rooms"] for w in application.wishes], [3])
+
+    check_equal("Zähler", (result.households_created, result.persons_created,
+                           result.persons_assigned, result.applications_created),
+                (1, 1, 1, 1))
+    db.close()
+
+
+def test_create_household_without_wish_and_with_one_person():
+    print("\n== Haushaltsbogen: „Neu anlegen“ ohne Wunsch, eine Person ==")
+    db = make_session()
+    row = {"Person 1 (Name)": "Kramer, Stefan", "Person 1 (Mitgliedsnummer)": "302"}
+    check("Hinweis „keine Mitgliedsnummer“ nicht gesetzt",
+          not analyze(db, row).households[0].no_member_number)
+
+    result = create_household(db, **row)
+
+    household = db.query(models.Household).one()
+    check_equal("Haushalt heißt wie der Nachname der einen Person", household.name, "Kramer")
+    check_equal("ohne Wunsch keine Bewerbung", applications_of(db, household), [])
+    check_equal("Zähler Bewerbungen", result.applications_created, 0)
+    db.close()
+
+
+def test_no_member_number_is_pointed_out():
+    print("\n== Haushaltsbogen: Hinweis „keine Mitgliedsnummer angegeben“ ==")
+    db = make_session()
+    preview = analyze(db, {"Person 1 (Name)": "Kramer, Stefan",
+                           "Person 2 (Name)": "Kramer, Ida"}).households[0]
+    check("Hinweis gesetzt, wenn keine Person eine Nummer nennt", preview.no_member_number)
+    check("„Neu anlegen“ bleibt zulässig", preview.create_allowed)
+    db.close()
+
+
+def test_create_is_not_allowed_without_a_person():
+    print("\n== Haushaltsbogen: kein neuer Haushalt ohne Person ==")
+    db = make_session()
+    add_household(db, "Ebert", {
+        "first_name": "Ines", "last_name": "Ebert", "member_number": "301"})
+    add_household(db, "Kramer", {
+        "first_name": "Stefan", "last_name": "Kramer", "member_number": "302"})
+    row = {"Person 1 (Name)": "Ebert, Ines", "Person 1 (Mitgliedsnummer)": "301",
+           "Person 2 (Name)": "Kramer, Stefan", "Person 2 (Mitgliedsnummer)": "302",
+           "Wohnungsgröße": "3 Zimmer"}
+
+    preview = analyze(db, row).households[0]
+    check("„Neu anlegen“ ist nicht zulässig", not preview.create_allowed)
+
+    result = create_household(db, **row)
+
+    check_equal("kein dritter Haushalt", db.query(models.Household).count(), 2)
+    check_equal("keine Bewerbung", db.query(models.Application).count(), 0)
+    check_equal("als übersprungen gezählt", (result.households_created, result.skipped), (0, 1))
+    db.close()
+
+
 if __name__ == "__main__":
     test_resident_household_gets_no_application()
     test_resident_household_keeps_existing_application()
@@ -548,6 +676,11 @@ if __name__ == "__main__":
     test_preview_shows_what_happens_to_each_person()
     test_similar_person_is_pointed_out()
     test_member_number_someone_else_holds_is_not_stored()
+    test_row_without_match_does_nothing_until_decided()
+    test_create_household_from_bogen()
+    test_create_household_without_wish_and_with_one_person()
+    test_no_member_number_is_pointed_out()
+    test_create_is_not_allowed_without_a_person()
 
     print("\n" + "=" * 50)
     if failures:

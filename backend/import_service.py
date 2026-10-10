@@ -13,6 +13,7 @@ from .person_matching import (
     ASSIGN,
     MEMBER_NUMBER,
     MEMBER_NUMBER_UNCONFIRMED,
+    NEW,
     OTHER_HOUSEHOLD,
     SAME_NAME,
     find_certain_person,
@@ -617,8 +618,6 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
     _cleanup_sessions()
     parsed = parse_household_bogen(file_contents)
 
-    # Ohne vorher angelegte Haushalte (vCard) kann nichts zugeordnet werden.
-    households_present = db.query(models.Household).count() > 0
     all_persons = db.query(models.Person).all()
 
     previews = []
@@ -645,6 +644,7 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
             hh_data["declared_member_count"] > 0
             and len(hh_data["persons"]) != hh_data["declared_member_count"]
         )
+        if_created = _person_previews(hh_data["persons"], None, all_persons, db)
 
         previews.append(schemas.HouseholdImportPreview(
             temp_id=hh_data["temp_id"],
@@ -663,6 +663,10 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
             already_imported=already_imported,
             existing_data_changes=data_changes,
             wish_not_applied=bool(existing and wish_stays_unapplied(existing, hh_data)),
+            suggested_household_name=suggested_household_name(hh_data["persons"]),
+            persons_if_created=if_created,
+            create_allowed=any(p.status in (NEW, ASSIGN) for p in if_created),
+            no_member_number=not any(p.get("member_number") for p in hh_data["persons"]),
         ))
 
     session = ImportSession("household", parsed["households"], {})
@@ -674,7 +678,6 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
         skipped_not_submitted=parsed["skipped_not_submitted"],
         skipped_duplicates=parsed["skipped_duplicates"],
         privacy_warnings=[schemas.PrivacyWarning(**w) for w in parsed["privacy_warnings"]],
-        missing_base_data_warning=not households_present,
         households=previews,
     )
 
@@ -684,11 +687,13 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
 # ---------------------------------------------------------------------------
 
 def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> schemas.HHCommitResponse:
-    """Ergaenzt bestehende Haushalte um die Angaben aus dem Haushaltsbogen.
+    """Übernimmt die Entscheidungen des Assistenten zum Haushaltsbogen.
 
-    Neue Haushalte entstehen hier nicht mehr: der Haushaltsbestand kommt aus
-    dem vCard-Import (Wohnungszuordnung). Datensaetze ohne zugeordneten
-    Haushalt werden als ``skipped_no_match`` ausgewiesen.
+    ``update`` ergänzt den gewählten Haushalt, ``create`` legt einen neuen an
+    und ergänzt ihn auf demselben Weg (ADR 0011). Jede andere Aktion bewirkt
+    nichts: Eine im Assistenten nicht entschiedene Zeile legt nichts an.
+    Datensätze ohne zugeordneten Haushalt werden als ``skipped_no_match``
+    ausgewiesen.
     """
     session = import_sessions.get(request.session_id)
     if not session:
@@ -700,29 +705,30 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
     all_persons = db.query(models.Person).all()
 
     for dec in request.decisions:
-        # Alles außer "update" ist keine Zuordnung -- eine im Assistenten noch
-        # nicht entschiedene Zeile darf nichts bewirken.
-        if dec.action != "update":
-            response.skipped += 1
-            continue
-
         raw = raw_map.get(dec.temp_id)
-        if not raw:
+        if dec.action not in ("update", "create") or not raw:
             response.skipped += 1
             continue
 
-        existing = (
-            db.query(models.Household).get(dec.target_household_id)
-            if dec.target_household_id else None
-        )
-        if existing is None:
-            response.skipped_no_match += 1
-            continue
+        if dec.action == "create":
+            household = _create_household_for(raw, db, all_persons)
+            if household is None:
+                response.skipped += 1
+                continue
+            response.households_created += 1
+        else:
+            household = (
+                db.query(models.Household).get(dec.target_household_id)
+                if dec.target_household_id else None
+            )
+            if household is None:
+                response.skipped_no_match += 1
+                continue
+            response.updated += 1
 
-        _update_household_from_raw(existing, raw, db, all_persons, response)
-        response.updated += 1
-        if wish_stays_unapplied(existing, raw):
-            response.wishes_not_applied.append(existing.name)
+        _update_household_from_raw(household, raw, db, all_persons, response)
+        if wish_stays_unapplied(household, raw):
+            response.wishes_not_applied.append(household.name)
 
     db.commit()
 
@@ -740,21 +746,41 @@ def wish_stays_unapplied(hh: models.Household, raw: dict) -> bool:
     return bool(hh.is_resident and (raw.get("wishes") or raw.get("unparsed_wishes")))
 
 
-def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session):
+def _create_household_for(raw: dict, db: Session, all_persons: list) -> Optional[models.Household]:
+    """Legt den Haushalt zu einem Bogen an; None, wenn er ohne Person bliebe.
+
+    Stehen alle Personen des Bogens schon in anderen Haushalten, entstünde
+    ein leerer Haushalt mit Bewerbung, denn der Import verschiebt niemanden.
+    """
+    resolutions = resolve_household_rows([], raw["persons"], all_persons)
+    if not any(resolution.status in (NEW, ASSIGN) for resolution in resolutions):
+        return None
+    household = models.Household(
+        name=suggested_household_name(raw["persons"]),
+        is_resident=False,
+        updated_at=datetime.utcnow(),
+    )
+    db.add(household)
+    # Die Personen und die Bewerbung brauchen die Nummer des Haushalts.
+    db.flush()
+    return household
+
+
+def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session) -> bool:
     """Schreibt den Wohnungswunsch des Fragebogens in die Wartepool-Bewerbung.
 
-    Gibt es noch keine offene Wartepool-Bewerbung, entsteht sie hier. Der
-    Fragebogen-Import legt damit weiterhin **keine Haushalte** an — nur die
-    Bewerbung zu einem bereits bestehenden Haushalt. Bei einem
-    Bewohner-Haushalt bleibt jede Bewerbung unberührt.
+    Gibt es noch keine offene Wartepool-Bewerbung, entsteht sie hier; der
+    Rückgabewert sagt, ob das geschehen ist. Bei einem Bewohner-Haushalt
+    bleibt jede Bewerbung unberührt.
     """
     if hh.is_resident:
-        return
+        return False
     wish_list = wishes_mod.normalize_wishes(raw.get("wishes") or [])
     application = open_wartepool_application(hh, db)
+    created = False
     if application is None:
         if not wish_list:
-            return
+            return False
         application = models.Application(
             household_id=hh.id,
             kind="wartepool",
@@ -763,15 +789,28 @@ def _apply_wishes_from_bogen(hh: models.Household, raw: dict, db: Session):
             created_at=datetime.utcnow(),
         )
         db.add(application)
+        created = True
     application.wishes = wish_list
     if application.requested_at is None:
         application.requested_at = raw.get("timestamp")
     application.updated_at = datetime.utcnow()
+    return created
 
 
 def _household_name(db: Session, household_id) -> Optional[str]:
     household = db.query(models.Household).get(household_id) if household_id else None
     return household.name if household else None
+
+
+def suggested_household_name(rows: list[dict]) -> str:
+    """Name eines neuen Haushalts: die unterschiedlichen Nachnamen in Bogenreihenfolge."""
+    last_names: list[str] = []
+    for data in rows:
+        # Ein einzelnes Wort liest der Parser als Vornamen ohne Nachnamen.
+        last_name = (data.get("last_name") or data.get("first_name") or "").strip()
+        if last_name and last_name.lower() not in (known.lower() for known in last_names):
+            last_names.append(last_name)
+    return " / ".join(last_names)
 
 
 def _person_previews(
@@ -835,7 +874,8 @@ def _update_household_from_raw(
     hh.import_source = "HH-Fragebogen"
     hh.household_member_count = raw.get("declared_member_count")
 
-    _apply_wishes_from_bogen(hh, raw, db)
+    if _apply_wishes_from_bogen(hh, raw, db):
+        response.applications_created += 1
 
     members = [p for p in all_persons if p.household_id == hh.id]
     resolutions = resolve_household_rows(members, raw["persons"], all_persons)

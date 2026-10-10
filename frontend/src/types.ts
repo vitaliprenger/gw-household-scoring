@@ -355,6 +355,14 @@ export interface HouseholdImportPreview {
     existing_data_changes?: ExistingDataChanges;
     /** Der vorgeschlagene Haushalt ist ein Bewohner-Haushalt: sein Wunsch wird nicht übernommen. */
     wish_not_applied: boolean;
+    /** Name, den ein neu angelegter Haushalt bekäme. */
+    suggested_household_name: string;
+    /** Was mit jeder Person geschähe, wenn der Bogen einen neuen Haushalt anlegt. */
+    persons_if_created: ImportPersonPreview[];
+    /** Mindestens eine Person käme in den neuen Haushalt; sonst ist „Neu anlegen“ nicht zulässig. */
+    create_allowed: boolean;
+    /** Keine Person des Bogens nennt eine Mitgliedsnummer. */
+    no_member_number: boolean;
 }
 
 export interface PrivacyWarning {
@@ -368,14 +376,13 @@ export interface HHAnalysisResponse {
     skipped_not_submitted: number;
     skipped_duplicates: number;
     privacy_warnings: PrivacyWarning[];
-    /** Es existieren noch keine Haushalte - bitte zuerst die vCard importieren. */
-    missing_base_data_warning: boolean;
     households: HouseholdImportPreview[];
 }
 
 export interface HouseholdDecision {
     temp_id: string;
-    action: 'update' | 'skip';
+    /** `create` legt einen neuen Haushalt an; nie vorausgewählt. */
+    action: 'update' | 'skip' | 'create';
     target_household_id?: number;
     confirm_data_removals: boolean;
 }
@@ -388,10 +395,12 @@ export interface HHCommitRequest {
 export interface HHCommitResponse {
     updated: number;
     skipped: number;
-    /** Ohne zugeordneten Haushalt - der Import legt keine Haushalte an. */
+    /** „Aktualisieren“ ohne zugeordneten Haushalt. */
     skipped_no_match: number;
     /** Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde. */
     wishes_not_applied: string[];
+    households_created: number;
+    applications_created: number;
     persons_created: number;
     /** Personen, die ohne Haushalt im Datenbestand standen und zugeordnet wurden. */
     persons_assigned: number;

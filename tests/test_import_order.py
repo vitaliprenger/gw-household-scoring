@@ -309,7 +309,7 @@ def household_row(**overrides) -> dict:
 
 
 def test_household_bogen_never_creates():
-    print("\n== Haushaltsbogen: legt keine Haushalte an ==")
+    print("\n== Haushaltsbogen: „Aktualisieren“ legt keinen Haushalt an ==")
     db = make_session()
     import_sample(db)
     before = db.query(models.Household).count()

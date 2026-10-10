@@ -49,7 +49,8 @@ Die drei Importe bauen aufeinander auf. **Halte die Reihenfolge ein:**
 2. **Individualbogen** (.xlsx) – ergänzt Geschlecht, Tätigkeit, Bildung usw. bei den vorhandenen
    Personen.
 3. **Haushaltsbogen** (.xlsx) – ergänzt WBS-Status, Haustiere usw. bei den vorhandenen Haushalten
-   und überträgt den Wohnungswunsch in die Wartepool-Bewerbung.
+   und überträgt den Wohnungswunsch in die Wartepool-Bewerbung. Für neue Bewerbende legst du im
+   Assistenten einen neuen Haushalt an.
 
 Wechselwünsche und Joker-Bewerbungen kommen nicht über einen Import. Leg sie im Tab
 **Bewerbungen** von Hand an.
@@ -76,6 +77,17 @@ kaputt machen.
   Haushalte zusammenziehen oder sich einer trennt), zeigt der Chip **„Mehrere Haushalte“**, und
   die Zeile steht auf „Überspringen“. Der Bogen würde sonst die Angaben und den Wunsch eines der
   bisherigen Haushalte ersetzen. Entscheide selbst, zu welchem Haushalt der Bogen gehört.
+- Findet der **Haushaltsbogen** keinen passenden Haushalt, steht die Zeile auf „Überspringen“ und
+  bewirkt nichts. Gehört der Bogen zu neuen Bewerbenden, wähl bei der Zeile **„Neu anlegen“**:
+  Dann entsteht ein Haushalt mit den Personen des Bogens, ihren Angaben und – wenn der Bogen einen
+  Wunsch nennt – einer Wartepool-Bewerbung mit dem Datum des Bogens. Der Haushalt heißt nach den
+  Nachnamen seiner Personen („Yilmaz / Berger“); umbenennen kannst du ihn danach im
+  Haushalts-Dialog. „Neu anlegen“ ist nie vorausgewählt: Wer aufgenommen wird, entscheiden wir.
+- Nennt ein Bogen **keine Mitgliedsnummer**, zeigt der Assistent beim Anlegen einen Hinweis.
+  Vergeben wird nur an Mitglieder – klär vorher, ob jemand aus dem Haushalt Mitglied ist.
+- Steht bei einer Zeile **„Neu anlegen nicht möglich“**, gehören alle Personen des Bogens schon zu
+  anderen Haushalten. Zieh die Personen zuerst im Tab **Personen** um oder lös sie aus ihrem
+  Haushalt, und lies den Bogen dann noch einmal ein.
 - Der Assistent des **Haushaltsbogens** zeigt jede Person mit Vor- und Nachnamen so, wie sie
   gespeichert würde, und sagt dir, was mit ihr geschieht:
   - **im Haushalt** – die Person steht schon dort; fehlende Angaben werden ergänzt.

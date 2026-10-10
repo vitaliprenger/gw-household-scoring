@@ -431,6 +431,15 @@ class HouseholdImportPreview(BaseModel):
     #: Der vorgeschlagene Haushalt ist ein Bewohner-Haushalt: Sein Wunsch wird
     #: nicht übernommen, ein Wechselwunsch wird von Hand angelegt.
     wish_not_applied: bool = False
+    #: Name, den ein neu angelegter Haushalt bekäme
+    suggested_household_name: str = ""
+    #: Was mit jeder Person geschähe, wenn der Bogen einen neuen Haushalt anlegt
+    persons_if_created: List[ImportPersonPreview] = []
+    #: Mindestens eine Person käme in den neuen Haushalt; sonst entstünde ein
+    #: Haushalt ohne Person, und „Neu anlegen“ ist nicht zulässig.
+    create_allowed: bool = False
+    #: Keine Person des Bogens nennt eine Mitgliedsnummer
+    no_member_number: bool = False
 
 class PrivacyWarning(BaseModel):
     row: int
@@ -442,7 +451,6 @@ class HHAnalysisResponse(BaseModel):
     skipped_not_submitted: int
     skipped_duplicates: int = 0
     privacy_warnings: List[PrivacyWarning] = []
-    missing_base_data_warning: bool = False
     households: List[HouseholdImportPreview] = []
 
 class HouseholdDecision(BaseModel):
@@ -461,6 +469,8 @@ class HHCommitResponse(BaseModel):
     skipped_no_match: int = 0
     #: Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde
     wishes_not_applied: List[str] = []
+    households_created: int = 0
+    applications_created: int = 0
     persons_created: int = 0
     #: Personen, die ohne Haushalt im Datenbestand standen und zugeordnet wurden
     persons_assigned: int = 0
