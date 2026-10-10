@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0011
+---
+
 # Importkette: die vCard legt an, die Fragebögen ergänzen
 
 Die vier Importe laufen in fester Reihenfolge: vCard-Mitgliederliste, Individualbogen, Haushaltsbogen, Bewerbungsliste. Nur die vCard legt Personen an, und Haushalte nur bei erkannter Wohnungsnummer; die Fragebögen ergänzen ausschließlich Vorhandenes. So hängt die Vollständigkeit der Personen an einer einzigen Quelle, und die Fragebögen können keine konkurrierenden Dubletten erzeugen.

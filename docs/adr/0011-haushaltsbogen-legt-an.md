@@ -1,0 +1,19 @@
+# Regelbetrieb: der Haushaltsbogen legt an, die Mitgliederliste füllt nur Lücken
+
+Ersetzt ADR 0006. Die vCard-Mitgliederliste und die Bewerbungsliste waren für den Erstimport gedacht; seitdem kommen neue Haushalte nur noch über den Haushaltsbogen. Deshalb legt jetzt der Haushaltsbogen Haushalte, ihre Personen und ihre Wartepool-Bewerbung an, und der Bewerbungslisten-Import entfällt. Die Mitgliederliste legt nichts mehr an, fasst keine Haushalte an und überschreibt nichts: Sie füllt nur leere Angaben vorhandener Personen. Ein Abgleich über das Änderungsdatum der Karte (REV) wurde verworfen, weil die Mitgliederverwaltung viele Karten im selben Zug stempelt; die REV sagt also nicht, ob sich eine Karte geändert hat, und eine Korrektur der Belegungskommission wäre nicht geschützt.
+
+## Consequences
+
+- Die Mitgliederliste ist eine Nebenfunktion: Nur ein Mitglied der Belegungskommission hat Zugang zu ihr, sie wird also selten eingelesen. Die Fragebögen dürfen deshalb nicht auf sie warten; wer zuerst eine Lücke füllt, dessen Wert bleibt.
+- Abweichende Werte aus der Mitgliederverwaltung (Namensänderung, genaueres Eintrittsdatum) pflegt die Belegungskommission von Hand. Die Mitgliederliste zeigt dafür an, wo ihr Eintrittsdatum vom gespeicherten abweicht.
+- Anders als in ADR 0007 sperrt der Haushaltsbogen den Import nicht, obwohl er anlegt: Zeilen ohne sicheren Treffer stehen auf „Überspringen“, und „Neu anlegen“ ist immer eine bewusste Wahl je Zeile. Eine unentschiedene Zeile bewirkt damit nichts.
+- Wechselwünsche kommen formlos per E-Mail und werden nie importiert. Der Haushaltsbogen eines Bewohner-Haushalts aktualisiert nur dessen Selbstauskunft und legt keine Bewerbung an.
+- Damit Personen nicht doppelt entstehen, sucht der Haushaltsbogen jede Person, die er im Haushalt nicht findet, auch im gesamten Datenbestand. Eine Person ohne Haushalt wird bei sicherem Treffer übernommen, eine Person aus einem anderen Haushalt wird nie automatisch verschoben.
+- Stehen die Personen eines Bogens in verschiedenen Haushalten (Zusammenzug, Trennung), gibt es keinen sicheren Haushaltstreffer. Sonst ersetzte der Bogen die Selbstauskunft und den Wunsch eines fremden Haushalts.
+- Fragebögen schreiben Namen uneinheitlich („Anna Maria Berger“, „Berger, Anna Maria“, „Voss Marianne“). Deshalb gilt als exakt gleicher Name, wenn die Namensbestandteile gleich sind, unabhängig von Reihenfolge und Aufteilung in Vor- und Nachname, und nur, wenn genau eine Person passt und sich die Geburtsdaten nicht widersprechen.
+- Mitgliedsnummern in den Fragebögen sind Selbstauskunft und manchmal falsch. Ein Treffer über die Mitgliedsnummer ist deshalb nur sicher, wenn genau eine Person die Nummer trägt, der Name mindestens einen Bestandteil mit ihr teilt und sich die Geburtsdaten nicht widersprechen; sonst träfe ein Kind mit der Nummer eines Elternteils dessen Datensatz. Eine Nummer, die schon eine andere Person trägt, speichert kein Import ein zweites Mal.
+- Gleicher Nachname mit gleichem Geburtsdatum ist nirgends ein Treffer, auch nicht innerhalb eines Haushalts: Er verschmilzt Zwillinge.
+- Nur der Haushaltsbogen legt Personen an, der Individualbogen nie. Wer noch keinen Haushaltsbogen hat, wird beim Individualbogen übersprungen und erscheint beim nächsten Einlesen wieder. Weil der Individualbogen nichts anlegt, sperrt er den Import auch bei unsicheren Zeilen nicht.
+- Das Eintrittsdatum neuer Mitglieder kommt als Selbstauskunft aus dem Individualbogen und wird nur eingetragen, wenn es fehlt.
+- Personen können zusätzlich von Hand angelegt werden.
+- Weiterhin gilt: Importe löschen nie etwas, und leere Werte überschreiben keine vorhandenen Angaben. Einzige Ausnahme bleibt die Selbstauskunft des Haushaltsbogens: Sie ersetzt die bisherige als Ganzes, und der Assistent lässt entfallende Angaben bestätigen.
