@@ -2,8 +2,8 @@
 """Tests für die Zuordnungssicherheit beim Import.
 
 Regel: **Nur ein eindeutiger Treffer wird automatisch zugeordnet** — eindeutige
-Mitgliedsnummer, exakt übereinstimmender Name (mit oder ohne bestätigendes
-Geburtsdatum) oder die Wohnungsnummer. Ein nur *ähnlicher* Name bleibt ein
+Mitgliedsnummer oder exakt übereinstimmender Name (mit oder ohne bestätigendes
+Geburtsdatum). Ein nur *ähnlicher* Name bleibt ein
 Vorschlag, über den ein Mensch entscheidet. Maßgeblich ist
 ``schemas.MatchResult.is_certain``, abgeleitet aus
 ``schemas.CERTAIN_MATCH_TYPES``; die Commit-Endpunkte behandeln außerdem jede
@@ -23,7 +23,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend import models, schemas, import_service, vcf_import_service
-from backend import application_import_service as ais
 
 failures: list[str] = []
 
@@ -84,12 +83,6 @@ def test_is_certain_derivation():
         result = schemas.MatchResult(type="fuzzy", matched_household_id=1,
                                      confidence=confidence)
         check(f"aehnlicher Name mit {confidence} ist NICHT eindeutig", not result.is_certain)
-    check("Aehnlichkeit des Haushaltsnamens ist NICHT eindeutig",
-          not schemas.MatchResult(type="household_name", matched_household_id=1,
-                                  confidence=0.95).is_certain)
-    check("heutiger Bewohner der Wohnung ist NICHT eindeutig",
-          not schemas.MatchResult(type="apartment_occupant", matched_household_id=1,
-                                  confidence=1.0).is_certain)
 
     check("ohne Treffer nicht eindeutig",
           not schemas.MatchResult(type="exact_member_nr", confidence=1.0).is_certain)
@@ -145,90 +138,6 @@ def test_individual_matching_confidence():
         person(first_name="Maja", last_name="Van Dahl"), db)
     check("ähnlicher Name wird NICHT zugeordnet", not fuzzy.is_certain,
           f"(typ {fuzzy.type}, confidence {fuzzy.confidence})")
-    db.close()
-
-
-def test_application_matching_confidence():
-    print("\n== Bewerbungslisten-Matching ==")
-    db = make_session()
-    hh = seed(db)
-    apt = models.Apartment(unit_number="R.110", size_rooms=1, funding_type="WBS A",
-                           household_id=hh.id)
-    db.add(apt)
-    hh.is_resident = True
-    hh.apartment_unit = "R.110"
-    db.commit()
-
-    by_unit = ais._match_row(
-        {"raw_current_unit": "R.110", "person_names": ["Maja Van Daal"],
-         "raw_household": "Maja Van Daal"}, db)
-    check_equal("Name + Wohnung treffen denselben Haushalt",
-                by_unit.matched_household_id, hh.id)
-    check_equal("Wohnung bestätigt den Namen", by_unit.type, "apartment_unit")
-    check("bestätigter Treffer wird zugeordnet", by_unit.is_certain)
-
-    by_name = ais._match_row(
-        {"raw_current_unit": None, "person_names": ["Maja Van Daal"],
-         "raw_household": "Maja Van Daal"}, db)
-    check_equal("Name trifft", by_name.matched_household_id, hh.id)
-    check("exakter Name wird zugeordnet", by_name.is_certain,
-          f"(typ {by_name.type}, confidence {by_name.confidence})")
-
-    fuzzy = ais._match_row(
-        {"raw_current_unit": None, "person_names": ["Maja Van Dahl"],
-         "raw_household": "Maja Van Dahl"}, db)
-    check("ähnlicher Name wird NICHT zugeordnet", not fuzzy.is_certain,
-          f"(typ {fuzzy.type}, confidence {fuzzy.confidence})")
-
-    # Haushalt ohne passende Person: der eindeutige Haushaltsname zählt.
-    db.add(models.Household(name="Familie Sonderbar"))
-    db.commit()
-    by_hh_name = ais._match_row(
-        {"raw_current_unit": None, "person_names": ["Familie Sonderbar"],
-         "raw_household": "Familie Sonderbar"}, db)
-    check_equal("eindeutiger Haushaltsname", by_hh_name.type, "exact_household_name")
-    check("eindeutiger Haushaltsname wird zugeordnet", by_hh_name.is_certain)
-    db.close()
-
-
-def test_application_matching_uses_names_not_apartment():
-    print("\n== Wohnung bestätigt nur, sie identifiziert nicht ==")
-    db = make_session()
-    # Ausgangslage wie in den echten Daten: Der Bewerber ist aus R.110 in R.217
-    # gezogen (Bewerbung erfüllt), in R.110 wohnt inzwischen jemand anderes.
-    mover = seed(db)                                     # "Maja Van Daal"
-    newcomer = models.Household(name="Michaela Andere", is_resident=True)
-    db.add(newcomer)
-    db.flush()
-    db.add(models.Person(household_id=newcomer.id,
-                         first_name="Michaela", last_name="Andere"))
-    db.add(models.Apartment(unit_number="R.110", size_rooms=1,
-                            funding_type="WBS A", household_id=newcomer.id))
-    db.add(models.Apartment(unit_number="R.217", size_rooms=2,
-                            funding_type="WBS A", household_id=mover.id))
-    mover.is_resident = True
-    mover.apartment_unit = "R.217"
-    newcomer.apartment_unit = "R.110"
-    db.commit()
-
-    row = {
-        "raw_current_unit": "R.110", "raw_new_unit": "R.217", "status": "erfuellt",
-        "person_names": ["Maja Van Daal"], "raw_household": "Maja Van Daal",
-    }
-    result = ais._match_row(row, db)
-    check_equal("der Bewerber wird getroffen, nicht der heutige Bewohner",
-                result.matched_household_name, "Maja Van Daal")
-    check("Treffer ist eindeutig", result.is_certain, f"(typ {result.type})")
-
-    # Passt der Name zu niemandem, bleibt der heutige Bewohner ein bloßer Hinweis.
-    unknown = ais._match_row({
-        "raw_current_unit": "R.110", "raw_new_unit": None, "status": "erfuellt",
-        "person_names": ["Voellig Unbekannt"], "raw_household": "Voellig Unbekannt",
-    }, db)
-    check_equal("heutiger Bewohner nur als Hinweis", unknown.type, "apartment_occupant")
-    check_equal("Hinweis nennt den heutigen Bewohner",
-                unknown.matched_household_name, "Michaela Andere")
-    check("Hinweis wird NICHT automatisch zugeordnet", not unknown.is_certain)
     db.close()
 
 
@@ -302,37 +211,11 @@ def test_undecided_action_does_nothing():
                 (before_households, before_persons))
     db.close()
 
-    # --- Bewerbungsliste ---
-    db = make_session()
-    hh = seed(db)
-    raw = {
-        "temp_id": "t1", "row": 2, "raw_household": "Maja Van Daal", "person_names": [],
-        "kind": "wartepool", "raw_kind": None, "requested_at": None,
-        "wishes": [], "unparsed_wishes": [], "status": "offen", "raw_status": None,
-        "note": None, "raw_current_type": None, "raw_current_unit": None,
-        "raw_new_unit": None,
-    }
-    session = import_service.ImportSession("applications", [raw], {})
-    import_service.import_sessions[session.id] = session
-    app_result = ais.commit_application_list(schemas.ApplicationCommitRequest(
-        session_id=session.id,
-        decisions=[schemas.ApplicationDecision(
-            temp_id="t1", action="undecided", target_household_id=hh.id)],
-    ), db)
-    check_equal("Bewerbungsliste: keine Bewerbung angelegt", app_result.applications_created, 0)
-    check_equal("Bewerbungsliste: kein Haushalt angelegt", app_result.households_created, 0)
-    check_equal("Bewerbungsliste: als übersprungen gezählt", app_result.skipped, 1)
-    check_equal("Bewerbungsliste: Bestand unverändert",
-                db.query(models.Application).count(), 0)
-    db.close()
-
 
 if __name__ == "__main__":
     test_is_certain_derivation()
     test_household_matching_confidence()
     test_individual_matching_confidence()
-    test_application_matching_confidence()
-    test_application_matching_uses_names_not_apartment()
     test_undecided_action_does_nothing()
 
     print("\n" + "=" * 50)

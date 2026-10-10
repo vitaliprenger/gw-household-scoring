@@ -8,9 +8,8 @@ ableitet; im Frontend wird der Wunsch deshalb aus einer Auswahlliste gewählt
 statt getippt.
 
 Dieses Modul hängt bewusst nur an der Standardbibliothek: es wird sowohl vom
-Import (:mod:`application_import_service`), vom Fragebogen-Import
-(:mod:`import_service`), vom Ranking (:mod:`services`) als auch von der
-Startmigration in :mod:`main` benutzt.
+Fragebogen-Import (:mod:`import_service`), vom Ranking (:mod:`services`) als
+auch von der Startmigration in :mod:`main` benutzt.
 
 Schreibweisen der gepflegten Liste, die der Parser auflöst::
 

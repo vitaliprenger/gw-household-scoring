@@ -336,23 +336,12 @@ class FuzzyCandidate(BaseModel):
 #:
 #: * ``exact_member_nr`` — eindeutige Mitgliedsnummer,
 #: * ``exact_name_dob`` — exakt übereinstimmender Personenname (mit oder ohne
-#:   bestätigendes Geburtsdatum),
-#: * ``exact_household_name`` — Haushaltsname, der genau übereinstimmt und im
-#:   Bestand nur einmal vorkommt,
-#: * ``apartment_unit`` — der Namenstreffer wohnt zusätzlich in der Wohnung, die
-#:   die Zeile nennt (die Wohnung **bestätigt** den Treffer).
+#:   bestätigendes Geburtsdatum).
 #:
 #: Bewusst über die **Art** entschieden und nicht über ``confidence``: Ein
 #: unscharfer Namensvergleich erreicht leicht einen Wert von 0.9 und mehr; eine
 #: reine Zahlenschwelle würde ihn deshalb zu einem sicheren Treffer machen.
-#:
-#: Nicht darin: ``apartment_occupant`` — in der genannten Wohnung wohnt jemand,
-#: dessen Name nicht zur Zeile passt. Das ist ein Hinweis, keine Zuordnung: Bei
-#: einer erfüllten Bewerbung ist der Bewerber ausgezogen und die Wohnung
-#: längst neu belegt.
-CERTAIN_MATCH_TYPES = frozenset({
-    "exact_member_nr", "exact_name_dob", "exact_household_name", "apartment_unit",
-})
+CERTAIN_MATCH_TYPES = frozenset({"exact_member_nr", "exact_name_dob"})
 
 
 class MatchResult(BaseModel):
@@ -362,7 +351,7 @@ class MatchResult(BaseModel):
     Zuordnung **vorauswählen** darf: nur ein eindeutiger Treffer (siehe
     :data:`CERTAIN_MATCH_TYPES`). Ein **ähnlicher** Name bleibt dagegen ein
     Vorschlag, über den ein Mensch entscheidet. Das Feld wird zentral berechnet,
-    damit keine der vier Treffer-Quellen es vergessen kann.
+    damit keine der Treffer-Quellen es vergessen kann.
     """
     type: str
     matched_household_id: Optional[int] = None
@@ -476,70 +465,6 @@ class IndividualCommitResponse(BaseModel):
     updated: int
     skipped: int
     skipped_no_match: int = 0
-
-# --- Bewerbungslisten-Import Schemas ---
-class ApplicationPersonCandidate(BaseModel):
-    """Vorhandene Person ohne Haushalt, die zum Namen der Zeile passt."""
-    person_id: int
-    name: str
-    member_number: Optional[str] = None
-    score: float = 0.0
-
-class ApplicationImportPreview(BaseModel):
-    temp_id: str
-    row: int
-    raw_household: str                              # Spalte "Haushalt"
-    kind: str                                       # wartepool | wechselwunsch | joker
-    raw_kind: Optional[str] = None
-    requested_at: Optional[str] = None              # "Mail / Info von"
-    wishes: List[ApplicationWish] = []
-    #: Teile der Wunsch-Zelle, die der Parser nicht auflösen konnte
-    unparsed_wishes: List[str] = []
-    status: str = "offen"
-    raw_status: Optional[str] = None
-    note: Optional[str] = None
-    #: Nur zum Abgleich im Assistenten -- wird nicht gespeichert
-    raw_current_type: Optional[str] = None
-    raw_current_unit: Optional[str] = None
-    raw_new_unit: Optional[str] = None
-    match_result: MatchResult
-    #: Der Haushalt wohnt laut Tool in einer anderen Wohnung als die Liste nennt
-    apartment_mismatch: bool = False
-    #: Wohnungsnummer der Liste existiert nicht in den Stammdaten
-    unknown_apartment: bool = False
-    #: Es gibt bereits eine offene Bewerbung dieser Art -- "Aktualisieren" möglich
-    existing_application_id: Optional[int] = None
-    #: Vorschlag für "Haushalt neu anlegen": passende Personen ohne Haushalt
-    person_candidates: List[ApplicationPersonCandidate] = []
-    suggested_household_name: str = ""
-
-class ApplicationAnalysisResponse(BaseModel):
-    session_id: str
-    total_rows: int
-    skipped_empty: int = 0
-    households: List[ApplicationImportPreview] = []
-
-class ApplicationDecision(BaseModel):
-    temp_id: str
-    #: "update" | "create" (bestehender Haushalt) | "create_household" | "skip"
-    action: str
-    target_household_id: Optional[int] = None
-    #: Nur bei "create_household": Name und die zuzuordnenden Personen ohne Haushalt
-    household_name: Optional[str] = None
-    person_ids: List[int] = []
-
-class ApplicationCommitRequest(BaseModel):
-    session_id: str
-    decisions: List[ApplicationDecision]
-
-class ApplicationCommitResponse(BaseModel):
-    applications_created: int = 0
-    applications_updated: int = 0
-    households_created: int = 0
-    persons_assigned: int = 0
-    skipped: int = 0
-    skipped_no_match: int = 0
-    created_household_ids: List[int] = []
 
 # --- VCF-Import Schemas ---
 class VcfPersonPreview(BaseModel):

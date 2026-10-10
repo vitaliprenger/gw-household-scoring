@@ -33,7 +33,7 @@ der Regel abweichen, halten wir das an der Bewerbung als Sonderfall fest.
 | **Wohnungen** | Wohnungsdaten pflegen, Haushalte einer Wohnung zuordnen |
 | **Ist-Statistik** | Wie setzen sich die aktuellen Bewohner zusammen – verglichen mit den Zielwerten; Prüfliste fehlender Angaben |
 | **Bewertungskonfiguration** | Gewichte, Zielwerte und „Maximale Mitgliedsjahre“ einstellen |
-| **Datenimport** | vCard, Individualbogen, Haushaltsbogen und Bewerbungsliste einlesen |
+| **Datenimport** | vCard, Individualbogen und Haushaltsbogen einlesen |
 
 Den Button **„Punkte neu berechnen“** findest du oben in der Kopfzeile – er ist aus jedem Tab
 erreichbar.
@@ -42,7 +42,7 @@ erreichbar.
 
 ## 3. Daten einlesen
 
-Die vier Importe bauen aufeinander auf. **Halte die Reihenfolge ein:**
+Die drei Importe bauen aufeinander auf. **Halte die Reihenfolge ein:**
 
 1. **vCard-Mitgliederliste** (.vcf) – legt die Personen an; Haushalte nur für Personen mit
    Wohnungsnummer.
@@ -50,7 +50,9 @@ Die vier Importe bauen aufeinander auf. **Halte die Reihenfolge ein:**
    Personen.
 3. **Haushaltsbogen** (.xlsx) – ergänzt WBS-Status, Haustiere usw. bei den vorhandenen Haushalten
    und überträgt den Wohnungswunsch in die Wartepool-Bewerbung.
-4. **Bewerbungsliste** (.xlsx) – legt Bewerbungen an, wenn nötig auch neue Haushalte.
+
+Wechselwünsche und Joker-Bewerbungen kommen nicht über einen Import. Leg sie im Tab
+**Bewerbungen** von Hand an.
 
 Jeder Import führt dich durch einen Assistenten: **Analyse → Zuordnung → Zusammenfassung**.
 Gespeichert wird erst, wenn du den letzten Schritt bestätigst – vorher kannst du also nichts
@@ -61,14 +63,12 @@ kaputt machen.
 - Automatisch zugeordnet wird nur ein **eindeutiger Treffer** (gleiche Mitgliedsnummer oder
   genau gleicher Name). Ist ein Treffer nur *ähnlich*, siehst du einen **orangefarbenen Chip**;
   klickst du darauf, wird er übernommen.
-- Bei vCard und Bewerbungsliste stehen unsichere Zeilen auf **„Bitte entscheiden“**. Du kannst
+- Bei der vCard stehen unsichere Zeilen auf **„Bitte entscheiden“**. Du kannst
   den Import erst abschließen, wenn alle entschieden sind – einzeln oder mit „Alle neu anlegen“ /
   „Alle überspringen“.
 - Im vCard-Assistenten kannst du Kinder und Partner\*innen, die aus dem Notizfeld erkannt wurden,
   einzeln abwählen, falls dabei etwas schiefgegangen ist.
 - Die Importe **löschen nie** etwas, und leere Werte überschreiben keine vorhandenen Angaben.
-- Wunschangaben aus der Bewerbungsliste, die nicht erkannt wurden, zeigt dir der Assistent je
-  Zeile an. Schau sie dir an und trag sie bei Bedarf in der Bewerbung nach.
 - **Klick nach dem Import auf „Punkte neu berechnen“.**
 
 ---
