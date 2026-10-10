@@ -169,7 +169,7 @@ NEW = "new"                          # wird neu angelegt
 
 #: Warum eine Person des Datenbestands einer neuen ähnlich ist.
 SIMILAR_BY_MEMBER_NUMBER = "member_number"  # trägt die Nummer, aber Name oder Geburtsdatum passen nicht
-SIMILAR_BY_NAME = "same_name"                # mehrere Personen tragen den Namen
+SIMILAR_BY_NAME = "same_name"                # gleicher Name, aber mehrdeutig oder anderes Geburtsdatum
 SIMILAR_BY_BIRTH_DATE = "birth_date"         # gleiches Geburtsdatum, gemeinsamer Namensbestandteil
 
 
@@ -181,9 +181,14 @@ class RowResolution:
     person: object = None
     #: Nur bei ``NEW``: ``(grund, person)`` für jede ähnliche Person
     similar: list = field(default_factory=list)
-    #: Wer die Mitgliedsnummer der Zeile schon trägt, sodass sie nicht
-    #: gespeichert wird
-    number_holder: object = None
+    #: Name dessen, der die Mitgliedsnummer der Zeile schon trägt, sodass sie
+    #: nicht gespeichert wird: eine Person des Datenbestands oder eine
+    #: frühere Zeile desselben Bogens
+    number_holder: Optional[str] = None
+
+
+def full_name(person) -> str:
+    return f"{person.first_name or ''} {person.last_name or ''}".strip()
 
 
 def _similar_persons(pool, data: dict) -> list:
@@ -204,8 +209,9 @@ def _similar_persons(pool, data: dict) -> list:
                 similar.append((reason, person))
 
     add(SIMILAR_BY_MEMBER_NUMBER, persons_with_member_number(pool, data.get("member_number")))
-    if len(same_name) > 1:
-        add(SIMILAR_BY_NAME, same_name)
+    # Wer hier noch den gleichen Namen trägt, war kein sicherer Treffer:
+    # Mehrere tragen ihn, oder das Geburtsdatum widerspricht (oft ein Tippfehler).
+    add(SIMILAR_BY_NAME, same_name)
     if birth_date is not None:
         add(SIMILAR_BY_BIRTH_DATE, [
             p for p in pool
@@ -223,43 +229,75 @@ def resolve_household_rows(household_people, rows: list[dict], all_people) -> li
     wird bei sicherem Treffer zugeordnet; eine Person aus einem anderen
     Haushalt bleibt dort. Jede Person nimmt höchstens eine Zeile auf.
     """
-    members = list(household_people)
-    in_household = match_household_persons(members, rows)
-    claimed = [person for person in in_household if person is not None]
+    in_household = list(household_people)
+    found: list = match_household_persons(in_household, rows)
+    claimed = [person for person in found if person is not None]
 
     def unclaimed() -> list:
         return [p for p in all_people if all(p is not c for c in claimed)]
 
+    # Wie im Haushalt läuft erst der gleiche Name über den ganzen Bogen, dann
+    # die Mitgliedsnummer: Wer mit eigener Zeile im Bogen steht, nimmt sie
+    # auf, bevor die Zeile eines Kindes mit seiner Nummer ihn trifft.
+    for find in (_find_by_same_name, lambda pool, data: find_certain_person(pool, data)[0]):
+        for index, data in enumerate(rows):
+            if found[index] is None:
+                person = find(unclaimed(), data)
+                if person is not None:
+                    found[index] = person
+                    claimed.append(person)
+
     resolutions: list[RowResolution] = []
-    for data, member in zip(rows, in_household):
-        if member is not None:
-            resolutions.append(RowResolution(IN_HOUSEHOLD, member))
-            continue
-        found, _ = find_certain_person(unclaimed(), data)
-        if found is None:
-            resolutions.append(RowResolution(NEW))
-            continue
-        claimed.append(found)
-        if any(found is m for m in members):
+    for person in found:
+        if person is None:
+            status = NEW
+        elif any(person is known for known in in_household):
             status = IN_HOUSEHOLD
-        elif found.household_id is None:
+        elif person.household_id is None:
             status = ASSIGN
         else:
             status = OTHER_HOUSEHOLD
-        resolutions.append(RowResolution(status, found))
+        resolutions.append(RowResolution(status, person))
 
     pool = unclaimed()
+    #: Nummer -> Name der Zeile, die sie in diesem Bogen zuerst trägt
+    numbers_in_bogen: dict[str, str] = {}
     for data, resolution in zip(rows, resolutions):
         if resolution.status == NEW:
             resolution.similar = _similar_persons(pool, data)
-        # Die Nummer wird nur gespeichert, wenn die Person noch keine hat.
-        stores_number = resolution.status in (NEW, IN_HOUSEHOLD, ASSIGN) and not (
-            resolution.person is not None and resolution.person.member_number
-        )
-        if stores_number:
-            resolution.number_holder = other_member_number_holder(
-                all_people, data.get("member_number"), resolution.person)
+
+        number = normalize_member_number(data.get("member_number"))
+        if number is None or resolution.status == OTHER_HOUSEHOLD:
+            continue
+        person = resolution.person
+        row_name = full_name(person) if person is not None else (
+            f"{data.get('first_name') or ''} {data.get('last_name') or ''}".strip())
+        if person is not None and person.member_number:
+            # Die Person hat schon eine Nummer; die des Bogens wird nicht gespeichert.
+            if same_member_number(person.member_number, number):
+                numbers_in_bogen.setdefault(number, row_name)
+            continue
+        holder = other_member_number_holder(all_people, number, person)
+        if holder is not None:
+            resolution.number_holder = full_name(holder)
+        elif number in numbers_in_bogen:
+            resolution.number_holder = numbers_in_bogen[number]
+        else:
+            numbers_in_bogen[number] = row_name
     return resolutions
+
+
+def _find_by_same_name(people, data: dict):
+    """Die eine Person mit dem gleichen Namen, deren Geburtsdatum nicht widerspricht."""
+    parts = name_parts(data.get("first_name"), data.get("last_name"))
+    same_name = [p for p in people if parts and name_parts(p.first_name, p.last_name) == parts]
+    # Über den gesamten Bestand sind Namen nicht eindeutig; ein mehrdeutiger
+    # Treffer würde zwei verschiedene Menschen verschmelzen.
+    if len(same_name) != 1:
+        return None
+    if birth_dates_conflict(data.get("birth_date"), same_name[0].birth_date):
+        return None
+    return same_name[0]
 
 
 def find_certain_person(people, data: dict):
@@ -283,10 +321,5 @@ def find_certain_person(people, data: dict):
     ):
         return holders[0], MEMBER_NUMBER
 
-    # Über den gesamten Bestand sind Namen nicht eindeutig; ein mehrdeutiger
-    # Treffer würde zwei verschiedene Menschen verschmelzen.
-    if len(same_name) != 1:
-        return None, None
-    if birth_dates_conflict(data.get("birth_date"), same_name[0].birth_date):
-        return None, None
-    return same_name[0], SAME_NAME
+    by_name = _find_by_same_name(people, data)
+    return (by_name, SAME_NAME) if by_name is not None else (None, None)

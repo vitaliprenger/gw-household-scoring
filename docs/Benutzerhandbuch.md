@@ -99,9 +99,17 @@ kaputt machen.
   - **neu** – die Person wird angelegt.
 - Steht bei einer neuen Person **„ähnliche Person im Datenbestand“**, gibt es schon jemanden mit
   derselben Mitgliedsnummer, demselben Namen oder demselben Geburtsdatum und einem gemeinsamen
-  Namensteil. Fahr mit der Maus über den Hinweis, um zu sehen, wer das ist. Ist es dieselbe
-  Person, überspring die Zeile, ordne die Person im Tab **Personen** dem Haushalt zu und lies den
-  Bogen noch einmal ein. Ist es jemand anderes, übernimm die Zeile.
+  Namensteil. Fahr mit der Maus über den Hinweis, um zu sehen, wer das ist und warum. Ist es
+  jemand anderes, übernimm die Zeile. Ist es dieselbe Person, überspring die Zeile und berichtige
+  bei der vorhandenen Person Namen oder Geburtsdatum so, dass sie zum Bogen passen. Lies den
+  Bogen dann noch einmal ein: Jetzt wird die Person gefunden und nicht doppelt angelegt.
+- Über den **Treffer-Chip** ordnest du eine Zeile von Hand zu. Der Dialog zeigt zuerst ähnliche
+  Haushalte; über die Suche findest du jeden Haushalt, auch einen, den du gerade erst angelegt
+  hast. Die Kennzeichnungen an den Personen gelten für den vorgeschlagenen Haushalt. Ordnest du
+  einem anderen zu, sagt dir die Zusammenfassung, was mit den Personen geschehen ist.
+- **„Wunsch nicht erkannt“** heißt: Der Assistent konnte die Wunschangabe des Bogens nicht oder
+  nur teilweise lesen. Fahr mit der Maus über den Hinweis und trag den Wunsch nach dem Import in
+  der Bewerbung nach; ohne lesbaren Wunsch entsteht keine Bewerbung.
 - Stimmt die Aufteilung in Vor- und Nachname nicht (aus „Berger Anna“ wird der Vorname „Berger“),
   berichtige den Namen nach dem Import bei der Person.
 - **„Nummer vergeben“** heißt: Die Mitgliedsnummer aus dem Bogen trägt schon eine andere Person.

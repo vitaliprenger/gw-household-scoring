@@ -25,12 +25,13 @@ export function isUncertainMatch(match: MatchResult | undefined | null): boolean
 /**
  * Aktionswert für eine Zeile, über die noch nicht entschieden wurde.
  *
- * Nötig überall, wo die Alternative zur Zuordnung selbst Daten erzeugen würde
- * (vCard: neuer Haushalt). Dort wäre weder
+ * Nötig, wo die Vorbelegung einer unsicheren Zeile selbst Daten erzeugen
+ * würde (vCard: neuer Haushalt). Dort wäre weder
  * „zuordnen" noch „neu anlegen" eine unschuldige Vorbelegung — die Zeile
  * braucht eine ausdrückliche Entscheidung, und der Import bleibt bis dahin
- * gesperrt. Die Fragebogen-Importe legen nichts an; dort genügt
- * „Überspringen" als Vorbelegung.
+ * gesperrt. Die Fragebogen-Importe belegen unsichere Zeilen mit
+ * „Überspringen" vor; „Neu anlegen" im Haushaltsbogen ist immer eine bewusste
+ * Wahl je Zeile (ADR 0011), deshalb sperren sie nicht.
  *
  * Die Commit-Endpunkte behandeln jede unbekannte Aktion wie „Überspringen",
  * damit dieser Wert auch versehentlich nichts bewirken kann.

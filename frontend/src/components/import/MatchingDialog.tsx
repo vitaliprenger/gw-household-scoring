@@ -6,11 +6,24 @@ import {
 } from '@mui/material';
 import { FuzzyCandidate } from '../../types';
 
+/** Eintrag, der sich von Hand zuordnen lässt, auch ohne Ähnlichkeit zur Zeile. */
+export interface MatchOption {
+    id: number;
+    name: string;
+    member_numbers: string[];
+}
+
 interface MatchingDialogProps {
     open: boolean;
     title: string;
     description: string;
     candidates: FuzzyCandidate[];
+    /**
+     * Alles, was sich zuordnen lässt. Die Suche findet darin auch Einträge,
+     * die der Zeile nicht ähnlich sind, etwa einen gerade von Hand
+     * angelegten Haushalt.
+     */
+    allOptions?: MatchOption[];
     onClose: () => void;
     onSelect: (id: number | null, name?: string) => void;
     nameColumnLabel?: string;
@@ -18,17 +31,20 @@ interface MatchingDialogProps {
 }
 
 export default function MatchingDialog({
-    open, title, description, candidates: allCandidates, onClose, onSelect,
+    open, title, description, candidates: allCandidates, allOptions = [], onClose, onSelect,
     nameColumnLabel = 'Haushaltsname', createButtonLabel = 'Neuen Haushalt anlegen',
 }: MatchingDialogProps) {
     const [search, setSearch] = useState('');
 
-    const filtered = search
-        ? allCandidates.filter((c) =>
-            c.name.toLowerCase().includes(search.toLowerCase()) ||
-            c.member_numbers.some((m) => m.includes(search))
-        )
-        : allCandidates;
+    const matches = (entry: { name: string; member_numbers: string[] }) =>
+        entry.name.toLowerCase().includes(search.toLowerCase()) ||
+        entry.member_numbers.some((m) => m.includes(search));
+
+    const filtered = search ? allCandidates.filter(matches) : allCandidates;
+    const suggested = new Set(allCandidates.map((c) => c.household_id));
+    const others = search
+        ? allOptions.filter((option) => !suggested.has(option.id) && matches(option))
+        : [];
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -79,10 +95,28 @@ export default function MatchingDialog({
                                     </TableCell>
                                 </TableRow>
                             ))}
-                            {filtered.length === 0 && (
+                            {others.map((option) => (
+                                <TableRow key={`option-${option.id}`} hover>
+                                    <TableCell>{option.name}</TableCell>
+                                    <TableCell>
+                                        {option.member_numbers.length > 0
+                                            ? option.member_numbers.join(', ')
+                                            : '—'}
+                                    </TableCell>
+                                    <TableCell align="right">—</TableCell>
+                                    <TableCell>
+                                        <Button size="small" onClick={() => onSelect(option.id, option.name)}>
+                                            Zuordnen
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                            {filtered.length === 0 && others.length === 0 && (
                                 <TableRow>
                                     <TableCell colSpan={4} align="center">
-                                        Keine Treffer
+                                        {search || allOptions.length === 0
+                                            ? 'Keine Treffer'
+                                            : 'Keine ähnlichen Einträge. Über die Suche lässt sich jeder Eintrag zuordnen.'}
                                     </TableCell>
                                 </TableRow>
                             )}

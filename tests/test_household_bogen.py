@@ -658,6 +658,101 @@ def test_create_is_not_allowed_without_a_person():
     db.close()
 
 
+def test_member_number_is_stored_only_once_within_a_bogen():
+    print("\n== Haushaltsbogen: dieselbe Nummer bei zwei neuen Personen eines Bogens ==")
+    db = make_session()
+    row = {"Person 1 (Name)": "Sommer, Ole", "Person 1 (Mitgliedsnummer)": "360",
+           "Person 2 (Name)": "Sommer, Mia", "Person 2 (Mitgliedsnummer)": "360"}
+
+    preview = analyze(db, row).households[0]
+    check_equal("Vorschau nennt, wer die Nummer im Bogen zuerst trägt",
+                [p.member_number_holder for p in preview.persons_if_created],
+                [None, "Ole Sommer"])
+
+    result = create_household(db, **row)
+
+    numbers = {p.first_name: p.member_number for p in db.query(models.Person).all()}
+    check_equal("nur die erste Person bekommt die Nummer", numbers, {"Ole": "360", "Mia": None})
+    check_equal("Zusammenfassung nennt die zweite",
+                [(c.person, c.holder) for c in result.member_numbers_not_stored],
+                [("Mia Sommer", "Ole Sommer")])
+    db.close()
+
+
+def test_own_row_claims_a_person_before_a_row_with_her_number():
+    print("\n== Haushaltsbogen: Kind steht im Bogen vor dem Elternteil aus dem Datenbestand ==")
+    db = make_session()
+    ole = add_person(db, "Ole", "Sommer", member_number="360")
+
+    create_household(db, **{
+        "Person 1 (Name)": "Sommer, Mia", "Person 1 (Mitgliedsnummer)": "360",
+        "Person 1 (Geburtsdatum)": "2019-04-04",
+        "Person 2 (Name)": "Sommer, Ole", "Person 2 (Mitgliedsnummer)": "360"})
+
+    db.refresh(ole)
+    check_equal("zwei Personen, keine Dublette",
+                sorted(p.first_name for p in db.query(models.Person).all()), ["Mia", "Ole"])
+    check_equal("der Elternteil bekommt nicht das Geburtsdatum des Kindes", ole.birth_date, None)
+    check("der Elternteil ist dem neuen Haushalt zugeordnet", ole.household_id is not None)
+    db.close()
+
+
+def test_same_name_with_other_birth_date_is_pointed_out():
+    print("\n== Haushaltsbogen: gleicher Name mit anderem Geburtsdatum ==")
+    db = make_session()
+    add_person(db, "Anna", "Berger", birth_date=datetime(1990, 6, 5))
+
+    preview = person_previews(db, **{
+        "Person 1 (Name)": "Berger, Anna", "Person 1 (Geburtsdatum)": "1990-05-06"})["Berger, Anna"]
+
+    check_equal("wird neu angelegt", preview.status, "new")
+    check_equal("mit Hinweis auf die namensgleiche Person",
+                [(s.reason, s.name) for s in preview.similar], [("same_name", "Anna Berger")])
+    db.close()
+
+
+def test_household_name_only_from_persons_who_join():
+    print("\n== Haushaltsbogen: Haushaltsname nur aus den Personen, die einziehen ==")
+    db = make_session()
+    add_household(db, "Vogel", {
+        "first_name": "Antje", "last_name": "Vogel", "member_number": "455"})
+    row = {"Person 1 (Name)": "Vogel, Antje", "Person 1 (Mitgliedsnummer)": "455",
+           "Person 2 (Name)": "Sommer, Ole", "Person 2 (Mitgliedsnummer)": "360"}
+
+    check_equal("Vorschlag ohne die Person, die im anderen Haushalt bleibt",
+                analyze(db, row).households[0].suggested_household_name, "Sommer")
+
+    result = create_household(db, **row)
+
+    check_equal("neuer Haushalt heißt nur nach der Person, die einzieht",
+                sorted(h.name for h in db.query(models.Household).all()), ["Sommer", "Vogel"])
+    check_equal("die andere Person steht in der Zusammenfassung",
+                [(n.person, n.household) for n in result.persons_not_taken_over],
+                [("Antje Vogel", "Vogel")])
+    db.close()
+
+
+def test_two_rows_for_one_household_share_one_application():
+    print("\n== Haushaltsbogen: zwei Zeilen eines Durchgangs für denselben Haushalt ==")
+    db = make_session()
+    household = sommer_household(db)
+
+    analysis = analyze(
+        db,
+        {"Person 1 (Name)": "Sommer, Ole", "Person 1 (Mitgliedsnummer)": "360",
+         "Wohnungsgröße": "3 Zimmer"},
+        {"Zeitstempel": "2026-09-02T10:00:00+02:00",
+         "Person 1 (Name)": "Sommer, Nele", "Person 1 (Mitgliedsnummer)": "361",
+         "Wohnungsgröße": "4 Zimmer"})
+    result = commit(db, analysis, *[
+        {"temp_id": preview.temp_id, "action": "update", "target_household_id": household.id}
+        for preview in analysis.households])
+
+    check_equal("nur eine offene Wartepool-Bewerbung", len(applications_of(db, household)), 1)
+    check_equal("Zähler Bewerbungen", result.applications_created, 1)
+    db.close()
+
+
 if __name__ == "__main__":
     test_resident_household_gets_no_application()
     test_resident_household_keeps_existing_application()
@@ -681,6 +776,11 @@ if __name__ == "__main__":
     test_create_household_without_wish_and_with_one_person()
     test_no_member_number_is_pointed_out()
     test_create_is_not_allowed_without_a_person()
+    test_member_number_is_stored_only_once_within_a_bogen()
+    test_own_row_claims_a_person_before_a_row_with_her_number()
+    test_same_name_with_other_birth_date_is_pointed_out()
+    test_household_name_only_from_persons_who_join()
+    test_two_rows_for_one_household_share_one_application()
 
     print("\n" + "=" * 50)
     if failures:

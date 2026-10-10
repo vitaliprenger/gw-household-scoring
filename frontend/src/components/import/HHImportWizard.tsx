@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, Stepper, Step, StepLabel, Typography, Box,
@@ -10,8 +10,8 @@ import {
     HHAnalysisResponse, HouseholdImportPreview, HouseholdDecision,
     HHCommitRequest, HHCommitResponse, MatchResult,
 } from '../../types';
-import { commitHHBogen } from '../../api';
-import MatchingDialog from './MatchingDialog';
+import { commitHHBogen, getHouseholds } from '../../api';
+import MatchingDialog, { MatchOption } from './MatchingDialog';
 import { isCertainMatch, isUncertainMatch } from './matching';
 import DataChangeDialog from './DataChangeDialog';
 import BogenPersons, { similarPersonText } from './BogenPersons';
@@ -75,6 +75,20 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
     });
     const [matchingFor, setMatchingFor] = useState<HouseholdImportPreview | null>(null);
     const [matchOverrides, setMatchOverrides] = useState<Record<string, string>>({});
+    // Alle Haushalte, damit sich eine Zeile auch einem zuordnen lässt, der ihr
+    // nicht ähnlich ist. Ohne die Liste bleibt es bei den Vorschlägen.
+    const [allHouseholds, setAllHouseholds] = useState<MatchOption[]>([]);
+    useEffect(() => {
+        getHouseholds()
+            .then((households) => setAllHouseholds(households.map((hh) => ({
+                id: hh.id,
+                name: hh.name,
+                member_numbers: hh.people
+                    .map((p) => p.member_number)
+                    .filter((nr): nr is string => !!nr),
+            }))))
+            .catch(() => setAllHouseholds([]));
+    }, []);
     const [dataChangeFor, setDataChangeFor] = useState<HouseholdImportPreview | null>(null);
     const [committing, setCommitting] = useState(false);
     const [commitResult, setCommitResult] = useState<HHCommitResponse | null>(null);
@@ -212,8 +226,8 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                         </Typography>
                                                     )}
                                                     {hh.member_count_mismatch && !hh.already_imported && (
-                                                        <Tooltip title={`Der Bogen nennt ${hh.declared_member_count} Personen, führt aber ${hh.persons.length} auf.`}>
-                                                            <Chip label="Abweichung der Personenzahl" size="small" color="warning" sx={{ mt: 0.5 }} />
+                                                        <Tooltip title={`Angegebene Haushaltsgröße: ${hh.declared_member_count}. Der Bogen führt aber ${hh.persons.length} Personen auf.`}>
+                                                            <Chip label="weicht von der angegebenen Haushaltsgröße ab" size="small" color="warning" sx={{ mt: 0.5 }} />
                                                         </Tooltip>
                                                     )}
                                                 </TableCell>
@@ -255,6 +269,16 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                             onClick={() => setDataChangeFor(hh)}
                                                         />
                                                     ) : null}
+                                                    {hh.unparsed_wishes.length > 0 && !hh.already_imported && (
+                                                        <Tooltip title={`Nicht erkannt: ${hh.unparsed_wishes.join(', ')}. Bitte den Wunsch in der Bewerbung von Hand nachtragen.`}>
+                                                            <Chip
+                                                                label="Wunsch nicht erkannt"
+                                                                size="small"
+                                                                color="warning"
+                                                                variant="outlined"
+                                                            />
+                                                        </Tooltip>
+                                                    )}
                                                     {creating && hh.no_member_number && (
                                                         <Tooltip title="Kein Mitglied im Bogen genannt. Vergeben wird nur an Mitglieder.">
                                                             <Chip
@@ -430,6 +454,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                     title={`Haushalt zuordnen: ${matchingFor.persons[0]?.name ?? '—'}`}
                     description={`Personen im importierten Haushalt: ${matchingFor.persons.map((p) => `${p.name} (MitglNr: ${p.member_number || '—'})`).join(', ')}`}
                     candidates={matchingFor.match_result.fuzzy_candidates || []}
+                    allOptions={allHouseholds}
                     createButtonLabel="Nicht zuordnen (überspringen)"
                     onClose={() => setMatchingFor(null)}
                     onSelect={(householdId, name) => {

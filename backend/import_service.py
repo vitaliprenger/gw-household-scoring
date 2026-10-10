@@ -663,9 +663,10 @@ def analyze_household_bogen(file_contents: bytes, db: Session) -> schemas.HHAnal
             already_imported=already_imported,
             existing_data_changes=data_changes,
             wish_not_applied=bool(existing and wish_stays_unapplied(existing, hh_data)),
-            suggested_household_name=suggested_household_name(hh_data["persons"]),
+            suggested_household_name=suggested_household_name(
+                hh_data["persons"], [p.status for p in if_created]),
             persons_if_created=if_created,
-            create_allowed=any(p.status in (NEW, ASSIGN) for p in if_created),
+            create_allowed=joins_new_household([p.status for p in if_created]),
             no_member_number=not any(p.get("member_number") for p in hh_data["persons"]),
         ))
 
@@ -729,6 +730,9 @@ def commit_household_bogen(request: schemas.HHCommitRequest, db: Session) -> sch
         _update_household_from_raw(household, raw, db, all_persons, response)
         if wish_stays_unapplied(household, raw):
             response.wishes_not_applied.append(household.name)
+        # Ohne Autoflush sähe die nächste Zeile nicht, was diese angelegt hat,
+        # etwa die Wartepool-Bewerbung desselben Haushalts.
+        db.flush()
 
     db.commit()
 
@@ -752,11 +756,11 @@ def _create_household_for(raw: dict, db: Session, all_persons: list) -> Optional
     Stehen alle Personen des Bogens schon in anderen Haushalten, entstünde
     ein leerer Haushalt mit Bewerbung, denn der Import verschiebt niemanden.
     """
-    resolutions = resolve_household_rows([], raw["persons"], all_persons)
-    if not any(resolution.status in (NEW, ASSIGN) for resolution in resolutions):
+    statuses = [r.status for r in resolve_household_rows([], raw["persons"], all_persons)]
+    if not joins_new_household(statuses):
         return None
     household = models.Household(
-        name=suggested_household_name(raw["persons"]),
+        name=suggested_household_name(raw["persons"], statuses),
         is_resident=False,
         updated_at=datetime.utcnow(),
     )
@@ -802,15 +806,25 @@ def _household_name(db: Session, household_id) -> Optional[str]:
     return household.name if household else None
 
 
-def suggested_household_name(rows: list[dict]) -> str:
-    """Name eines neuen Haushalts: die unterschiedlichen Nachnamen in Bogenreihenfolge."""
+def joins_new_household(statuses: list[str]) -> bool:
+    """Mindestens eine Person des Bogens käme in einen neu angelegten Haushalt."""
+    return any(status in (NEW, ASSIGN) for status in statuses)
+
+
+def suggested_household_name(rows: list[dict], statuses: list[str]) -> str:
+    """Name eines neuen Haushalts: die Nachnamen seiner Personen in Bogenreihenfolge.
+
+    Wer in einem anderen Haushalt bleibt, gibt dem neuen nicht seinen Namen.
+    """
     last_names: list[str] = []
-    for data in rows:
+    for data, status in zip(rows, statuses):
+        if status not in (NEW, ASSIGN):
+            continue
         # Ein einzelnes Wort liest der Parser als Vornamen ohne Nachnamen.
         last_name = (data.get("last_name") or data.get("first_name") or "").strip()
         if last_name and last_name.lower() not in (known.lower() for known in last_names):
             last_names.append(last_name)
-    return " / ".join(last_names)
+    return " / ".join(last_names) or "Neuer Haushalt"
 
 
 def _person_previews(
@@ -823,10 +837,11 @@ def _person_previews(
 
     Ohne Haushalt (kein Vorschlag) gilt die Sicht eines neuen Haushalts.
     """
-    members = [p for p in all_persons if household is not None and p.household_id == household.id]
+    in_household = [
+        p for p in all_persons if household is not None and p.household_id == household.id
+    ]
     previews = []
-    for data, resolution in zip(rows, resolve_household_rows(members, rows, all_persons)):
-        holder = resolution.number_holder
+    for data, resolution in zip(rows, resolve_household_rows(in_household, rows, all_persons)):
         previews.append(schemas.ImportPersonPreview(
             **data,
             status=resolution.status,
@@ -835,7 +850,7 @@ def _person_previews(
                 if resolution.status == OTHER_HOUSEHOLD else None
             ),
             similar=_similar_previews(resolution.similar, db),
-            member_number_holder=_full_name(holder) if holder is not None else None,
+            member_number_holder=resolution.number_holder,
         ))
     return previews
 
@@ -877,8 +892,8 @@ def _update_household_from_raw(
     if _apply_wishes_from_bogen(hh, raw, db):
         response.applications_created += 1
 
-    members = [p for p in all_persons if p.household_id == hh.id]
-    resolutions = resolve_household_rows(members, raw["persons"], all_persons)
+    in_household = [p for p in all_persons if p.household_id == hh.id]
+    resolutions = resolve_household_rows(in_household, raw["persons"], all_persons)
 
     for p_data, resolution in zip(raw["persons"], resolutions):
         person = resolution.person
@@ -925,7 +940,7 @@ def _update_household_from_raw(
             response.member_numbers_not_stored.append(schemas.MemberNumberConflict(
                 person=_full_name(person),
                 member_number=p_data["member_number"],
-                holder=_full_name(resolution.number_holder),
+                holder=resolution.number_holder,
             ))
 
 
