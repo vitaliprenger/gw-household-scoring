@@ -27,7 +27,7 @@ import ApplicationsTab from './components/applications/ApplicationsTab';
 import { formatDate } from './components/applications/wishes';
 import CreateHouseholdDialog from './components/household/CreateHouseholdDialog';
 import { mobileWrappingGridSx, zebraGridSx, zebraRowClassName } from './components/common/tableStyles';
-import { flexCell, mobileColumns, mobileWrappingGridProps } from './components/common/mobileColumns';
+import { flexCell, mobileColumns, mobileGridProps, mobileWrappingGridProps } from './components/common/mobileColumns';
 import { useIsMobile } from './components/common/useIsMobile';
 import ScoreBreakdownDialog from './components/scoring/ScoreBreakdownDialog';
 import ScoreComparisonDialog, { ComparisonEntry } from './components/scoring/ScoreComparisonDialog';
@@ -694,6 +694,15 @@ function App() {
             },
           ];
 
+          // Handy: Name, Mitglieder und Wohnung passen nebeneinander.
+          const householdGridColumns = isMobile
+            ? mobileColumns(householdColumns, ['name', 'people_count', 'assigned_apartment_unit'], {
+                name: { minWidth: 154 },
+                people_count: { width: 88 },
+                assigned_apartment_unit: { width: 84 },
+              })
+            : householdColumns;
+
           let visibleHouseholds = households;
           if (filterNoApartment) {
             visibleHouseholds = visibleHouseholds.filter(h => !h.assigned_apartment_unit);
@@ -756,15 +765,18 @@ function App() {
               </Typography>
               <DataGrid
                 rows={visibleHouseholds}
-                columns={householdColumns}
+                columns={householdGridColumns}
                 autoHeight
                 density="compact"
                 disableRowSelectionOnClick
                 onRowClick={(params) => setDetailHouseholdId(params.row.id)}
+                // Die Haushalte kommen schon nach Namen sortiert; auf dem Handy
+                // bleibt der Spaltenkopf so ohne Sortierpfeil.
                 initialState={{
-                  sorting: { sortModel: [{ field: 'name', sort: 'asc' }] },
+                  ...(isMobile ? {} : { sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }),
                   pagination: { paginationModel: { pageSize: 100 } },
                 }}
+                {...(isMobile ? mobileGridProps : {})}
                 pageSizeOptions={[10, 25, 50, 100]}
                 getRowClassName={(params) =>
                   [zebraRowClassName(params), params.row.archived ? 'archived-row' : ''].filter(Boolean).join(' ')
