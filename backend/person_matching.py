@@ -97,6 +97,51 @@ def birth_dates_conflict(a, b) -> bool:
     return first is not None and second is not None and first != second
 
 
+def _number_confirms(person, data: dict, parts: frozenset[str]) -> bool:
+    """Die Mitgliedsnummer der Zeile gehört ``person``, und Name und Geburtsdatum passen."""
+    return bool(
+        same_member_number(person.member_number, data.get("member_number"))
+        and (parts & name_parts(person.first_name, person.last_name)) - NAME_PARTICLES
+        and not birth_dates_conflict(data.get("birth_date"), person.birth_date)
+    )
+
+
+def find_person_in_household(candidates, data: dict):
+    """Sucht die Person eines Haushalts, die eine Zeile des Haushaltsbogens meint.
+
+    ``candidates`` sind die Personen des Haushalts, denen im selben Bogen noch
+    keine Zeile zugeordnet wurde. Innerhalb eines Haushalts genügt zusätzlich
+    der Rufname mit gleichem Nachnamen ("Jakob Dreyer" für "Jakob Finn
+    Dreyer"). Jede Regel zählt nur, wenn genau eine Person passt. Gleicher
+    Nachname mit gleichem Geburtsdatum ist bewusst kein Treffer: Er
+    verschmilzt Zwillinge (ADR 0011).
+    """
+    parts = name_parts(data.get("first_name"), data.get("last_name"))
+    last_name = (data.get("last_name") or "").strip().lower()
+    call_name = (data.get("first_name") or "").strip().lower().split(" ")[0]
+
+    def same_call_name(person) -> bool:
+        return bool(
+            last_name and call_name
+            and (person.last_name or "").strip().lower() == last_name
+            and (person.first_name or "").strip().lower().split(" ")[0] == call_name
+        )
+
+    rules = (
+        lambda person: _number_confirms(person, data, parts),
+        lambda person: bool(parts) and name_parts(person.first_name, person.last_name) == parts,
+        same_call_name,
+    )
+    for rule in rules:
+        hits = [
+            person for person in candidates
+            if rule(person) and not birth_dates_conflict(data.get("birth_date"), person.birth_date)
+        ]
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
 def find_certain_person(people, data: dict):
     """Sucht zu einem Import-Datensatz die sicher passende Person in ``people``.
 
@@ -113,8 +158,7 @@ def find_certain_person(people, data: dict):
     holders = persons_with_member_number(people, data.get("member_number"))
     if (
         len(holders) == 1
-        and (parts & name_parts(holders[0].first_name, holders[0].last_name)) - NAME_PARTICLES
-        and not birth_dates_conflict(data.get("birth_date"), holders[0].birth_date)
+        and _number_confirms(holders[0], data, parts)
         and (not same_name or holders[0] in same_name)
     ):
         return holders[0], MEMBER_NUMBER

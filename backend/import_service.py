@@ -12,8 +12,10 @@ from . import models, schemas, wishes as wishes_mod
 from .person_matching import (
     MEMBER_NUMBER,
     MEMBER_NUMBER_UNCONFIRMED,
+    SAME_NAME,
     find_certain_person,
     find_person_by_member_number,
+    find_person_in_household,
     normalize_member_number,
     other_member_number_holder,
     persons_with_member_number,
@@ -383,6 +385,11 @@ def match_person_in(people, data: dict, loose: bool = True):
     return None
 
 
+#: Die Personen des Bogens stehen sicher in verschiedenen Haushalten: kein
+#: sicherer Haushaltstreffer, nur ein Vorschlag.
+SEVERAL_HOUSEHOLDS = "several_households"
+
+
 def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
     persons = hh_data.get("persons", [])
     all_households = db.query(models.Household).all()
@@ -390,62 +397,45 @@ def match_household(hh_data: dict, db: Session) -> schemas.MatchResult:
     # Always compute fuzzy candidates so users can re-assign even exact matches
     candidates = _fuzzy_match(persons, all_households)
 
-    # Step 1: Exact match on member number ("3" und "003" sind dieselbe Nummer)
-    numbered = db.query(models.Person).filter(models.Person.member_number.isnot(None)).all()
+    # Personen des Bogens, die sicher gefunden werden und schon in einem
+    # Haushalt stehen, bestimmen den Haushalt (ADR 0011).
+    all_persons = db.query(models.Person).all()
+    housed = []
     for p in persons:
-        matched_person = find_person_by_member_number(numbered, p.get("member_number"))
-        if matched_person and matched_person.household_id:
-            hh = db.query(models.Household).get(matched_person.household_id)
-            if hh:
-                _ensure_hh_candidate(candidates, hh)
-                return schemas.MatchResult(
-                    type="exact_member_nr",
-                    matched_household_id=hh.id,
-                    matched_household_name=hh.name,
-                    confidence=1.0,
-                    fuzzy_candidates=candidates[:10],
-                )
+        found, match_type = find_certain_person(all_persons, p)
+        if found is not None and found.household_id:
+            housed.append((found, match_type, p))
 
-    # Step 2: Exact match on normalized name + birth date
-    for p in persons:
-        fn = (p.get("first_name") or "").strip().lower()
-        ln = (p.get("last_name") or "").strip().lower()
-        dob_str = p.get("birth_date")
-        if not fn or not ln:
-            continue
-        for hh in all_households:
-            for db_person in hh.people:
-                db_fn = (db_person.first_name or "").strip().lower()
-                db_ln = (db_person.last_name or "").strip().lower()
-                name_match = (fn == db_fn and ln == db_ln) or (fn == db_ln and ln == db_fn)
-                if not name_match:
-                    continue
-                if dob_str and db_person.birth_date:
-                    db_dob = db_person.birth_date.date() if isinstance(db_person.birth_date, datetime) else db_person.birth_date
-                    try:
-                        import_dob = date.fromisoformat(dob_str)
-                        if import_dob == db_dob:
-                            _ensure_hh_candidate(candidates, hh)
-                            return schemas.MatchResult(
-                                type="exact_name_dob",
-                                matched_household_id=hh.id,
-                                matched_household_name=hh.name,
-                                confidence=1.0,
-                                fuzzy_candidates=candidates[:10],
-                            )
-                    except Exception:
-                        pass
-                elif name_match and not dob_str:
-                    _ensure_hh_candidate(candidates, hh)
-                    return schemas.MatchResult(
-                        type="exact_name_dob",
-                        matched_household_id=hh.id,
-                        matched_household_name=hh.name,
-                        confidence=0.9,
-                        fuzzy_candidates=candidates[:10],
-                    )
+    households = {found.household_id: found.household for found, _, _ in housed}
+    for hh in households.values():
+        _ensure_hh_candidate(candidates, hh)
 
-    # Step 3: Fuzzy matching (already computed above)
+    if len(households) == 1:
+        hh = next(iter(households.values()))
+        by_number = any(match_type == MEMBER_NUMBER for _, match_type, _ in housed)
+        # Ein Geburtsdatum auf beiden Seiten bestätigt den Namen zusätzlich.
+        confirmed = by_number or any(p.get("birth_date") and found.birth_date for found, _, p in housed)
+        return schemas.MatchResult(
+            type=MEMBER_NUMBER if by_number else SAME_NAME,
+            matched_household_id=hh.id,
+            matched_household_name=hh.name,
+            confidence=1.0 if confirmed else 0.9,
+            fuzzy_candidates=candidates[:10],
+        )
+
+    # Zusammenzug oder Trennung: Der Bogen ersetzte sonst die Selbstauskunft
+    # und den Wunsch eines der bisherigen Haushalte.
+    if len(households) > 1:
+        first = housed[0][0].household
+        return schemas.MatchResult(
+            type=SEVERAL_HOUSEHOLDS,
+            matched_household_id=first.id,
+            matched_household_name=first.name,
+            confidence=0.0,
+            fuzzy_candidates=candidates[:10],
+        )
+
+    # Sonst der ähnlichste Haushalt als Vorschlag (oben schon berechnet)
     top = candidates[0] if candidates else None
     return schemas.MatchResult(
         type="fuzzy" if top else "none",
@@ -795,17 +785,18 @@ def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
 
     _apply_wishes_from_bogen(hh, raw, db)
 
-    # Personen werden ueber Mitgliedsnummer/Name/Geburtsdatum wiedergefunden,
-    # damit Schreibweisen aus dem Fragebogen keine Dubletten zu den bereits
-    # per vCard angelegten Personen erzeugen.
-    known = list(hh.people)
+    # Personen werden im Haushalt wiedergefunden, damit Schreibweisen aus dem
+    # Fragebogen keine Dubletten erzeugen. Jede Person nimmt höchstens eine
+    # Zeile des Bogens auf; sonst fiele ein Zwilling auf den anderen.
+    unmatched = list(hh.people)
 
     for p_data in raw["persons"]:
         dob = parse_date(p_data.get("birth_date"))
         dob_dt = datetime(dob.year, dob.month, dob.day) if dob else None
 
-        ep = match_person_in(known, p_data)
+        ep = find_person_in_household(unmatched, p_data)
         if ep is not None:
+            unmatched.remove(ep)
             if p_data.get("member_number") and not ep.member_number:
                 ep.member_number = p_data["member_number"]
             if dob_dt and not ep.birth_date:
@@ -821,7 +812,6 @@ def _update_household_from_raw(hh: models.Household, raw: dict, db: Session):
                 updated_at=datetime.utcnow(),
             )
             db.add(person)
-            known.append(person)
 
 
 # ---------------------------------------------------------------------------

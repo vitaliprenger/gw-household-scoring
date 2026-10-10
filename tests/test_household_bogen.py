@@ -11,6 +11,7 @@ Aufruf aus dem Projekt-Root:  python tests/test_household_bogen.py
 import io
 import os
 import sys
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -174,10 +175,192 @@ def test_household_without_apartment_gets_wartepool_application():
     db.close()
 
 
+def match_of(db, **row) -> schemas.MatchResult:
+    """Haushaltstreffer, den die Analyse für eine Zeile meldet."""
+    return analyze(db, row).households[0].match_result
+
+
+def test_household_match_same_name_in_any_spelling():
+    print("\n== Haushaltsbogen: Haushaltstreffer trotz anderer Namensschreibweise ==")
+    db = make_session()
+    # So legt der Haushaltsbogen "Anna Maria Berger" an: erstes Wort = Vorname.
+    berger = add_household(db, "Berger", {"first_name": "Anna", "last_name": "Maria Berger"})
+    tamm = add_household(db, "Tamm", {"first_name": "Renate", "last_name": "Tamm"})
+
+    split = match_of(db, **{"Person 1 (Name)": "Berger, Anna Maria"})
+    check_equal("anders aufgeteilter Name trifft den Haushalt",
+                split.matched_household_id, berger.id)
+    check("anders aufgeteilter Name ist sicher", split.is_certain, f"(typ {split.type})")
+
+    swapped = match_of(db, **{"Person 1 (Name)": "Tamm Renate"})
+    check_equal("vertauschter Name trifft den Haushalt", swapped.matched_household_id, tamm.id)
+    check("vertauschter Name ist sicher", swapped.is_certain, f"(typ {swapped.type})")
+    db.close()
+
+
+def test_household_match_needs_unique_name_and_consistent_birth_date():
+    print("\n== Haushaltsbogen: Name nur eindeutig und ohne Widerspruch sicher ==")
+    db = make_session()
+    add_household(db, "Hoffmann", {"first_name": "Jürgen", "last_name": "Hoffmann"})
+    add_household(db, "Hoffmann 2", {"first_name": "Jürgen", "last_name": "Hoffmann"})
+    kramer = add_household(db, "Kramer", {
+        "first_name": "Stefan", "last_name": "Kramer", "birth_date": datetime(1985, 3, 14)})
+
+    ambiguous = match_of(db, **{"Person 1 (Name)": "Hoffmann, Jürgen"})
+    check("Name, den zwei Personen tragen, ist NICHT sicher", not ambiguous.is_certain,
+          f"(typ {ambiguous.type})")
+
+    conflict = match_of(db, **{
+        "Person 1 (Name)": "Kramer, Stefan", "Person 1 (Geburtsdatum)": "1990-01-01"})
+    check("widersprüchliches Geburtsdatum ist NICHT sicher", not conflict.is_certain,
+          f"(typ {conflict.type})")
+
+    without_birth_date = match_of(db, **{"Person 1 (Name)": "Kramer, Stefan"})
+    check_equal("Geburtsdatum fehlt im Bogen: Treffer",
+                without_birth_date.matched_household_id, kramer.id)
+    check("Geburtsdatum fehlt im Bogen: sicher", without_birth_date.is_certain)
+    db.close()
+
+
+def test_household_match_member_number_needs_matching_person():
+    print("\n== Haushaltsbogen: Mitgliedsnummer nur mit passender Person sicher ==")
+    db = make_session()
+    kern = add_household(db, "Kern", {
+        "first_name": "Agathe", "last_name": "Kern", "member_number": "412",
+        "birth_date": datetime(1970, 2, 3)})
+
+    own = match_of(db, **{
+        "Person 1 (Name)": "Kern, Agathe Maria", "Person 1 (Mitgliedsnummer)": "412"})
+    check_equal("Nummer mit passendem Namen trifft den Haushalt",
+                own.matched_household_id, kern.id)
+    check("Nummer mit passendem Namen ist sicher", own.is_certain)
+
+    foreign = match_of(db, **{
+        "Person 1 (Name)": "Bauer, Moritz", "Person 1 (Mitgliedsnummer)": "412"})
+    check("Nummer mit fremdem Namen ist NICHT sicher", not foreign.is_certain,
+          f"(typ {foreign.type})")
+    check_equal("Nummer mit fremdem Namen bleibt ein Vorschlag",
+                foreign.matched_household_id, kern.id)
+
+    child = match_of(db, **{
+        "Person 1 (Name)": "Kern, Lina", "Person 1 (Mitgliedsnummer)": "412",
+        "Person 1 (Geburtsdatum)": "2015-03-02"})
+    check("Nummer mit widersprüchlichem Geburtsdatum ist NICHT sicher",
+          not child.is_certain, f"(typ {child.type})")
+    db.close()
+
+
+def test_household_match_persons_in_two_households():
+    print("\n== Haushaltsbogen: Personen des Bogens stehen in zwei Haushalten ==")
+    db = make_session()
+    add_household(db, "Ebert", {
+        "first_name": "Ines", "last_name": "Ebert", "member_number": "301"})
+    add_household(db, "Kramer", {
+        "first_name": "Stefan", "last_name": "Kramer", "member_number": "302"})
+
+    # Zusammenzug: beide stehen sicher im Datenbestand, aber in zwei Haushalten.
+    moving_in = match_of(db, **{
+        "Person 1 (Name)": "Ebert, Ines", "Person 1 (Mitgliedsnummer)": "301",
+        "Person 2 (Name)": "Kramer, Stefan", "Person 2 (Mitgliedsnummer)": "302"})
+    check("kein sicherer Haushaltstreffer", not moving_in.is_certain,
+          f"(typ {moving_in.type})")
+    db.close()
+
+
+def update_household(db, household, **row) -> schemas.HHCommitResponse:
+    """Liest eine Zeile ein und übernimmt sie für ``household``."""
+    analysis = analyze(db, row)
+    result = commit(db, analysis, {
+        "temp_id": analysis.households[0].temp_id, "action": "update",
+        "target_household_id": household.id})
+    db.refresh(household)
+    return result
+
+
+def first_names(household) -> list[str]:
+    return sorted(p.first_name for p in household.people)
+
+
+TWINS = {
+    "Person 2 (Name)": "Dreyer, Karl", "Person 2 (Geburtsdatum)": "2019-04-04",
+    "Person 3 (Name)": "Dreyer, Emil", "Person 3 (Geburtsdatum)": "2019-04-04",
+}
+
+
+def test_twins_stay_two_persons():
+    print("\n== Haushaltsbogen: Zwillinge bleiben zwei Personen ==")
+    db = make_session()
+    household = add_household(
+        db, "Dreyer", {"first_name": "Olaf", "last_name": "Dreyer", "member_number": "360"})
+
+    update_household(db, household, **{
+        "Person 1 (Name)": "Dreyer, Olaf", "Person 1 (Mitgliedsnummer)": "360", **TWINS})
+
+    check_equal("beide Zwillinge angelegt", first_names(household), ["Emil", "Karl", "Olaf"])
+    db.close()
+
+
+def test_twin_of_an_existing_person_is_added():
+    print("\n== Haushaltsbogen: ein Zwilling steht schon im Haushalt ==")
+    db = make_session()
+    household = add_household(
+        db, "Dreyer",
+        {"first_name": "Olaf", "last_name": "Dreyer", "member_number": "360"},
+        {"first_name": "Karl", "last_name": "Dreyer", "birth_date": datetime(2019, 4, 4),
+         "gender": "m"})
+
+    # Der neue Zwilling steht im Bogen vor dem vorhandenen.
+    update_household(db, household, **{
+        "Person 1 (Name)": "Dreyer, Olaf", "Person 1 (Mitgliedsnummer)": "360",
+        "Person 2 (Name)": "Dreyer, Emil", "Person 2 (Geburtsdatum)": "2019-04-04",
+        "Person 3 (Name)": "Dreyer, Karl", "Person 3 (Geburtsdatum)": "2019-04-04"})
+
+    check_equal("der andere Zwilling ist neu angelegt",
+                first_names(household), ["Emil", "Karl", "Olaf"])
+    karl = next(p for p in household.people if p.first_name == "Karl")
+    check_equal("die Angaben des vorhandenen Zwillings bleiben seine", karl.gender, "m")
+    db.close()
+
+
+def test_call_name_matches_within_the_household():
+    print("\n== Haushaltsbogen: Rufname trifft im Haushalt, wenn er eindeutig ist ==")
+    db = make_session()
+    household = add_household(
+        db, "Dreyer",
+        {"first_name": "Olaf", "last_name": "Dreyer", "member_number": "360"},
+        {"first_name": "Jakob Finn", "last_name": "Dreyer"})
+
+    update_household(db, household, **{
+        "Person 1 (Name)": "Dreyer, Olaf", "Person 1 (Mitgliedsnummer)": "360",
+        "Person 2 (Name)": "Dreyer, Jakob", "Person 2 (Geburtsdatum)": "2021-03-14"})
+
+    check_equal("keine Dublette zum Rufnamen", first_names(household), ["Jakob Finn", "Olaf"])
+    jakob = next(p for p in household.people if p.first_name == "Jakob Finn")
+    check_equal("Geburtsdatum ergänzt", jakob.birth_date, datetime(2021, 3, 14))
+
+    # Zwei Personen mit demselben Rufnamen: Der Bogen meint keine eindeutig.
+    db.add(models.Person(household_id=household.id, first_name="Jakob Bo", last_name="Dreyer"))
+    db.commit()
+    update_household(db, household, **{
+        "Zeitstempel": "2026-09-02T10:00:00+02:00",
+        "Person 1 (Name)": "Dreyer, Olaf", "Person 1 (Mitgliedsnummer)": "360",
+        "Person 2 (Name)": "Dreyer, Jakob"})
+    check_equal("mehrdeutiger Rufname wird nicht zugeordnet", first_names(household),
+                ["Jakob", "Jakob Bo", "Jakob Finn", "Olaf"])
+    db.close()
+
+
 if __name__ == "__main__":
     test_resident_household_gets_no_application()
     test_resident_household_keeps_existing_application()
     test_household_without_apartment_gets_wartepool_application()
+    test_household_match_same_name_in_any_spelling()
+    test_household_match_needs_unique_name_and_consistent_birth_date()
+    test_household_match_member_number_needs_matching_person()
+    test_household_match_persons_in_two_households()
+    test_twins_stay_two_persons()
+    test_twin_of_an_existing_person_is_added()
+    test_call_name_matches_within_the_household()
 
     print("\n" + "=" * 50)
     if failures:

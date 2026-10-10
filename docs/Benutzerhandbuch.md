@@ -61,17 +61,21 @@ kaputt machen.
 **Darauf solltest du achten:**
 
 - Automatisch zugeordnet wird nur ein **eindeutiger Treffer** (gleiche Mitgliedsnummer oder
-  genau gleicher Name). Ist ein Treffer nur *ähnlich*, siehst du einen **orangefarbenen Chip**;
+  gleicher Name). Ist ein Treffer nur *ähnlich*, siehst du einen **orangefarbenen Chip**;
   klickst du darauf, wird er übernommen.
-- Der **Individualbogen** ordnet eine Zeile automatisch zu, wenn der Name gleich ist. Reihenfolge,
-  Groß- und Kleinschreibung und die Aufteilung in Vor- und Nachname spielen keine Rolle:
-  „Berger, Anna Maria“ und „Anna Maria Berger“ gelten als derselbe Name. Tragen zwei Personen den
-  Namen oder widersprechen sich die Geburtsdaten, ordnet er nicht automatisch zu.
-- Eine **Mitgliedsnummer** im Individualbogen zählt nur, wenn auch der Name zur Person passt und
-  sich die Geburtsdaten nicht widersprechen. Sonst zeigt der Chip „(nur Mitgliedsnummer)“. Prüf
-  dann, ob wirklich diese Person gemeint ist – oft hat jemand die Nummer eines Angehörigen
-  eingetragen oder sich vertippt. Trägt eine andere Person genau den Namen aus dem Bogen, gilt
-  der Name und nicht die Nummer.
+- **Individualbogen und Haushaltsbogen** ordnen automatisch zu, wenn der Name gleich ist.
+  Reihenfolge, Groß- und Kleinschreibung und die Aufteilung in Vor- und Nachname spielen keine
+  Rolle: „Berger, Anna Maria“ und „Anna Maria Berger“ gelten als derselbe Name. Tragen zwei
+  Personen den Namen oder widersprechen sich die Geburtsdaten, ordnen sie nicht automatisch zu.
+- Eine **Mitgliedsnummer** in einem Fragebogen zählt nur, wenn auch der Name zur Person passt und
+  sich die Geburtsdaten nicht widersprechen – oft hat jemand die Nummer eines Angehörigen
+  eingetragen oder sich vertippt. Im Individualbogen zeigt der Chip dann
+  „(nur Mitgliedsnummer)“; prüf, ob wirklich diese Person gemeint ist. Trägt eine andere Person
+  genau den Namen aus dem Bogen, gilt der Name und nicht die Nummer.
+- Stehen die Personen eines Haushaltsbogens in **verschiedenen Haushalten** (etwa weil zwei
+  Haushalte zusammenziehen oder sich einer trennt), zeigt der Chip **„Mehrere Haushalte“**, und
+  die Zeile steht auf „Überspringen“. Der Bogen würde sonst die Angaben und den Wunsch eines der
+  bisherigen Haushalte ersetzen. Entscheide selbst, zu welchem Haushalt der Bogen gehört.
 - Der Individualbogen **überschreibt** Geschlecht, Haupttätigkeit, Bildungsabschluss, kulturelle
   Vielfalt und besondere Lebenslagen, wenn er dazu eine Angabe enthält. Geburtsdatum,
   Mitgliedsnummer und **„Mitglied seit“** trägt er **nur ein, wenn sie noch fehlen**; den Namen

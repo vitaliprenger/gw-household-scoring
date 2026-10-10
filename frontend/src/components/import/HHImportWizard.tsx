@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import {
     HHAnalysisResponse, HouseholdImportPreview, HouseholdDecision,
-    HHCommitRequest, HHCommitResponse,
+    HHCommitRequest, HHCommitResponse, MatchResult,
 } from '../../types';
 import { commitHHBogen } from '../../api';
 import MatchingDialog from './MatchingDialog';
@@ -30,20 +30,17 @@ const WISH_NOT_APPLIED_HINT =
 function matchTypeLabel(type: string): string {
     switch (type) {
         case 'exact_member_nr': return 'Mitgliedsnr.';
-        case 'exact_name_dob': return 'Name+Geb.';
+        case 'exact_name_dob': return 'Name';
         case 'fuzzy': return 'Vorschlag';
+        case 'several_households': return 'Mehrere Haushalte';
         case 'none': return 'Kein Match';
         default: return type;
     }
 }
 
-function matchColor(type: string): 'success' | 'warning' | 'info' | 'default' {
-    switch (type) {
-        case 'exact_member_nr': return 'success';
-        case 'exact_name_dob': return 'success';
-        case 'fuzzy': return 'warning';
-        default: return 'default';
-    }
+function matchColor(match: MatchResult): 'success' | 'warning' | 'info' | 'default' {
+    if (isCertainMatch(match)) return 'success';
+    return isUncertainMatch(match) ? 'warning' : 'default';
 }
 
 export default function HHImportWizard({ open, analysis, onClose, onComplete }: HHImportWizardProps) {
@@ -137,10 +134,11 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
 
                 {uncertainCount > 0 && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
-                        <strong>{uncertainCount} Zeile(n) mit nur ähnlichem Treffer.</strong>{' '}
-                        Nur ein eindeutiger Treffer wird automatisch zugeordnet —
-                        Mitgliedsnummer, exakter Name oder Wohnungsnummer. Ein nur ähnlicher
-                        Name steht auf „Überspringen"; der Vorschlag lässt sich über den
+                        <strong>{uncertainCount} Zeile(n) mit unsicherem Treffer.</strong>{' '}
+                        Automatisch zugeordnet wird nur bei gleichem Namen oder bei einer
+                        Mitgliedsnummer, zu der Name und Geburtsdatum passen, und nur, wenn
+                        alle gefundenen Personen im selben Haushalt stehen. Alles andere
+                        steht auf „Überspringen"; der Vorschlag lässt sich über den
                         Treffer-Chip prüfen und übernehmen.
                     </Alert>
                 )}
@@ -217,7 +215,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                                         ? 'Kein Match'
                                                                         : `${matchTypeLabel(hh.match_result.type)}: ${hh.match_result.matched_household_name ?? ''}`}
                                                                 size="small"
-                                                                color={overrideName ? 'info' : matchColor(hh.match_result.type)}
+                                                                color={overrideName ? 'info' : matchColor(hh.match_result)}
                                                                 onClick={() => setMatchingFor(hh)}
                                                             />
                                                         );
