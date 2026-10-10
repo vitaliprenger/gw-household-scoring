@@ -6,6 +6,7 @@ Name. Was hier als gleich gilt, steht in ADR 0011.
 """
 
 import re
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Optional
 
@@ -160,6 +161,145 @@ def match_household_persons(people, rows: list[dict]) -> list:
     return matched
 
 
+#: Was mit der Person einer Zeile des Haushaltsbogens geschieht.
+IN_HOUSEHOLD = "in_household"        # steht schon im Haushalt
+ASSIGN = "assign"                    # steht ohne Haushalt im Datenbestand, wird zugeordnet
+OTHER_HOUSEHOLD = "other_household"  # steht in einem anderen Haushalt, bleibt dort
+NEW = "new"                          # wird neu angelegt
+
+#: Warum eine Person des Datenbestands einer neuen ähnlich ist.
+SIMILAR_BY_MEMBER_NUMBER = "member_number"  # trägt die Nummer, aber Name oder Geburtsdatum passen nicht
+SIMILAR_BY_NAME = "same_name"                # gleicher Name, aber mehrdeutig oder anderes Geburtsdatum
+SIMILAR_BY_BIRTH_DATE = "birth_date"         # gleiches Geburtsdatum, gemeinsamer Namensbestandteil
+
+
+@dataclass
+class RowResolution:
+    """Ergebnis der Suche für eine Zeile des Haushaltsbogens."""
+    status: str
+    #: Gefundene Person; None, wenn die Person neu angelegt wird
+    person: object = None
+    #: Nur bei ``NEW``: ``(grund, person)`` für jede ähnliche Person
+    similar: list = field(default_factory=list)
+    #: Name dessen, der die Mitgliedsnummer der Zeile schon trägt, sodass sie
+    #: nicht gespeichert wird: eine Person des Datenbestands oder eine
+    #: frühere Zeile desselben Bogens
+    number_holder: Optional[str] = None
+
+
+def full_name(person) -> str:
+    return f"{person.first_name or ''} {person.last_name or ''}".strip()
+
+
+def _similar_persons(pool, data: dict) -> list:
+    """Personen, die einer neu anzulegenden ähnlich sind (ADR 0011).
+
+    Bewusst nur drei Fälle und kein Ähnlichkeitswert: Angehörige teilen den
+    Nachnamen, ein Hinweis bei jedem gleichen Nachnamen sagte nichts.
+    """
+    parts = name_parts(data.get("first_name"), data.get("last_name"))
+    birth_date = _as_date(data.get("birth_date"))
+    same_name = [p for p in pool if parts and name_parts(p.first_name, p.last_name) == parts]
+
+    similar: list = []
+
+    def add(reason: str, people) -> None:
+        for person in people:
+            if all(person is not known for _, known in similar):
+                similar.append((reason, person))
+
+    add(SIMILAR_BY_MEMBER_NUMBER, persons_with_member_number(pool, data.get("member_number")))
+    # Wer hier noch den gleichen Namen trägt, war kein sicherer Treffer:
+    # Mehrere tragen ihn, oder das Geburtsdatum widerspricht (oft ein Tippfehler).
+    add(SIMILAR_BY_NAME, same_name)
+    if birth_date is not None:
+        add(SIMILAR_BY_BIRTH_DATE, [
+            p for p in pool
+            if _as_date(p.birth_date) == birth_date
+            and (parts & name_parts(p.first_name, p.last_name)) - NAME_PARTICLES
+        ])
+    return similar
+
+
+def resolve_household_rows(household_people, rows: list[dict], all_people) -> list[RowResolution]:
+    """Sucht zu jeder Zeile eines Haushaltsbogens die gemeinte Person.
+
+    Erst im Haushalt (``household_people``, leer bei einem neuen Haushalt),
+    dann im gesamten Datenbestand (``all_people``). Eine Person ohne Haushalt
+    wird bei sicherem Treffer zugeordnet; eine Person aus einem anderen
+    Haushalt bleibt dort. Jede Person nimmt höchstens eine Zeile auf.
+    """
+    in_household = list(household_people)
+    found: list = match_household_persons(in_household, rows)
+    claimed = [person for person in found if person is not None]
+
+    def unclaimed() -> list:
+        return [p for p in all_people if all(p is not c for c in claimed)]
+
+    # Wie im Haushalt läuft erst der gleiche Name über den ganzen Bogen, dann
+    # die Mitgliedsnummer: Wer mit eigener Zeile im Bogen steht, nimmt sie
+    # auf, bevor die Zeile eines Kindes mit seiner Nummer ihn trifft.
+    for find in (_find_by_same_name, lambda pool, data: find_certain_person(pool, data)[0]):
+        for index, data in enumerate(rows):
+            if found[index] is None:
+                person = find(unclaimed(), data)
+                if person is not None:
+                    found[index] = person
+                    claimed.append(person)
+
+    resolutions: list[RowResolution] = []
+    for person in found:
+        if person is None:
+            status = NEW
+        elif any(person is known for known in in_household):
+            status = IN_HOUSEHOLD
+        elif person.household_id is None:
+            status = ASSIGN
+        else:
+            status = OTHER_HOUSEHOLD
+        resolutions.append(RowResolution(status, person))
+
+    pool = unclaimed()
+    #: Nummer -> Name der Zeile, die sie in diesem Bogen zuerst trägt
+    numbers_in_bogen: dict[str, str] = {}
+    for data, resolution in zip(rows, resolutions):
+        if resolution.status == NEW:
+            resolution.similar = _similar_persons(pool, data)
+
+        number = normalize_member_number(data.get("member_number"))
+        if number is None or resolution.status == OTHER_HOUSEHOLD:
+            continue
+        person = resolution.person
+        row_name = full_name(person) if person is not None else (
+            f"{data.get('first_name') or ''} {data.get('last_name') or ''}".strip())
+        if person is not None and person.member_number:
+            # Die Person hat schon eine Nummer; die des Bogens wird nicht gespeichert.
+            if same_member_number(person.member_number, number):
+                numbers_in_bogen.setdefault(number, row_name)
+            continue
+        holder = other_member_number_holder(all_people, number, person)
+        if holder is not None:
+            resolution.number_holder = full_name(holder)
+        elif number in numbers_in_bogen:
+            resolution.number_holder = numbers_in_bogen[number]
+        else:
+            numbers_in_bogen[number] = row_name
+    return resolutions
+
+
+def _find_by_same_name(people, data: dict):
+    """Die eine Person mit dem gleichen Namen, deren Geburtsdatum nicht widerspricht."""
+    parts = name_parts(data.get("first_name"), data.get("last_name"))
+    same_name = [p for p in people if parts and name_parts(p.first_name, p.last_name) == parts]
+    # Über den gesamten Bestand sind Namen nicht eindeutig; ein mehrdeutiger
+    # Treffer würde zwei verschiedene Menschen verschmelzen.
+    if len(same_name) != 1:
+        return None
+    if birth_dates_conflict(data.get("birth_date"), same_name[0].birth_date):
+        return None
+    return same_name[0]
+
+
 def find_certain_person(people, data: dict):
     """Sucht zu einem Import-Datensatz die sicher passende Person in ``people``.
 
@@ -181,10 +321,5 @@ def find_certain_person(people, data: dict):
     ):
         return holders[0], MEMBER_NUMBER
 
-    # Über den gesamten Bestand sind Namen nicht eindeutig; ein mehrdeutiger
-    # Treffer würde zwei verschiedene Menschen verschmelzen.
-    if len(same_name) != 1:
-        return None, None
-    if birth_dates_conflict(data.get("birth_date"), same_name[0].birth_date):
-        return None, None
-    return same_name[0], SAME_NAME
+    by_name = _find_by_same_name(people, data)
+    return (by_name, SAME_NAME) if by_name is not None else (None, None)

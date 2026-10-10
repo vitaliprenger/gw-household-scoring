@@ -49,7 +49,8 @@ Die drei Importe bauen aufeinander auf. **Halte die Reihenfolge ein:**
 2. **Individualbogen** (.xlsx) – ergänzt Geschlecht, Tätigkeit, Bildung usw. bei den vorhandenen
    Personen.
 3. **Haushaltsbogen** (.xlsx) – ergänzt WBS-Status, Haustiere usw. bei den vorhandenen Haushalten
-   und überträgt den Wohnungswunsch in die Wartepool-Bewerbung.
+   und überträgt den Wohnungswunsch in die Wartepool-Bewerbung. Für neue Bewerbende legst du im
+   Assistenten einen neuen Haushalt an.
 
 Wechselwünsche und Joker-Bewerbungen kommen nicht über einen Import. Leg sie im Tab
 **Bewerbungen** von Hand an.
@@ -76,6 +77,43 @@ kaputt machen.
   Haushalte zusammenziehen oder sich einer trennt), zeigt der Chip **„Mehrere Haushalte“**, und
   die Zeile steht auf „Überspringen“. Der Bogen würde sonst die Angaben und den Wunsch eines der
   bisherigen Haushalte ersetzen. Entscheide selbst, zu welchem Haushalt der Bogen gehört.
+- Findet der **Haushaltsbogen** keinen passenden Haushalt, steht die Zeile auf „Überspringen“ und
+  bewirkt nichts. Gehört der Bogen zu neuen Bewerbenden, wähl bei der Zeile **„Neu anlegen“**:
+  Dann entsteht ein Haushalt mit den Personen des Bogens, ihren Angaben und – wenn der Bogen einen
+  Wunsch nennt – einer Wartepool-Bewerbung mit dem Datum des Bogens. Der Haushalt heißt nach den
+  Nachnamen seiner Personen („Yilmaz / Berger“); umbenennen kannst du ihn danach im
+  Haushalts-Dialog. „Neu anlegen“ ist nie vorausgewählt: Wer aufgenommen wird, entscheiden wir.
+- Nennt ein Bogen **keine Mitgliedsnummer**, zeigt der Assistent beim Anlegen einen Hinweis.
+  Vergeben wird nur an Mitglieder – klär vorher, ob jemand aus dem Haushalt Mitglied ist.
+- Steht bei einer Zeile **„Neu anlegen nicht möglich“**, gehören alle Personen des Bogens schon zu
+  anderen Haushalten. Zieh die Personen zuerst im Tab **Personen** um oder lös sie aus ihrem
+  Haushalt, und lies den Bogen dann noch einmal ein.
+- Der Assistent des **Haushaltsbogens** zeigt jede Person mit Vor- und Nachnamen so, wie sie
+  gespeichert würde, und sagt dir, was mit ihr geschieht:
+  - **im Haushalt** – die Person steht schon dort; fehlende Angaben werden ergänzt.
+  - **wird zugeordnet** – die Person steht ohne Haushalt in der Anwendung und kommt in diesen
+    Haushalt. Ihre Angaben, etwa „Mitglied seit“, behält sie.
+  - **bleibt in „…“** – die Person gehört schon zu einem anderen Haushalt. Der Import verschiebt
+    niemanden: Sie wird nicht übernommen, und die Zusammenfassung nennt sie. Zieh sie bei Bedarf
+    im Tab **Personen** von Hand um.
+  - **neu** – die Person wird angelegt.
+- Steht bei einer neuen Person **„ähnliche Person im Datenbestand“**, gibt es schon jemanden mit
+  derselben Mitgliedsnummer, demselben Namen oder demselben Geburtsdatum und einem gemeinsamen
+  Namensteil. Fahr mit der Maus über den Hinweis, um zu sehen, wer das ist und warum. Ist es
+  jemand anderes, übernimm die Zeile. Ist es dieselbe Person, überspring die Zeile und berichtige
+  bei der vorhandenen Person Namen oder Geburtsdatum so, dass sie zum Bogen passen. Lies den
+  Bogen dann noch einmal ein: Jetzt wird die Person gefunden und nicht doppelt angelegt.
+- Über den **Treffer-Chip** ordnest du eine Zeile von Hand zu. Der Dialog zeigt zuerst ähnliche
+  Haushalte; über die Suche findest du jeden Haushalt, auch einen, den du gerade erst angelegt
+  hast. Die Kennzeichnungen an den Personen gelten für den vorgeschlagenen Haushalt. Ordnest du
+  einem anderen zu, sagt dir die Zusammenfassung, was mit den Personen geschehen ist.
+- **„Wunsch nicht erkannt“** heißt: Der Assistent konnte die Wunschangabe des Bogens nicht oder
+  nur teilweise lesen. Fahr mit der Maus über den Hinweis und trag den Wunsch nach dem Import in
+  der Bewerbung nach; ohne lesbaren Wunsch entsteht keine Bewerbung.
+- Stimmt die Aufteilung in Vor- und Nachname nicht (aus „Berger Anna“ wird der Vorname „Berger“),
+  berichtige den Namen nach dem Import bei der Person.
+- **„Nummer vergeben“** heißt: Die Mitgliedsnummer aus dem Bogen trägt schon eine andere Person.
+  Die Nummer wird dann nicht gespeichert; die Zusammenfassung nennt beide Personen.
 - Der Individualbogen **überschreibt** Geschlecht, Haupttätigkeit, Bildungsabschluss, kulturelle
   Vielfalt und besondere Lebenslagen, wenn er dazu eine Angabe enthält. Geburtsdatum,
   Mitgliedsnummer und **„Mitglied seit“** trägt er **nur ein, wenn sie noch fehlen**; den Namen

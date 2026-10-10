@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, Stepper, Step, StepLabel, Typography, Box,
@@ -10,10 +10,11 @@ import {
     HHAnalysisResponse, HouseholdImportPreview, HouseholdDecision,
     HHCommitRequest, HHCommitResponse, MatchResult,
 } from '../../types';
-import { commitHHBogen } from '../../api';
-import MatchingDialog from './MatchingDialog';
+import { commitHHBogen, getHouseholds } from '../../api';
+import MatchingDialog, { MatchOption } from './MatchingDialog';
 import { isCertainMatch, isUncertainMatch } from './matching';
 import DataChangeDialog from './DataChangeDialog';
+import BogenPersons, { similarPersonText } from './BogenPersons';
 
 interface HHImportWizardProps {
     open: boolean;
@@ -57,9 +58,10 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                 targetId = hh.match_result.matched_household_id ?? undefined;
             } else {
                 // Nur ein eindeutiger Treffer wird automatisch zugeordnet (siehe
-                // matching.ts). Der Haushaltsbogen legt nichts an, deshalb ist
-                // "Überspringen" hier die unschuldige Vorbelegung: der
-                // Vorschlag bleibt sichtbar und auswählbar.
+                // matching.ts). "Überspringen" ist die unschuldige Vorbelegung:
+                // der Vorschlag bleibt sichtbar, und "Neu anlegen" ist immer
+                // eine bewusste Wahl je Zeile (ADR 0011). Eine unentschiedene
+                // Zeile bewirkt so nichts, deshalb sperrt der Assistent nicht.
                 action = 'skip';
             }
             init[hh.temp_id] = {
@@ -73,6 +75,20 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
     });
     const [matchingFor, setMatchingFor] = useState<HouseholdImportPreview | null>(null);
     const [matchOverrides, setMatchOverrides] = useState<Record<string, string>>({});
+    // Alle Haushalte, damit sich eine Zeile auch einem zuordnen lässt, der ihr
+    // nicht ähnlich ist. Ohne die Liste bleibt es bei den Vorschlägen.
+    const [allHouseholds, setAllHouseholds] = useState<MatchOption[]>([]);
+    useEffect(() => {
+        getHouseholds()
+            .then((households) => setAllHouseholds(households.map((hh) => ({
+                id: hh.id,
+                name: hh.name,
+                member_numbers: hh.people
+                    .map((p) => p.member_number)
+                    .filter((nr): nr is string => !!nr),
+            }))))
+            .catch(() => setAllHouseholds([]));
+    }, []);
     const [dataChangeFor, setDataChangeFor] = useState<HouseholdImportPreview | null>(null);
     const [committing, setCommitting] = useState(false);
     const [commitResult, setCommitResult] = useState<HHCommitResponse | null>(null);
@@ -124,14 +140,6 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-                {analysis.missing_base_data_warning && step === 0 && (
-                    <Alert severity="warning" sx={{ mb: 2 }}>
-                        Es sind noch keine Haushalte vorhanden. Bitte zuerst die
-                        Mitgliederliste (vCard) importieren — der Haushaltsbogen
-                        ergänzt nur bestehende Haushalte.
-                    </Alert>
-                )}
-
                 {uncertainCount > 0 && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
                         <strong>{uncertainCount} Zeile(n) mit unsicherem Treffer.</strong>{' '}
@@ -164,9 +172,11 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                             </Alert>
                         )}
                         <Typography variant="body2" color="text.secondary">
-                            Der Haushaltsbogen <strong>ergänzt bestehende Haushalte</strong> und legt
-                            keine neuen an. Im nächsten Schritt entscheiden Sie je Datensatz:
-                            vorhandenen Haushalt aktualisieren oder überspringen.
+                            Der Haushaltsbogen <strong>ergänzt bestehende Haushalte</strong>. Findet
+                            er keinen passenden Haushalt, steht die Zeile auf „Überspringen“; im
+                            nächsten Schritt lässt sich je Zeile ein Haushalt zuordnen oder mit
+                            „Neu anlegen“ ein neuer Haushalt samt Personen und Wartepool-Bewerbung
+                            anlegen.
                         </Typography>
                     </Box>
                 )}
@@ -178,9 +188,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                             <Table size="small">
                                 <TableHead>
                                     <TableRow>
-                                        <TableCell>Person 1</TableCell>
-                                        <TableCell>MitglNr.</TableCell>
-                                        <TableCell>Mitglieder</TableCell>
+                                        <TableCell>Personen (Vorname | Nachname)</TableCell>
                                         <TableCell>Match</TableCell>
                                         <TableCell>Status</TableCell>
                                         <TableCell>Hinweise</TableCell>
@@ -189,19 +197,38 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                 </TableHead>
                                 <TableBody>
                                     {analysis.households.map((hh) => {
-                                        const p1 = hh.persons[0];
                                         const dec = decisions[hh.temp_id];
+                                        const proposed = hh.match_result.matched_household_id;
+                                        // Vorschau und Hinweise gelten für den vorgeschlagenen
+                                        // Haushalt; nach der Zuordnung zu einem anderen zählt
+                                        // die Zusammenfassung.
+                                        const forProposed = (dec?.target_household_id ?? proposed) === proposed;
+                                        const creating = dec?.action === 'create';
+                                        // Neu angelegt wird nur, wo kein Haushalt sicher passt.
+                                        const mayCreate = hh.create_allowed && !hh.already_imported
+                                            && !isCertainMatch(hh.match_result);
+                                        const cannotCreate = !hh.create_allowed && !hh.already_imported
+                                            && !isCertainMatch(hh.match_result);
                                         return (
                                             <TableRow
                                                 key={hh.temp_id}
                                                 sx={hh.already_imported ? { opacity: 0.5, bgcolor: 'action.hover' } : undefined}
                                             >
-                                                <TableCell>{p1?.name ?? '—'}</TableCell>
-                                                <TableCell>{p1?.member_number ?? '—'}</TableCell>
                                                 <TableCell>
-                                                    {hh.persons.length}
+                                                    <BogenPersons
+                                                        persons={creating ? hh.persons_if_created : hh.persons}
+                                                        showOutcome={!hh.already_imported
+                                                            && (creating || (!!proposed && forProposed))}
+                                                    />
+                                                    {creating && (
+                                                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                                                            Neuer Haushalt: „{hh.suggested_household_name}“
+                                                        </Typography>
+                                                    )}
                                                     {hh.member_count_mismatch && !hh.already_imported && (
-                                                        <Chip label="Abweichung" size="small" color="warning" sx={{ ml: 1 }} />
+                                                        <Tooltip title={`Angegebene Haushaltsgröße: ${hh.declared_member_count}. Der Bogen führt aber ${hh.persons.length} Personen auf.`}>
+                                                            <Chip label="weicht von der angegebenen Haushaltsgröße ab" size="small" color="warning" sx={{ mt: 0.5 }} />
+                                                        </Tooltip>
                                                     )}
                                                 </TableCell>
                                                 <TableCell>
@@ -234,7 +261,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                     )}
                                                 </TableCell>
                                                 <TableCell>
-                                                    {hh.existing_data_changes?.data_removals?.length ? (
+                                                    {hh.existing_data_changes?.data_removals?.length && !creating ? (
                                                         <Chip
                                                             label={`${hh.existing_data_changes.data_removals.length} Löschungen`}
                                                             size="small"
@@ -242,11 +269,36 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                             onClick={() => setDataChangeFor(hh)}
                                                         />
                                                     ) : null}
-                                                    {/* Gilt für den vorgeschlagenen Haushalt; nach der Zuordnung
-                                                        zu einem anderen zählt die Zusammenfassung. */}
-                                                    {hh.wish_not_applied && !hh.already_imported
-                                                        && (dec?.target_household_id ?? hh.match_result.matched_household_id)
-                                                            === hh.match_result.matched_household_id && (
+                                                    {hh.unparsed_wishes.length > 0 && !hh.already_imported && (
+                                                        <Tooltip title={`Nicht erkannt: ${hh.unparsed_wishes.join(', ')}. Bitte den Wunsch in der Bewerbung von Hand nachtragen.`}>
+                                                            <Chip
+                                                                label="Wunsch nicht erkannt"
+                                                                size="small"
+                                                                color="warning"
+                                                                variant="outlined"
+                                                            />
+                                                        </Tooltip>
+                                                    )}
+                                                    {creating && hh.no_member_number && (
+                                                        <Tooltip title="Kein Mitglied im Bogen genannt. Vergeben wird nur an Mitglieder.">
+                                                            <Chip
+                                                                label="keine Mitgliedsnummer angegeben"
+                                                                size="small"
+                                                                color="warning"
+                                                                variant="outlined"
+                                                            />
+                                                        </Tooltip>
+                                                    )}
+                                                    {cannotCreate && (
+                                                        <Tooltip title="Alle Personen des Bogens stehen schon in anderen Haushalten. Erst die Personen umziehen, dann den Bogen erneut einlesen.">
+                                                            <Chip
+                                                                label="Neu anlegen nicht möglich"
+                                                                size="small"
+                                                                variant="outlined"
+                                                            />
+                                                        </Tooltip>
+                                                    )}
+                                                    {hh.wish_not_applied && !hh.already_imported && forProposed && !creating && (
                                                         <Tooltip title={WISH_NOT_APPLIED_HINT}>
                                                             <Chip
                                                                 label="Wunsch nicht übernommen"
@@ -261,16 +313,30 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                                                     <FormControl size="small" sx={{ minWidth: 140 }}>
                                                         <Select
                                                             value={dec?.action ?? 'skip'}
-                                                            onChange={(e) => updateDecision(hh.temp_id, {
-                                                                action: e.target.value as 'update' | 'skip',
-                                                                target_household_id: e.target.value === 'update'
-                                                                    ? dec?.target_household_id
-                                                                        ?? hh.match_result.matched_household_id ?? undefined
-                                                                    : undefined,
-                                                            })}
+                                                            onChange={(e) => {
+                                                                const action = e.target.value as HouseholdDecision['action'];
+                                                                updateDecision(hh.temp_id, {
+                                                                    action,
+                                                                    target_household_id: action === 'update'
+                                                                        ? dec?.target_household_id
+                                                                            ?? hh.match_result.matched_household_id ?? undefined
+                                                                        : undefined,
+                                                                });
+                                                                if (action !== 'update') {
+                                                                    // Eine Zuordnung von Hand gilt nicht mehr.
+                                                                    setMatchOverrides((prev) => {
+                                                                        const next = { ...prev };
+                                                                        delete next[hh.temp_id];
+                                                                        return next;
+                                                                    });
+                                                                }
+                                                            }}
                                                         >
                                                             {(dec?.target_household_id || hh.match_result.matched_household_id) && (
                                                                 <MenuItem value="update">Aktualisieren</MenuItem>
+                                                            )}
+                                                            {mayCreate && (
+                                                                <MenuItem value="create">Neu anlegen</MenuItem>
                                                             )}
                                                             <MenuItem value="skip">Überspringen</MenuItem>
                                                         </Select>
@@ -296,14 +362,52 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                     <Box>
                         <Typography variant="h6" gutterBottom>Import abgeschlossen</Typography>
                         <Alert severity="success" sx={{ mb: 2 }}>
-                            <strong>{commitResult.updated}</strong> Haushalte ergänzt,{' '}
-                            <strong>{commitResult.skipped}</strong> übersprungen.
+                            <strong>{commitResult.households_created}</strong> Haushalte neu angelegt,{' '}
+                            <strong>{commitResult.updated}</strong> ergänzt,{' '}
+                            <strong>{commitResult.skipped}</strong> Zeilen übersprungen.{' '}
+                            <strong>{commitResult.applications_created}</strong> Wartepool-Bewerbungen angelegt.{' '}
+                            <strong>{commitResult.persons_created}</strong> Personen neu angelegt,{' '}
+                            <strong>{commitResult.persons_assigned}</strong> aus dem Datenbestand zugeordnet.
                         </Alert>
+                        {commitResult.persons_not_taken_over.length > 0 && (
+                            <Alert severity="warning" sx={{ mb: 2 }}>
+                                <strong>Nicht übernommen – bitte von Hand umziehen:</strong>
+                                <ul>
+                                    {commitResult.persons_not_taken_over.map((entry, i) => (
+                                        <li key={i}>{entry.person} bleibt im Haushalt „{entry.household}“</li>
+                                    ))}
+                                </ul>
+                            </Alert>
+                        )}
+                        {commitResult.similar_persons.length > 0 && (
+                            <Alert severity="warning" sx={{ mb: 2 }}>
+                                <strong>Neu angelegt, obwohl es eine ähnliche Person im Datenbestand gibt:</strong>
+                                <ul>
+                                    {commitResult.similar_persons.map((entry, i) => (
+                                        <li key={i}>
+                                            {entry.person} – {entry.similar.map(similarPersonText).join('; ')}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </Alert>
+                        )}
+                        {commitResult.member_numbers_not_stored.length > 0 && (
+                            <Alert severity="warning" sx={{ mb: 2 }}>
+                                <strong>Mitgliedsnummer nicht gespeichert, weil sie schon vergeben ist:</strong>
+                                <ul>
+                                    {commitResult.member_numbers_not_stored.map((conflict, i) => (
+                                        <li key={i}>
+                                            {conflict.person}: Nummer {conflict.member_number} trägt
+                                            schon {conflict.holder}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </Alert>
+                        )}
                         {commitResult.skipped_no_match > 0 && (
                             <Alert severity="info" sx={{ mb: 2 }}>
                                 <strong>{commitResult.skipped_no_match}</strong> Datensätze ohne
-                                zugeordneten Haushalt wurden nicht übernommen — der Haushaltsbogen
-                                legt keine neuen Haushalte an.
+                                zugeordneten Haushalt wurden nicht übernommen.
                             </Alert>
                         )}
                         {commitResult.wishes_not_applied.length > 0 && (
@@ -350,6 +454,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                     title={`Haushalt zuordnen: ${matchingFor.persons[0]?.name ?? '—'}`}
                     description={`Personen im importierten Haushalt: ${matchingFor.persons.map((p) => `${p.name} (MitglNr: ${p.member_number || '—'})`).join(', ')}`}
                     candidates={matchingFor.match_result.fuzzy_candidates || []}
+                    allOptions={allHouseholds}
                     createButtonLabel="Nicht zuordnen (überspringen)"
                     onClose={() => setMatchingFor(null)}
                     onSelect={(householdId, name) => {
