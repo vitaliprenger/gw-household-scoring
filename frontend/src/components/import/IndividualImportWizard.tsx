@@ -115,7 +115,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                 {step === 0 && (
                     <Box>
                         <Typography variant="h6" gutterBottom>Analyse-Ergebnis</Typography>
-                        <Box sx={{ display: 'flex', gap: 3, mb: 2 }}>
+                        <Box sx={{ display: 'flex', columnGap: 3, rowGap: 0.5, mb: 2, flexWrap: 'wrap' }}>
                             <Typography>Gesamt: <strong>{analysis.total_rows}</strong></Typography>
                             <Typography>Nicht abgesendet: <strong>{analysis.skipped_not_submitted}</strong></Typography>
                             <Typography>Dubletten: <strong>{analysis.skipped_duplicates}</strong></Typography>

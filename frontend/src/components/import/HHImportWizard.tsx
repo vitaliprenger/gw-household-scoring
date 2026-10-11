@@ -156,7 +156,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                 {step === 0 && (
                     <Box>
                         <Typography variant="h6" gutterBottom>Analyse-Ergebnis</Typography>
-                        <Box sx={{ display: 'flex', gap: 3, mb: 2 }}>
+                        <Box sx={{ display: 'flex', columnGap: 3, rowGap: 0.5, mb: 2, flexWrap: 'wrap' }}>
                             <Typography>Gesamt: <strong>{analysis.total_rows}</strong> Zeilen</Typography>
                             <Typography>Übersprungen (nicht abgesendet): <strong>{analysis.skipped_not_submitted}</strong></Typography>
                             <Typography>Dubletten: <strong>{analysis.skipped_duplicates}</strong></Typography>
@@ -190,7 +190,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
                             <Table size="small">
                                 <TableHead>
                                     <TableRow>
-                                        <TableCell>Personen (Vorname | Nachname)</TableCell>
+                                        <TableCell sx={{ minWidth: 180 }}>Personen (Vorname | Nachname)</TableCell>
                                         <TableCell>Match</TableCell>
                                         <TableCell>Status</TableCell>
                                         <TableCell>Hinweise</TableCell>
