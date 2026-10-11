@@ -5,6 +5,10 @@ Diese Daten wurden früher beim Start der Anwendung in eine leere Datenbank
 geschrieben. Die Anwendung startet jetzt mit einer leeren Datenbank; die
 Beispieldaten leben nur noch hier und werden ausschließlich von den Tests
 benutzt.
+
+Die Personen und Haushalte sind frei erfunden. Hier gehören keine echten
+Angaben hinein, auch nicht aus den Import-Dateien: Das Repository ist
+öffentlich.
 """
 import os
 import sys
@@ -216,9 +220,9 @@ def seed_example_data(db: Session):
     # Zwei Bewohner-Haushalte wollen wechseln, einer möchte ein Joker-Zimmer.
     # Hier entscheidet nicht das Scoring, sondern das Datum des Wunsches.
     resident_applications = [
-        ("Ingrid Sommerfeld",      "wechselwunsch", "2,5 A",  _d(2023, 4, 12),  "möchte sich verkleinern"),
-        ("Hannelore Petzold",   "wechselwunsch", "2,5 A",  _d(2024, 10, 2), None),
-        ("Lukas Wiegand",  "joker",         "Joker",  _d(2024, 2, 19),  None),
+        ("Ingrid Sommerfeld", "wechselwunsch", "2,5 A",  _d(2023, 4, 12), "möchte sich verkleinern"),
+        ("Hannelore Petzold", "wechselwunsch", "2,5 A",  _d(2024, 10, 2), None),
+        ("Lukas Wiegand",     "joker",         "Joker",  _d(2024, 2, 19), None),
     ]
     for name, kind, wish, requested, note in resident_applications:
         wish_list, _ = parse_wish(wish)
