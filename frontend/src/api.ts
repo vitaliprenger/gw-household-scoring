@@ -20,9 +20,6 @@ import {
     Application,
     ApartmentCategory,
     JokerWaitEntry,
-    ApplicationAnalysisResponse,
-    ApplicationCommitRequest,
-    ApplicationCommitResponse,
     BreakdownTarget,
     HouseholdBreakdown,
     ManualOverrides,
@@ -292,18 +289,3 @@ export const commitVcf = async (request: VcfCommitRequest): Promise<VcfCommitRes
     return response.data;
 };
 
-export const analyzeApplicationList = async (file: File): Promise<ApplicationAnalysisResponse> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const response = await api.post<ApplicationAnalysisResponse>('/import/applications/analyze', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data;
-};
-
-export const commitApplicationList = async (
-    request: ApplicationCommitRequest,
-): Promise<ApplicationCommitResponse> => {
-    const response = await api.post<ApplicationCommitResponse>('/import/applications/commit', request);
-    return response.data;
-};

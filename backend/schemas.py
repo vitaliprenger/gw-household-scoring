@@ -16,7 +16,15 @@ class PersonBase(BaseModel):
     member_since: Optional[datetime] = None
 
 class PersonCreate(PersonBase):
-    pass
+    #: Haushalt, in dem die Person sofort steht; ohne Angabe hat sie keinen
+    household_id: Optional[int] = None
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def _name_required(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Vor- und Nachname sind Pflicht")
+        return value.strip()
 
 class PersonUpdate(BaseModel):
     first_name: Optional[str] = None
@@ -318,12 +326,46 @@ class PersonMissingData(BaseModel):
     missing: List[MissingValue] = []
 
 # --- Import Schemas ---
+class SimilarPerson(BaseModel):
+    """Person des Datenbestands, die einer neu anzulegenden ähnlich ist."""
+    name: str
+    household: Optional[str] = None
+    #: ``member_number`` | ``same_name`` | ``birth_date``
+    reason: str
+
+class MemberNumberConflict(BaseModel):
+    """Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde."""
+    person: str
+    member_number: str
+    #: Wer die Nummer schon trägt
+    holder: str
+
 class ImportPersonPreview(BaseModel):
     name: str
+    #: Vor- und Nachname so, wie sie gespeichert würden
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     member_number: Optional[str] = None
     birth_date: Optional[str] = None
+    #: Was mit der Person geschieht, bezogen auf den vorgeschlagenen Haushalt:
+    #: ``in_household`` | ``assign`` | ``other_household`` | ``new``
+    status: str = "new"
+    #: Bei ``other_household``: der Haushalt, in dem die Person bleibt
+    other_household: Optional[str] = None
+    #: Bei ``new``: ähnliche Personen im Datenbestand
+    similar: List[SimilarPerson] = []
+    #: Wer die Mitgliedsnummer schon trägt; sie wird dann nicht gespeichert
+    member_number_holder: Optional[str] = None
+
+class PersonNotTakenOver(BaseModel):
+    """Person eines Bogens, die in ihrem bisherigen Haushalt bleibt."""
+    person: str
+    household: str
+
+class SimilarPersonNotice(BaseModel):
+    """Neu angelegte Person, zu der es ähnliche im Datenbestand gibt."""
+    person: str
+    similar: List[SimilarPerson]
 
 class FuzzyCandidate(BaseModel):
     household_id: int
@@ -336,23 +378,12 @@ class FuzzyCandidate(BaseModel):
 #:
 #: * ``exact_member_nr`` — eindeutige Mitgliedsnummer,
 #: * ``exact_name_dob`` — exakt übereinstimmender Personenname (mit oder ohne
-#:   bestätigendes Geburtsdatum),
-#: * ``exact_household_name`` — Haushaltsname, der genau übereinstimmt und im
-#:   Bestand nur einmal vorkommt,
-#: * ``apartment_unit`` — der Namenstreffer wohnt zusätzlich in der Wohnung, die
-#:   die Zeile nennt (die Wohnung **bestätigt** den Treffer).
+#:   bestätigendes Geburtsdatum).
 #:
 #: Bewusst über die **Art** entschieden und nicht über ``confidence``: Ein
 #: unscharfer Namensvergleich erreicht leicht einen Wert von 0.9 und mehr; eine
 #: reine Zahlenschwelle würde ihn deshalb zu einem sicheren Treffer machen.
-#:
-#: Nicht darin: ``apartment_occupant`` — in der genannten Wohnung wohnt jemand,
-#: dessen Name nicht zur Zeile passt. Das ist ein Hinweis, keine Zuordnung: Bei
-#: einer erfüllten Bewerbung ist der Bewerber ausgezogen und die Wohnung
-#: längst neu belegt.
-CERTAIN_MATCH_TYPES = frozenset({
-    "exact_member_nr", "exact_name_dob", "exact_household_name", "apartment_unit",
-})
+CERTAIN_MATCH_TYPES = frozenset({"exact_member_nr", "exact_name_dob"})
 
 
 class MatchResult(BaseModel):
@@ -362,7 +393,7 @@ class MatchResult(BaseModel):
     Zuordnung **vorauswählen** darf: nur ein eindeutiger Treffer (siehe
     :data:`CERTAIN_MATCH_TYPES`). Ein **ähnlicher** Name bleibt dagegen ein
     Vorschlag, über den ein Mensch entscheidet. Das Feld wird zentral berechnet,
-    damit keine der vier Treffer-Quellen es vergessen kann.
+    damit keine der Treffer-Quellen es vergessen kann.
     """
     type: str
     matched_household_id: Optional[int] = None
@@ -405,6 +436,18 @@ class HouseholdImportPreview(BaseModel):
     member_count_mismatch: bool = False
     already_imported: bool = False
     existing_data_changes: Optional[ExistingDataChanges] = None
+    #: Der vorgeschlagene Haushalt ist ein Bewohner-Haushalt: Sein Wunsch wird
+    #: nicht übernommen, ein Wechselwunsch wird von Hand angelegt.
+    wish_not_applied: bool = False
+    #: Name, den ein neu angelegter Haushalt bekäme
+    suggested_household_name: str = ""
+    #: Was mit jeder Person geschähe, wenn der Bogen einen neuen Haushalt anlegt
+    persons_if_created: List[ImportPersonPreview] = []
+    #: Mindestens eine Person käme in den neuen Haushalt; sonst entstünde ein
+    #: Haushalt ohne Person, und „Neu anlegen“ ist nicht zulässig.
+    create_allowed: bool = False
+    #: Keine Person des Bogens nennt eine Mitgliedsnummer
+    no_member_number: bool = False
 
 class PrivacyWarning(BaseModel):
     row: int
@@ -416,7 +459,6 @@ class HHAnalysisResponse(BaseModel):
     skipped_not_submitted: int
     skipped_duplicates: int = 0
     privacy_warnings: List[PrivacyWarning] = []
-    missing_base_data_warning: bool = False
     households: List[HouseholdImportPreview] = []
 
 class HouseholdDecision(BaseModel):
@@ -433,6 +475,16 @@ class HHCommitResponse(BaseModel):
     updated: int
     skipped: int
     skipped_no_match: int = 0
+    #: Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde
+    wishes_not_applied: List[str] = []
+    households_created: int = 0
+    applications_created: int = 0
+    persons_created: int = 0
+    #: Personen, die ohne Haushalt im Datenbestand standen und zugeordnet wurden
+    persons_assigned: int = 0
+    persons_not_taken_over: List[PersonNotTakenOver] = []
+    member_numbers_not_stored: List[MemberNumberConflict] = []
+    similar_persons: List[SimilarPersonNotice] = []
 
 class IndividualImportPreview(BaseModel):
     temp_id: str
@@ -441,6 +493,12 @@ class IndividualImportPreview(BaseModel):
     last_name: str
     birth_date: Optional[str] = None
     member_number: Optional[str] = None
+    member_since: Optional[str] = None
+    #: Wert der Spalte „Mitglied seit“, der nicht als Datum angenommen wurde
+    member_since_rejected: Optional[str] = None
+    #: Eine andere Person trägt die Mitgliedsnummer der Zeile schon; sie wird
+    #: bei der vorgeschlagenen Person nicht ergänzt.
+    member_number_holder: Optional[str] = None
     timestamp: str
     gender: Optional[str] = None
     occupation: Optional[str] = None
@@ -458,7 +516,6 @@ class IndividualAnalysisResponse(BaseModel):
     skipped_not_submitted: int
     skipped_duplicates: int = 0
     privacy_warnings: List[PrivacyWarning] = []
-    missing_base_data_warning: bool = False
     individuals: List[IndividualImportPreview] = []
 
 class IndividualDecision(BaseModel):
@@ -476,126 +533,49 @@ class IndividualCommitResponse(BaseModel):
     updated: int
     skipped: int
     skipped_no_match: int = 0
+    member_numbers_not_stored: List[MemberNumberConflict] = []
 
-# --- Bewerbungslisten-Import Schemas ---
-class ApplicationPersonCandidate(BaseModel):
-    """Vorhandene Person ohne Haushalt, die zum Namen der Zeile passt."""
-    person_id: int
-    name: str
-    member_number: Optional[str] = None
-    score: float = 0.0
+# --- Mitgliederliste (vCard) ---
+class MemberListFills(BaseModel):
+    """Leere Angaben, die die Mitgliederliste füllt."""
+    #: Personen, bei denen mindestens eine Angabe gefüllt wird
+    persons: int = 0
+    birth_date: int = 0
+    member_since: int = 0
+    member_number: int = 0
+    gender: int = 0
 
-class ApplicationImportPreview(BaseModel):
-    temp_id: str
-    row: int
-    raw_household: str                              # Spalte "Haushalt"
-    kind: str                                       # wartepool | wechselwunsch | joker
-    raw_kind: Optional[str] = None
-    requested_at: Optional[str] = None              # "Mail / Info von"
-    wishes: List[ApplicationWish] = []
-    #: Teile der Wunsch-Zelle, die der Parser nicht auflösen konnte
-    unparsed_wishes: List[str] = []
-    status: str = "offen"
-    raw_status: Optional[str] = None
-    note: Optional[str] = None
-    #: Nur zum Abgleich im Assistenten -- wird nicht gespeichert
-    raw_current_type: Optional[str] = None
-    raw_current_unit: Optional[str] = None
-    raw_new_unit: Optional[str] = None
-    match_result: MatchResult
-    #: Der Haushalt wohnt laut Tool in einer anderen Wohnung als die Liste nennt
-    apartment_mismatch: bool = False
-    #: Wohnungsnummer der Liste existiert nicht in den Stammdaten
-    unknown_apartment: bool = False
-    #: Es gibt bereits eine offene Bewerbung dieser Art -- "Aktualisieren" möglich
-    existing_application_id: Optional[int] = None
-    #: Vorschlag für "Haushalt neu anlegen": passende Personen ohne Haushalt
-    person_candidates: List[ApplicationPersonCandidate] = []
-    suggested_household_name: str = ""
+class MemberSinceDeviation(BaseModel):
+    """„Mitglied seit“ der Mitgliederliste weicht vom gespeicherten Wert ab.
 
-class ApplicationAnalysisResponse(BaseModel):
-    session_id: str
-    total_rows: int
-    skipped_empty: int = 0
-    households: List[ApplicationImportPreview] = []
-
-class ApplicationDecision(BaseModel):
-    temp_id: str
-    #: "update" | "create" (bestehender Haushalt) | "create_household" | "skip"
-    action: str
-    target_household_id: Optional[int] = None
-    #: Nur bei "create_household": Name und die zuzuordnenden Personen ohne Haushalt
-    household_name: Optional[str] = None
-    person_ids: List[int] = []
-
-class ApplicationCommitRequest(BaseModel):
-    session_id: str
-    decisions: List[ApplicationDecision]
-
-class ApplicationCommitResponse(BaseModel):
-    applications_created: int = 0
-    applications_updated: int = 0
-    households_created: int = 0
-    persons_assigned: int = 0
-    skipped: int = 0
-    skipped_no_match: int = 0
-    created_household_ids: List[int] = []
-
-# --- VCF-Import Schemas ---
-class VcfPersonPreview(BaseModel):
-    temp_id: str
-    name: str
-    first_name: str
-    last_name: str
-    birth_date: Optional[str] = None
-    gender: Optional[str] = None
-    member_number: Optional[str] = None
-    member_since: Optional[str] = None
-    apartment_unit: Optional[str] = None
-    role: str
-    source: str
-    mentioned_by: Optional[str] = None
-
-class VcfHouseholdPreview(BaseModel):
-    temp_id: str
-    name: str
-    apartment_unit: Optional[str] = None
-    address: Optional[str] = None
-    is_resident: bool = False
-    timestamp: Optional[str] = None
-    persons: List[VcfPersonPreview] = []
-    match_result: MatchResult
-    already_imported: bool = False
-    warnings: List[str] = []
-    existing_data_changes: Optional[ExistingDataChanges] = None
+    Nur zur Anzeige: Die Mitgliederliste überschreibt nichts (ADR 0011).
+    """
+    person: str
+    household: Optional[str] = None
+    stored: str
+    member_list: str
+    days: int
 
 class VcfAnalysisResponse(BaseModel):
     session_id: str
     total_cards: int
     skipped_no_name: int = 0
-    total_persons: int = 0
-    resident_households: int = 0
-    households: List[VcfHouseholdPreview] = []
-
-class VcfDecision(BaseModel):
-    temp_id: str
-    action: str
-    target_household_id: Optional[int] = None
-    excluded_person_temp_ids: List[str] = []
+    #: Karten ohne sicheren Treffer; sie bewirken nichts
+    unmatched_cards: int = 0
+    #: Karten mit sicherem Treffer, bei dem nichts fehlt
+    unchanged_cards: int = 0
+    fills: MemberListFills = MemberListFills()
+    #: Größte Abweichung zuerst
+    member_since_deviations: List[MemberSinceDeviation] = []
+    member_numbers_not_stored: List[MemberNumberConflict] = []
 
 class VcfCommitRequest(BaseModel):
     session_id: str
-    decisions: List[VcfDecision]
 
 class VcfCommitResponse(BaseModel):
-    households_created: int
-    households_updated: int
-    households_skipped: int
-    persons_created: int
-    persons_updated: int
-    persons_assigned: int
-    persons_without_household: int = 0
-    created_household_ids: List[int] = []
+    fills: MemberListFills = MemberListFills()
+    unmatched_cards: int = 0
+    member_numbers_not_stored: List[MemberNumberConflict] = []
 
 
 # --- Punkteaufschlüsselung (Transparenz des Scorings) ---

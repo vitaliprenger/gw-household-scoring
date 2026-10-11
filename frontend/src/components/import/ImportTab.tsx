@@ -2,15 +2,13 @@ import { useState } from 'react';
 import {
     Box, Typography, Paper, Button, Alert, CircularProgress,
 } from '@mui/material';
-import { analyzeHHBogen, analyzeIndividualBogen, analyzeVcf, analyzeApplicationList } from '../../api';
+import { analyzeHHBogen, analyzeIndividualBogen, analyzeVcf } from '../../api';
 import {
     HHAnalysisResponse, IndividualAnalysisResponse, VcfAnalysisResponse,
-    ApplicationAnalysisResponse,
 } from '../../types';
 import HHImportWizard from './HHImportWizard';
 import IndividualImportWizard from './IndividualImportWizard';
 import VcfImportWizard from './VcfImportWizard';
-import ApplicationImportWizard from './ApplicationImportWizard';
 
 interface ImportTabProps {
     onImportComplete: () => void;
@@ -29,28 +27,7 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
     const [vcfWizardOpen, setVcfWizardOpen] = useState(false);
     const [vcfLoading, setVcfLoading] = useState(false);
 
-    const [appAnalysis, setAppAnalysis] = useState<ApplicationAnalysisResponse | null>(null);
-    const [appWizardOpen, setAppWizardOpen] = useState(false);
-    const [appLoading, setAppLoading] = useState(false);
-
     const [error, setError] = useState('');
-
-    async function handleApplicationUpload(event: React.ChangeEvent<HTMLInputElement>) {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        setAppLoading(true);
-        setError('');
-        try {
-            const result = await analyzeApplicationList(file);
-            setAppAnalysis(result);
-            setAppWizardOpen(true);
-        } catch (e: any) {
-            setError(e?.response?.data?.detail || 'Analyse fehlgeschlagen');
-        } finally {
-            setAppLoading(false);
-            event.target.value = '';
-        }
-    }
 
     async function handleHHUpload(event: React.ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0];
@@ -110,85 +87,62 @@ export default function ImportTab({ onImportComplete }: ImportTabProps) {
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
             <Alert severity="info" sx={{ mb: 3 }}>
-                Die Reihenfolge ist verbindlich: Die <strong>Mitgliederliste (vCard)</strong> legt
-                Personen und — bei erkannter Wohnungszuordnung — Haushalte an. Die beiden
-                Fragebögen <strong>ergänzen anschließend nur noch</strong> vorhandene Personen
-                bzw. Haushalte; sie legen selbst nichts Neues an.
+                Im Regelbetrieb lesen wir zwei Fragebögen ein, in dieser Reihenfolge: erst den{' '}
+                <strong>Haushaltsbogen</strong>, dann den <strong>Individualbogen</strong>. Der
+                Haushaltsbogen legt bei Bedarf neue Haushalte mit ihren Personen an, der
+                Individualbogen ergänzt die Angaben dieser Personen.
             </Alert>
 
             <Paper sx={{ p: 3, mb: 3 }}>
-                <Typography variant="h6" gutterBottom>1. Mitgliederliste (vCard) importieren</Typography>
+                <Typography variant="h6" gutterBottom>1. Haushaltsbogen importieren</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Grundlage für alle weiteren Importe. Legt aus dem Adressbuch-Export (.vcf) alle
-                    enthaltenen Personen an — inklusive der im Notizfeld genannten Partner*innen und
-                    Kinder (Name + Geburtsdatum) — und übernimmt Mitgliedsnummer, Geburtsdatum,
-                    Geschlecht sowie das Datum des Aufnahmegesprächs als Beginn der Mitgliedschaft.
-                    Vorhandene Personen werden mit den vCard-Daten überschrieben; leere Felder
-                    überschreiben nichts. Ein Haushalt entsteht nur bei erkannter Wohnungsnummer:
-                    alle Personen derselben Wohnung bilden einen Haushalt und gelten als aktuelle
-                    Bewohner. Alle übrigen Personen bleiben ohne Haushalt.
+                    Ergänzt bestehende Haushalte um die Angaben aus dem Haushaltsbogen
+                    (Excel .xlsx): WBS-Status, Wunsch, Haustiere und finanzielle
+                    Rahmenbedingungen. Für Bögen ohne passenden Haushalt lässt sich im
+                    Assistenten je Zeile ein neuer Haushalt mit Personen und
+                    Wartepool-Bewerbung anlegen. Erkennt automatisch das alte (LimeSurvey) und
+                    das neue (Nextcloud Forms) Format.
                 </Typography>
-                <Button variant="contained" component="label" disabled={vcfLoading}>
-                    {vcfLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                    vCard-Datei hochladen
-                    <input type="file" hidden onChange={handleVcfUpload} accept=".vcf,.vcard" />
+                <Button variant="contained" component="label" disabled={hhLoading}>
+                    {hhLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                    Haushaltsbogen hochladen
+                    <input type="file" hidden onChange={handleHHUpload} accept=".xlsx" />
                 </Button>
             </Paper>
 
             <Paper sx={{ p: 3, mb: 3 }}>
                 <Typography variant="h6" gutterBottom>2. Individualbogen importieren</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Ergänzt individuelle Personeninformationen (Geschlecht, Beruf, Bildung etc.)
-                    bei Personen, die vorhanden sind und zugeordnet werden können — auch bei
-                    Personen ohne Haushalt. Neue Personen werden nicht angelegt.
+                    Ergänzt bei vorhandenen Personen Geschlecht, Haupttätigkeit,
+                    Bildungsabschluss, kulturelle Vielfalt und besondere Lebenslagen und trägt
+                    fehlende Angaben wie „Mitglied seit“ nach. Neue Personen werden nicht
+                    angelegt; wer noch keinen Haushaltsbogen hat, erscheint beim nächsten
+                    Einlesen wieder.
                 </Typography>
                 <Button variant="contained" component="label" disabled={indLoading}>
                     {indLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                    Individual-Fragebogen hochladen
+                    Individualbogen hochladen
                     <input type="file" hidden onChange={handleIndUpload} accept=".xlsx" />
                 </Button>
             </Paper>
 
-            <Paper sx={{ p: 3, mb: 3 }}>
-                <Typography variant="h6" gutterBottom>3. Haushaltsbogen importieren</Typography>
+            <Typography variant="overline" color="text.secondary" display="block" sx={{ mt: 4, mb: 1 }}>
+                Nebenfunktion
+            </Typography>
+            <Paper variant="outlined" sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>Mitgliederliste – fehlende Angaben ergänzen</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Ergänzt bestehende Haushalte um die Angaben aus dem Haushaltsbogen-Fragebogen
-                    (Excel .xlsx): WBS-Status, Wohnungswunsch, Haustiere und finanzielle
-                    Rahmenbedingungen. Erkennt automatisch das alte (LimeSurvey) und neue
-                    (Nextcloud Forms) Format. Neue Haushalte werden nicht angelegt.
+                    Liest die Mitgliederliste (vCard, .vcf) und trägt bei vorhandenen Personen
+                    nach, was noch fehlt: Geburtsdatum, Mitglied seit, Mitgliedsnummer und
+                    Geschlecht. Sie überschreibt nichts, legt niemanden an und ändert keine
+                    Haushalte. Du kannst sie jederzeit einlesen, unabhängig von den Fragebögen.
                 </Typography>
-                <Button variant="contained" component="label" disabled={hhLoading}>
-                    {hhLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                    HH-Fragebogen hochladen
-                    <input type="file" hidden onChange={handleHHUpload} accept=".xlsx" />
+                <Button variant="outlined" component="label" disabled={vcfLoading}>
+                    {vcfLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                    Mitgliederliste hochladen
+                    <input type="file" hidden onChange={handleVcfUpload} accept=".vcf,.vcard" />
                 </Button>
             </Paper>
-
-            <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom>4. Bewerbungsliste importieren</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Übernimmt die gepflegte Bewerbungsliste (.xlsx) mit Typ, Wunsch, Datum, Status
-                    und Kommentar. Der Wunsch wird in Wohnungskategorien übersetzt („2,5 A"); nicht
-                    auflösbare Angaben werden im Assistenten ausgewiesen statt stillschweigend
-                    übernommen. Dieser Import <strong>darf Haushalte anlegen</strong> — Wartepool-Bewerber
-                    wohnen noch nicht im Projekt und entstehen deshalb nicht aus der vCard. Vorhandene
-                    Personen ohne Haushalt werden zur Zuordnung vorgeschlagen.
-                </Typography>
-                <Button variant="contained" component="label" disabled={appLoading}>
-                    {appLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                    Bewerbungsliste hochladen
-                    <input type="file" hidden onChange={handleApplicationUpload} accept=".xlsx" />
-                </Button>
-            </Paper>
-
-            {appWizardOpen && appAnalysis && (
-                <ApplicationImportWizard
-                    open={appWizardOpen}
-                    analysis={appAnalysis}
-                    onClose={() => setAppWizardOpen(false)}
-                    onComplete={() => { setAppWizardOpen(false); onImportComplete(); }}
-                />
-            )}
 
             {hhWizardOpen && hhAnalysis && (
                 <HHImportWizard

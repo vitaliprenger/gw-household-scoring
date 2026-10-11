@@ -12,12 +12,12 @@ interface PersonCardProps {
     onRemove?: (person: Person) => void;
 }
 
-const FIELD_LABELS: Record<string, string> = {
+export const FIELD_LABELS: Record<string, string> = {
     first_name: 'Vorname',
     last_name: 'Nachname',
     birth_date: 'Geburtsdatum',
     gender: 'Geschlecht',
-    occupation_type: 'Beruf',
+    occupation_type: 'Haupttätigkeit',
     education_level: 'Bildungsabschluss',
     cultural_background: 'Kultureller Hintergrund',
     special_needs: 'Besondere Lebenslage',
@@ -25,7 +25,7 @@ const FIELD_LABELS: Record<string, string> = {
     member_since: 'Mitglied seit',
 };
 
-const OCCUPATION_OPTIONS: { value: string; label: string }[] = [
+export const OCCUPATION_OPTIONS: { value: string; label: string }[] = [
     { value: '', label: '—' },
     { value: '1', label: 'Organisation, Verwaltung, Recht, Buchhaltung' },
     { value: '2', label: 'Pädagogik, Psychologie, Soziales, Gesundheit, Lehre' },
@@ -45,7 +45,7 @@ const OCCUPATION_LABEL_MAP: Record<string, string> = Object.fromEntries(
     OCCUPATION_OPTIONS.filter(o => o.value).map(o => [o.value, o.label])
 );
 
-const EDUCATION_OPTIONS: { value: string; label: string }[] = [
+export const EDUCATION_OPTIONS: { value: string; label: string }[] = [
     { value: '', label: '—' },
     { value: '1', label: 'Berufsausbildungsvorbereitung' },
     { value: '2', label: 'Hauptschulabschluss' },

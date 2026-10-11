@@ -102,20 +102,12 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-                {analysis.missing_base_data_warning && step === 0 && (
-                    <Alert severity="warning" sx={{ mb: 2 }}>
-                        Es sind noch keine Personen vorhanden. Bitte zuerst die
-                        Mitgliederliste (vCard) importieren — der Individualbogen
-                        ergänzt nur bestehende Personen.
-                    </Alert>
-                )}
-
                 {uncertainCount > 0 && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
-                        <strong>{uncertainCount} Datensatz/Datensätze mit nur ähnlichem Treffer.</strong>{' '}
-                        Nur ein eindeutiger Treffer wird automatisch zugeordnet —
-                        Mitgliedsnummer, exakter Name oder Wohnungsnummer. Ein nur ähnlicher
-                        Name steht auf „Überspringen"; der Vorschlag lässt sich über den
+                        <strong>{uncertainCount} Datensatz/Datensätze mit unsicherem Treffer.</strong>{' '}
+                        Automatisch zugeordnet wird nur bei gleichem Namen oder bei einer
+                        Mitgliedsnummer, zu der Name und Geburtsdatum passen. Alles andere
+                        steht auf „Überspringen"; der Vorschlag lässt sich über den
                         Treffer-Chip prüfen und übernehmen.
                     </Alert>
                 )}
@@ -123,7 +115,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                 {step === 0 && (
                     <Box>
                         <Typography variant="h6" gutterBottom>Analyse-Ergebnis</Typography>
-                        <Box sx={{ display: 'flex', gap: 3, mb: 2 }}>
+                        <Box sx={{ display: 'flex', columnGap: 3, rowGap: 0.5, mb: 2, flexWrap: 'wrap' }}>
                             <Typography>Gesamt: <strong>{analysis.total_rows}</strong></Typography>
                             <Typography>Nicht abgesendet: <strong>{analysis.skipped_not_submitted}</strong></Typography>
                             <Typography>Dubletten: <strong>{analysis.skipped_duplicates}</strong></Typography>
@@ -151,6 +143,7 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                         <TableCell>Name</TableCell>
                                         <TableCell>MitglNr.</TableCell>
                                         <TableCell>Geburtsdatum</TableCell>
+                                        <TableCell>Mitglied seit</TableCell>
                                         <TableCell>Match</TableCell>
                                         <TableCell>Status</TableCell>
                                         <TableCell>Aktion</TableCell>
@@ -172,20 +165,42 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                                 sx={inactive ? { opacity: 0.5, bgcolor: 'action.hover' } : undefined}
                                             >
                                                 <TableCell>{ind.name}</TableCell>
-                                                <TableCell>{ind.member_number || '—'}</TableCell>
+                                                <TableCell>
+                                                    {ind.member_number || '—'}
+                                                    {/* Gilt für die vorgeschlagene Person; nach der Zuordnung
+                                                        zu einer anderen zählt die Zusammenfassung. */}
+                                                    {ind.member_number_holder
+                                                        && (dec?.target_person_id ?? ind.match_result.matched_household_id)
+                                                            === ind.match_result.matched_household_id && (
+                                                        <Tooltip title={`Diese Mitgliedsnummer trägt schon ${ind.member_number_holder}. Sie wird hier nicht ergänzt.`}>
+                                                            <Chip label="vergeben" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
+                                                        </Tooltip>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell>{ind.birth_date || '—'}</TableCell>
+                                                <TableCell>
+                                                    {ind.member_since || '—'}
+                                                    {ind.member_since_rejected && (
+                                                        <Tooltip title={`„${ind.member_since_rejected}“ ist kein vollständiges Datum oder liegt in der Zukunft. Der Wert wird nicht übernommen.`}>
+                                                            <Chip label="nicht übernommen" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
+                                                        </Tooltip>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell>
                                                     {(() => {
                                                         const overrideName = matchOverrides[ind.temp_id];
+                                                        const matchName = ind.match_result.matched_household_name ?? 'Match';
                                                         return (
                                                             <Chip
                                                                 label={overrideName
                                                                     ? `Zugeordnet: ${overrideName}`
                                                                     : mt === 'none'
                                                                         ? 'Kein Match'
-                                                                        : `${ind.match_result.matched_household_name ?? 'Match'}`}
+                                                                        : mt === 'member_nr_unconfirmed'
+                                                                            ? `${matchName} (nur Mitgliedsnummer)`
+                                                                            : matchName}
                                                                 size="small"
-                                                                color={overrideName ? 'info' : mt === 'exact_member_nr' || mt === 'exact_name_dob' ? 'success' : mt === 'fuzzy' ? 'warning' : 'default'}
+                                                                color={overrideName ? 'info' : isCertainMatch(ind.match_result) ? 'success' : isUncertainMatch(ind.match_result) ? 'warning' : 'default'}
                                                                 onClick={() => setMatchingFor(ind)}
                                                             />
                                                         );
@@ -248,6 +263,19 @@ export default function IndividualImportWizard({ open, analysis, onClose, onComp
                                 <strong>{commitResult.skipped_no_match}</strong> Datensätze ohne
                                 zugeordnete Person wurden nicht übernommen — der Individualbogen
                                 legt keine neuen Personen an.
+                            </Alert>
+                        )}
+                        {commitResult.member_numbers_not_stored.length > 0 && (
+                            <Alert severity="warning" sx={{ mt: 2 }}>
+                                <strong>Mitgliedsnummer nicht eingetragen, weil sie schon vergeben ist:</strong>
+                                <ul>
+                                    {commitResult.member_numbers_not_stored.map((conflict, i) => (
+                                        <li key={i}>
+                                            {conflict.person}: Nummer {conflict.member_number} trägt
+                                            schon {conflict.holder}
+                                        </li>
+                                    ))}
+                                </ul>
                             </Alert>
                         )}
                     </Box>

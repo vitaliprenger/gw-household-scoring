@@ -270,78 +270,38 @@ export interface JokerWaitEntry {
     special_case_note?: string;
 }
 
-// --- Bewerbungslisten-Import ---
-
-export interface ApplicationPersonCandidate {
-    person_id: number;
-    name: string;
-    member_number?: string;
-    score: number;
-}
-
-export interface ApplicationImportPreview {
-    temp_id: string;
-    row: number;
-    raw_household: string;
-    kind: ApplicationKind;
-    raw_kind?: string;
-    requested_at?: string;
-    wishes: ApplicationWish[];
-    /** Teile der Wunsch-Zelle, die der Parser nicht auflösen konnte. */
-    unparsed_wishes: string[];
-    status: ApplicationStatus;
-    raw_status?: string;
-    note?: string;
-    raw_current_type?: string;
-    raw_current_unit?: string;
-    raw_new_unit?: string;
-    match_result: MatchResult;
-    apartment_mismatch: boolean;
-    unknown_apartment: boolean;
-    existing_application_id?: number;
-    person_candidates: ApplicationPersonCandidate[];
-    suggested_household_name: string;
-}
-
-export interface ApplicationAnalysisResponse {
-    session_id: string;
-    total_rows: number;
-    skipped_empty: number;
-    households: ApplicationImportPreview[];
-}
-
-export interface ApplicationDecision {
-    temp_id: string;
-    /** "update" | "create" | "create_household" | "skip" */
-    action: string;
-    target_household_id?: number;
-    household_name?: string;
-    person_ids: number[];
-}
-
-export interface ApplicationCommitRequest {
-    session_id: string;
-    decisions: ApplicationDecision[];
-}
-
-export interface ApplicationCommitResponse {
-    applications_created: number;
-    applications_updated: number;
-    households_created: number;
-    persons_assigned: number;
-    skipped: number;
-    skipped_no_match: number;
-    created_household_ids: number[];
-}
-
 // --- Import Types ---
+
+/** Person des Datenbestands, die einer neu anzulegenden ähnlich ist. */
+export interface SimilarPerson {
+    name: string;
+    household?: string;
+    reason: 'member_number' | 'same_name' | 'birth_date';
+}
+
+/** Eine Mitgliedsnummer aus einem Import, die nicht gespeichert wurde. */
+export interface MemberNumberConflict {
+    person: string;
+    member_number: string;
+    /** Wer die Nummer schon trägt. */
+    holder: string;
+}
 
 export interface ImportPersonPreview {
     name: string;
+    /** Vor- und Nachname so, wie sie gespeichert würden. */
     first_name?: string;
     last_name?: string;
     member_number?: string;
     birth_date?: string;
+    /** Was mit der Person geschieht, bezogen auf den vorgeschlagenen Haushalt. */
+    status: 'in_household' | 'assign' | 'other_household' | 'new';
+    /** Bei `other_household`: der Haushalt, in dem die Person bleibt. */
+    other_household?: string;
+    /** Bei `new`: ähnliche Personen im Datenbestand. */
+    similar: SimilarPerson[];
+    /** Wer die Mitgliedsnummer schon trägt; sie wird dann nicht gespeichert. */
+    member_number_holder?: string;
 }
 
 export interface FuzzyCandidate {
@@ -357,7 +317,7 @@ export interface MatchResult {
     matched_household_name?: string;
     confidence: number;
     /**
-     * Eindeutiger Treffer (Mitgliedsnummer, exakter Name oder Wohnungsnummer).
+     * Eindeutiger Treffer (Mitgliedsnummer oder gleicher Name).
      * Nur dann darf ein Assistent die Zuordnung vorauswählen — siehe
      * `components/import/matching.ts`.
      */
@@ -393,6 +353,16 @@ export interface HouseholdImportPreview {
     member_count_mismatch: boolean;
     already_imported: boolean;
     existing_data_changes?: ExistingDataChanges;
+    /** Der vorgeschlagene Haushalt ist ein Bewohner-Haushalt: sein Wunsch wird nicht übernommen. */
+    wish_not_applied: boolean;
+    /** Name, den ein neu angelegter Haushalt bekäme. */
+    suggested_household_name: string;
+    /** Was mit jeder Person geschähe, wenn der Bogen einen neuen Haushalt anlegt. */
+    persons_if_created: ImportPersonPreview[];
+    /** Mindestens eine Person käme in den neuen Haushalt; sonst ist „Neu anlegen“ nicht zulässig. */
+    create_allowed: boolean;
+    /** Keine Person des Bogens nennt eine Mitgliedsnummer. */
+    no_member_number: boolean;
 }
 
 export interface PrivacyWarning {
@@ -406,14 +376,13 @@ export interface HHAnalysisResponse {
     skipped_not_submitted: number;
     skipped_duplicates: number;
     privacy_warnings: PrivacyWarning[];
-    /** Es existieren noch keine Haushalte - bitte zuerst die vCard importieren. */
-    missing_base_data_warning: boolean;
     households: HouseholdImportPreview[];
 }
 
 export interface HouseholdDecision {
     temp_id: string;
-    action: 'update' | 'skip';
+    /** `create` legt einen neuen Haushalt an; nie vorausgewählt. */
+    action: 'update' | 'skip' | 'create';
     target_household_id?: number;
     confirm_data_removals: boolean;
 }
@@ -426,8 +395,20 @@ export interface HHCommitRequest {
 export interface HHCommitResponse {
     updated: number;
     skipped: number;
-    /** Ohne zugeordneten Haushalt - der Import legt keine Haushalte an. */
+    /** „Aktualisieren“ ohne zugeordneten Haushalt. */
     skipped_no_match: number;
+    /** Namen der Bewohner-Haushalte, deren Wunsch nicht übernommen wurde. */
+    wishes_not_applied: string[];
+    households_created: number;
+    applications_created: number;
+    persons_created: number;
+    /** Personen, die ohne Haushalt im Datenbestand standen und zugeordnet wurden. */
+    persons_assigned: number;
+    /** Personen, die in ihrem bisherigen Haushalt bleiben. */
+    persons_not_taken_over: { person: string; household: string }[];
+    member_numbers_not_stored: MemberNumberConflict[];
+    /** Neu angelegte Personen, zu denen es ähnliche im Datenbestand gibt. */
+    similar_persons: { person: string; similar: SimilarPerson[] }[];
 }
 
 export interface IndividualImportPreview {
@@ -437,6 +418,11 @@ export interface IndividualImportPreview {
     last_name: string;
     birth_date?: string;
     member_number?: string;
+    member_since?: string;
+    /** Wert der Spalte „Mitglied seit“, der nicht als Datum angenommen wurde. */
+    member_since_rejected?: string;
+    /** Eine andere Person trägt die Mitgliedsnummer schon; sie wird nicht ergänzt. */
+    member_number_holder?: string;
     timestamp: string;
     gender?: string;
     occupation?: string;
@@ -455,8 +441,6 @@ export interface IndividualAnalysisResponse {
     skipped_not_submitted: number;
     skipped_duplicates: number;
     privacy_warnings: PrivacyWarning[];
-    /** Es existieren noch keine Personen - bitte zuerst die vCard importieren. */
-    missing_base_data_warning: boolean;
     individuals: IndividualImportPreview[];
 }
 
@@ -477,71 +461,52 @@ export interface IndividualCommitResponse {
     skipped: number;
     /** Ohne zugeordnete Person - der Import legt keine Personen an. */
     skipped_no_match: number;
+    member_numbers_not_stored: MemberNumberConflict[];
 }
 
-// --- VCF-Import Types ---
+// --- Mitgliederliste (vCard) ---
 
-export interface VcfPersonPreview {
-    temp_id: string;
-    name: string;
-    first_name: string;
-    last_name: string;
-    birth_date?: string;
-    gender?: string;
-    member_number?: string;
-    member_since?: string;
-    apartment_unit?: string;
-    role: 'member' | 'partner' | 'child';
-    source: 'vcard' | 'note';
-    mentioned_by?: string;
+/** Leere Angaben, die die Mitgliederliste füllt. */
+export interface MemberListFills {
+    /** Personen, bei denen mindestens eine Angabe gefüllt wird. */
+    persons: number;
+    birth_date: number;
+    member_since: number;
+    member_number: number;
+    gender: number;
 }
 
-export interface VcfHouseholdPreview {
-    temp_id: string;
-    name: string;
-    apartment_unit?: string;
-    address?: string;
-    is_resident: boolean;
-    timestamp?: string;
-    persons: VcfPersonPreview[];
-    match_result: MatchResult;
-    already_imported: boolean;
-    warnings: string[];
-    existing_data_changes?: ExistingDataChanges;
+/** „Mitglied seit“ der Mitgliederliste weicht vom gespeicherten Wert ab (nur Anzeige). */
+export interface MemberSinceDeviation {
+    person: string;
+    household?: string;
+    stored: string;
+    member_list: string;
+    days: number;
 }
 
 export interface VcfAnalysisResponse {
     session_id: string;
     total_cards: number;
     skipped_no_name: number;
-    total_persons: number;
-    resident_households: number;
-    households: VcfHouseholdPreview[];
-}
-
-export interface VcfDecision {
-    temp_id: string;
-    /** 'undecided': unsicherer Treffer, über den noch niemand entschieden hat. */
-    action: 'create' | 'update' | 'skip' | 'undecided';
-    target_household_id?: number;
-    excluded_person_temp_ids: string[];
+    /** Karten ohne sicheren Treffer; sie bewirken nichts. */
+    unmatched_cards: number;
+    /** Karten mit sicherem Treffer, bei dem nichts fehlt. */
+    unchanged_cards: number;
+    fills: MemberListFills;
+    /** Größte Abweichung zuerst. */
+    member_since_deviations: MemberSinceDeviation[];
+    member_numbers_not_stored: MemberNumberConflict[];
 }
 
 export interface VcfCommitRequest {
     session_id: string;
-    decisions: VcfDecision[];
 }
 
 export interface VcfCommitResponse {
-    households_created: number;
-    households_updated: number;
-    households_skipped: number;
-    persons_created: number;
-    persons_updated: number;
-    persons_assigned: number;
-    /** Neu angelegte Personen ohne Haushalt (keine Wohnungszuordnung). */
-    persons_without_household: number;
-    created_household_ids: number[];
+    fills: MemberListFills;
+    unmatched_cards: number;
+    member_numbers_not_stored: MemberNumberConflict[];
 }
 
 // --- Ist-Statistik ---

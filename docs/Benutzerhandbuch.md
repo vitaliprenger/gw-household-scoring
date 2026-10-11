@@ -29,11 +29,11 @@ der Regel abweichen, halten wir das an der Bewerbung als Sonderfall fest.
 | **Rangliste** | Wechselwünsche (Vorrang) und Wartepool-Rangliste je Kategorie; Punkte prüfen und vergleichen |
 | **Bewerbungen** | Bewerbungen anlegen, bearbeiten, Status pflegen; darunter die Joker-Warteliste |
 | **Alle Haushalte** | Haushalte suchen und im Detail-Dialog bearbeiten |
-| **Personen** | Personen suchen, Haushalten zuordnen oder aus ihnen entfernen |
+| **Personen** | Personen suchen, von Hand anlegen, Haushalten zuordnen oder aus ihnen entfernen |
 | **Wohnungen** | Wohnungsdaten pflegen, Haushalte einer Wohnung zuordnen |
 | **Ist-Statistik** | Wie setzen sich die aktuellen Bewohner zusammen – verglichen mit den Zielwerten; Prüfliste fehlender Angaben |
 | **Bewertungskonfiguration** | Gewichte, Zielwerte und „Maximale Mitgliedsjahre“ einstellen |
-| **Datenimport** | vCard, Individualbogen, Haushaltsbogen und Bewerbungsliste einlesen |
+| **Datenimport** | Haushaltsbogen und Individualbogen einlesen; Mitgliederliste als Nebenfunktion |
 
 Den Button **„Punkte neu berechnen“** findest du oben in der Kopfzeile – er ist aus jedem Tab
 erreichbar.
@@ -56,34 +56,140 @@ erreichbar.
 
 ## 3. Daten einlesen
 
-Die vier Importe bauen aufeinander auf. **Halte die Reihenfolge ein:**
+Im Regelbetrieb lesen wir zwei Fragebögen ein. **Halte die Reihenfolge ein:**
 
-1. **vCard-Mitgliederliste** (.vcf) – legt die Personen an; Haushalte nur für Personen mit
-   Wohnungsnummer.
-2. **Individualbogen** (.xlsx) – ergänzt Geschlecht, Tätigkeit, Bildung usw. bei den vorhandenen
-   Personen.
-3. **Haushaltsbogen** (.xlsx) – ergänzt WBS-Status, Haustiere usw. bei den vorhandenen Haushalten
-   und überträgt den Wohnungswunsch in die Wartepool-Bewerbung.
-4. **Bewerbungsliste** (.xlsx) – legt Bewerbungen an, wenn nötig auch neue Haushalte.
+1. **Haushaltsbogen** (.xlsx) – ergänzt WBS-Status, Haustiere usw. bei den vorhandenen Haushalten
+   und überträgt den Wunsch in die Wartepool-Bewerbung. Für neue Bewerbende legst du im
+   Assistenten einen neuen Haushalt mit seinen Personen an.
+2. **Individualbogen** (.xlsx) – ergänzt bei diesen Personen Geschlecht, Haupttätigkeit,
+   Bildungsabschluss usw. und trägt „Mitglied seit“ nach.
 
-Jeder Import führt dich durch einen Assistenten: **Analyse → Zuordnung → Zusammenfassung**.
+Die **Mitgliederliste** (.vcf) ist eine Nebenfunktion: Sie trägt nur nach, was bei einer Person
+noch fehlt. Du kannst sie jederzeit einlesen, unabhängig von den Fragebögen.
+
+Wechselwünsche und Joker-Bewerbungen kommen nicht über einen Import. Leg sie im Tab
+**Bewerbungen** von Hand an.
+
+Die Fragebögen führen dich durch einen Assistenten: **Analyse → Zuordnung → Zusammenfassung**.
 Gespeichert wird erst, wenn du den letzten Schritt bestätigst – vorher kannst du also nichts
 kaputt machen.
 
-**Darauf solltest du achten:**
+### Wann automatisch zugeordnet wird
 
 - Automatisch zugeordnet wird nur ein **eindeutiger Treffer** (gleiche Mitgliedsnummer oder
-  genau gleicher Name). Ist ein Treffer nur *ähnlich*, siehst du einen **orangefarbenen Chip**;
-  klickst du darauf, wird er übernommen.
-- Bei vCard und Bewerbungsliste stehen unsichere Zeilen auf **„Bitte entscheiden“**. Du kannst
-  den Import erst abschließen, wenn alle entschieden sind – einzeln oder mit „Alle neu anlegen“ /
-  „Alle überspringen“.
-- Im vCard-Assistenten kannst du Kinder und Partner\*innen, die aus dem Notizfeld erkannt wurden,
-  einzeln abwählen, falls dabei etwas schiefgegangen ist.
-- Die Importe **löschen nie** etwas, und leere Werte überschreiben keine vorhandenen Angaben.
-- Wunschangaben aus der Bewerbungsliste, die nicht erkannt wurden, zeigt dir der Assistent je
-  Zeile an. Schau sie dir an und trag sie bei Bedarf in der Bewerbung nach.
+  gleicher Name). Ist ein Treffer nur *ähnlich*, siehst du einen **orangefarbenen Chip**, und die
+  Zeile steht auf „Überspringen“. Ohne deine Entscheidung bewirkt so eine Zeile nichts.
+- Über den **Treffer-Chip** ordnest du eine Zeile von Hand zu. Der Dialog zeigt zuerst ähnliche
+  Einträge; im Haushaltsbogen findest du über die Suche jeden Haushalt, auch einen, den du gerade
+  erst angelegt hast.
+- **Individualbogen und Haushaltsbogen** ordnen automatisch zu, wenn der Name gleich ist.
+  Reihenfolge, Groß- und Kleinschreibung und die Aufteilung in Vor- und Nachname spielen keine
+  Rolle: „Berger, Anna Maria“ und „Anna Maria Berger“ gelten als derselbe Name. Tragen zwei
+  Personen den Namen oder widersprechen sich die Geburtsdaten, ordnen sie nicht automatisch zu.
+- Eine **Mitgliedsnummer** in einem Fragebogen zählt nur, wenn der Bogen auch einen Vornamen
+  dieser Person nennt und sich die Geburtsdaten nicht widersprechen – oft hat jemand die Nummer
+  eines Angehörigen eingetragen oder sich vertippt. Der gleiche Nachname allein genügt deshalb
+  nicht; ein neuer Nachname, etwa nach einer Heirat, schadet dagegen nicht. Im Individualbogen
+  zeigt der Chip sonst
+  „(nur Mitgliedsnummer)“; prüf, ob wirklich diese Person gemeint ist. Trägt eine andere Person
+  genau den Namen aus dem Bogen, gilt der Name und nicht die Nummer.
+
+### Haushaltsbogen
+
+- Stehen die Personen eines Haushaltsbogens in **verschiedenen Haushalten** (etwa weil zwei
+  Haushalte zusammenziehen oder sich einer trennt), zeigt der Chip **„Mehrere Haushalte“**, und
+  die Zeile steht auf „Überspringen“. Der Bogen würde sonst die Angaben und den Wunsch eines der
+  bisherigen Haushalte ersetzen. Entscheide selbst, zu welchem Haushalt der Bogen gehört.
+- Findet der **Haushaltsbogen** keinen passenden Haushalt, steht die Zeile auf „Überspringen“ und
+  bewirkt nichts. Gehört der Bogen zu neuen Bewerbenden, wähl bei der Zeile **„Neu anlegen“**:
+  Dann entsteht ein Haushalt mit den Personen des Bogens, ihren Angaben und – wenn der Bogen einen
+  Wunsch nennt – einer Wartepool-Bewerbung mit dem Datum des Bogens. Der Haushalt heißt nach den
+  Nachnamen seiner Personen („Yilmaz / Berger“); umbenennen kannst du ihn danach im
+  Haushalts-Dialog. „Neu anlegen“ ist nie vorausgewählt: Wer aufgenommen wird, entscheiden wir.
+- Nennt ein Bogen **keine Mitgliedsnummer**, zeigt der Assistent beim Anlegen einen Hinweis.
+  Vergeben wird nur an Mitglieder – klär vorher, ob jemand aus dem Haushalt Mitglied ist.
+- Steht bei einer Zeile **„Neu anlegen nicht möglich“**, gehören alle Personen des Bogens schon zu
+  anderen Haushalten. Zieh die Personen zuerst im Tab **Personen** um oder lös sie aus ihrem
+  Haushalt, und lies den Bogen dann noch einmal ein.
+- Der Assistent des **Haushaltsbogens** zeigt jede Person mit Vor- und Nachnamen so, wie sie
+  gespeichert würde, und sagt dir, was mit ihr geschieht:
+  - **im Haushalt** – die Person steht schon dort; fehlende Angaben werden ergänzt.
+  - **wird zugeordnet** – die Person steht ohne Haushalt in der Anwendung und kommt in diesen
+    Haushalt. Ihre Angaben, etwa „Mitglied seit“, behält sie.
+  - **bleibt in „…“** – die Person gehört schon zu einem anderen Haushalt. Der Import verschiebt
+    niemanden: Sie wird nicht übernommen, und die Zusammenfassung nennt sie. Zieh sie bei Bedarf
+    im Tab **Personen** von Hand um.
+  - **neu** – die Person wird angelegt.
+- Steht bei einer neuen Person **„ähnliche Person im Datenbestand“**, gibt es schon jemanden mit
+  derselben Mitgliedsnummer, demselben Namen oder demselben Geburtsdatum und einem gemeinsamen
+  Namensteil. Fahr mit der Maus über den Hinweis, um zu sehen, wer das ist und warum. Ist es
+  jemand anderes, übernimm die Zeile. Ist es dieselbe Person, überspring die Zeile und berichtige
+  bei der vorhandenen Person Namen oder Geburtsdatum so, dass sie zum Bogen passen. Lies den
+  Bogen dann noch einmal ein: Jetzt wird die Person gefunden und nicht doppelt angelegt.
+- Die Kennzeichnungen an den Personen gelten für den vorgeschlagenen Haushalt. Ordnest du die
+  Zeile von Hand einem anderen zu, sagt dir die Zusammenfassung, was mit den Personen geschehen
+  ist.
+- **„Wunsch nicht erkannt“** heißt: Der Assistent konnte die Wunschangabe des Bogens nicht oder
+  nur teilweise lesen. Fahr mit der Maus über den Hinweis und trag den Wunsch nach dem Import in
+  der Bewerbung nach; ohne lesbaren Wunsch entsteht keine Bewerbung.
+- Stimmt die Aufteilung in Vor- und Nachname nicht (aus „Berger Anna“ wird der Vorname „Berger“),
+  berichtige den Namen nach dem Import bei der Person.
+- **„Nummer vergeben“** heißt: Die Mitgliedsnummer aus dem Bogen trägt schon eine andere Person.
+  Die Nummer wird dann nicht gespeichert; die Zusammenfassung nennt beide Personen.
+- Der **Haushaltsbogen eines Bewohner-Haushalts** aktualisiert nur dessen Angaben. Er legt keine
+  Bewerbung an und ändert keine vorhandene. Nennt so ein Bogen einen Wunsch, siehst du den Hinweis
+  **„Wunsch nicht übernommen“**, im Assistenten und in der Zusammenfassung. Will der Haushalt
+  wirklich umziehen, leg den Wechselwunsch im Tab **Bewerbungen** von Hand an und trag dort das
+  Datum des Wunsches ein.
+- Der Haushaltsbogen ersetzt die bisherigen Angaben eines Haushalts als Ganzes. Fiele dabei eine
+  Angabe weg, zeigt der Assistent **„Löschungen“** an und lässt sie dich bestätigen.
+
+### Individualbogen
+
+- Der Individualbogen **überschreibt** Geschlecht, Haupttätigkeit, Bildungsabschluss, kulturelle
+  Vielfalt und besondere Lebenslagen, wenn er dazu eine Angabe enthält. Geburtsdatum,
+  Mitgliedsnummer und **„Mitglied seit“** trägt er **nur ein, wenn sie noch fehlen**; den Namen
+  ändert er nie. Stimmt ein vorhandener Wert nicht, berichtige ihn von Hand bei der Person.
+- Ein „Mitglied seit“, das kein vollständiges Datum ist (etwa nur „2019“) oder in der Zukunft
+  liegt, übernimmt der Individualbogen nicht; der Assistent markiert es mit **„nicht übernommen“**.
+  Trag das Datum dann von Hand ein.
+- Trägt schon eine andere Person die Mitgliedsnummer aus dem Bogen, steht daneben **„vergeben“**,
+  und die Nummer wird nicht eingetragen. Die Zusammenfassung nennt solche Fälle noch einmal, auch
+  wenn du die Zeile von Hand einer anderen Person zugeordnet hast. Klär, wem die Nummer gehört.
+- Zeilen des Individualbogens ohne Treffer werden übersprungen. Sie erscheinen beim nächsten
+  Einlesen wieder; der Individualbogen legt nie eine Person an. Fehlt jemand dauerhaft, leg die
+  Person von Hand an (siehe Abschnitt 8).
+
+### Mitgliederliste
+
+- Die Mitgliederliste trägt bei vorhandenen Personen nur ein, was **noch fehlt**: Geburtsdatum,
+  „Mitglied seit“, Mitgliedsnummer und Geschlecht. Sie **überschreibt nichts**, legt niemanden an
+  und ändert keine Haushalte. Was wir in der Anwendung berichtigt haben, bleibt also stehen, auch
+  wenn du die Liste noch einmal einliest.
+- Es gibt nichts zu entscheiden: Der Assistent zeigt, bei wie vielen Personen welche Angaben
+  ergänzt würden, und du bestätigst. Karten, zu denen es in der Anwendung keine Person gibt,
+  bewirken nichts – die meisten Mitglieder haben sich ja nie beworben. Dasselbe gilt, wenn zwei
+  Karten auf dieselbe Person passen, etwa bei zwei Mitgliedern gleichen Namens: Dann trag die
+  Angaben von Hand ein.
+- Trägt schon eine andere Person die Mitgliedsnummer einer Karte, wird die Nummer nicht
+  eingetragen. Der Assistent nennt beide Personen, vor und nach dem Ergänzen. Klär, wem die Nummer
+  gehört.
+- Weicht **„Mitglied seit“** der Mitgliederliste vom gespeicherten Wert ab, listet der Assistent
+  beide Daten auf, die größte Abweichung zuerst. Geändert wird nichts. Stimmt das Datum der
+  Mitgliederliste, trag es von Hand bei der Person ein; das gilt genauso für einen geänderten
+  Namen.
+- Das Eintrittsdatum neuer Mitglieder kommt in der Regel zuerst aus dem Individualbogen, weil nur
+  eine von uns die Mitgliederliste einlesen kann. Die Abweichungsliste ist deshalb der Ort, an
+  dem eine ungenaue Selbstauskunft auffällt.
+
+### Nach jedem Import
+
+- Die Importe **löschen nie** eine Person, einen Haushalt oder eine Bewerbung, und leere Werte
+  überschreiben keine vorhandenen Angaben. Die einzige Ausnahme sind die bestätigten „Löschungen“
+  im Haushaltsbogen.
 - **Klick nach dem Import auf „Punkte neu berechnen“.**
+- Vorsicht mit **„Alle ohne Haushalt löschen“** im Tab Personen: Kein Import legt diese Personen
+  von selbst wieder an. Mit ihnen gehen auch ihre Angaben verloren, etwa „Mitglied seit“.
 
 ---
 
@@ -221,6 +327,13 @@ Wegen der Wohnraumausnutzung – die hängt von der Zimmerzahl ab (siehe Abschni
 **Warum zeigt der Tab „Alle Haushalte“ keine Punkte?**
 Die Grundpunktzahl allein sagt ohne Wohnungsgröße wenig aus. Punkte findest du deshalb nur in der
 Rangliste.
+
+**Wie lege ich eine Person von Hand an?**
+Im Tab **Personen** über **„Person anlegen“**; die Person hat dann noch keinen Haushalt. Soll sie
+gleich zu einem Haushalt gehören, öffne den Haushalt, klick auf „Person hinzufügen“ und dort auf
+**„Neue Person anlegen“**. Pflicht sind nur Vor- und Nachname, alles andere kannst du später
+nachtragen. Gibt es schon jemanden mit demselben Namen oder derselben Mitgliedsnummer, warnt dich
+der Dialog. Ist es wirklich eine andere Person, leg sie mit „Trotzdem anlegen“ an.
 
 **Was ist der Unterschied zwischen Archivieren und Löschen?**
 Archivieren blendet Haushalte oder Personen aus, und du kannst es rückgängig machen; archivierte
