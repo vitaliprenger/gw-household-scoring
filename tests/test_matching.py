@@ -24,7 +24,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend import models, schemas, import_service, vcf_import_service
+from backend import models, schemas, import_service
 
 failures: list[str] = []
 
@@ -201,7 +201,7 @@ def test_individual_name_needs_unique_person_and_consistent_birth_date():
     db = make_session()
     without_birth_date = add_person(db, "Ines", "Ebert")
     with_birth_date = add_person(db, "Stefan", "Kramer", birth_date=datetime(1985, 3, 14))
-    add_person(db, "Jakob Finn", "Dreyer", birth_date=datetime(2021, 3, 14))
+    add_person(db, "Jonas Emil", "Sommer", birth_date=datetime(2020, 2, 2))
     add_person(db, "Jürgen", "Hoffmann")
     add_person(db, "Jürgen", "Hoffmann")
 
@@ -227,7 +227,7 @@ def test_individual_name_needs_unique_person_and_consistent_birth_date():
           f"(typ {result.type})")
 
     result = analyze_individual(
-        db, **{"Nachname, Vorname": "Dreyer, Jakob", "Geburtsdatum": "2021-03-14"})
+        db, **{"Nachname, Vorname": "Sommer, Jonas", "Geburtsdatum": "2020-02-02"})
     check("bloßer Rufname ist NICHT sicher", not result.is_certain, f"(typ {result.type})")
     db.close()
 
@@ -262,6 +262,26 @@ def test_individual_member_number_of_a_parent():
         "Geburtsdatum": "2015-03-02"})
     check("gleicher Nachname, anderes Geburtsdatum ist NICHT sicher",
           not child.is_certain, f"(typ {child.type})")
+    db.close()
+
+
+def test_individual_member_number_needs_a_shared_first_name():
+    print("\n== Individualbogen: Mitgliedsnummer braucht einen gemeinsamen Vornamen ==")
+    db = make_session()
+    # Der Elternteil hat kein Geburtsdatum, und das Kind ist noch nicht erfasst:
+    # Der gemeinsame Nachname allein darf die Nummer nicht bestätigen.
+    moritz = add_person(db, "Moritz", "Bauer", member_number="431")
+
+    child = analyze_individual(db, **{
+        "Nachname, Vorname": "Bauer, Lina", "Mitgliedsnummer": "431"})
+    check("nur der Nachname gemeinsam ist NICHT sicher", not child.is_certain,
+          f"(typ {child.type})")
+
+    renamed = analyze_individual(db, **{
+        "Nachname, Vorname": "Schulze, Moritz", "Mitgliedsnummer": "431"})
+    check_equal("neuer Nachname, gleicher Vorname trifft", renamed.matched_household_id, moritz.id)
+    check("neuer Nachname, gleicher Vorname ist sicher", renamed.is_certain,
+          f"(typ {renamed.type})")
     db.close()
 
 
@@ -352,33 +372,6 @@ def test_undecided_action_does_nothing():
     check("Individualbogen: Geschlecht unverändert", target.gender is None)
     db.close()
 
-    # --- vCard ---
-    db = make_session()
-    hh = seed(db)
-    before_households = db.query(models.Household).count()
-    before_persons = db.query(models.Person).count()
-    raw = {
-        "temp_id": "t1", "name": "Neu Jemand", "apartment_unit": "W.001",
-        "address": None, "timestamp": None,
-        "persons": [{"temp_id": "p1", "first_name": "Neu", "last_name": "Jemand",
-                     "name": "Neu Jemand", "birth_date": None, "gender": None,
-                     "member_number": None, "member_since": None,
-                     "apartment_unit": "W.001", "role": "member", "source": "contact",
-                     "mentioned_by": None}],
-    }
-    session = import_service.ImportSession("vcf", [raw], {})
-    import_service.import_sessions[session.id] = session
-    vcf_result = vcf_import_service.commit_vcf(schemas.VcfCommitRequest(
-        session_id=session.id,
-        decisions=[schemas.VcfDecision(temp_id="t1", action="undecided")],
-    ), db)
-    check_equal("vCard: kein Haushalt angelegt", vcf_result.households_created, 0)
-    check_equal("vCard: als übersprungen gezählt", vcf_result.households_skipped, 1)
-    check_equal("vCard: Bestand unverändert",
-                (db.query(models.Household).count(), db.query(models.Person).count()),
-                (before_households, before_persons))
-    db.close()
-
 
 if __name__ == "__main__":
     test_is_certain_derivation()
@@ -388,6 +381,7 @@ if __name__ == "__main__":
     test_individual_name_needs_unique_person_and_consistent_birth_date()
     test_individual_member_number_needs_matching_name()
     test_individual_member_number_of_a_parent()
+    test_individual_member_number_needs_a_shared_first_name()
     test_individual_same_name_beats_member_number()
     test_individual_member_number_held_by_several_persons()
     test_individual_member_number_ignores_name_particles()

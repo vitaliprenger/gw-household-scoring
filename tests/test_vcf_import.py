@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Tests für den vCard-Import (ohne Datenbank).
+"""Tests für den Parser der Mitgliederliste (vCard, ohne Datenbank).
+
+Was die Mitgliederliste im Datenbestand bewirkt, steht in ``test_member_list.py``.
 
 Aufruf aus dem Projekt-Root:  python tests/test_vcf_import.py
 """
@@ -96,72 +98,37 @@ def test_low_level_parsing():
     check_equal(person["member_number"], "907", "Mitgliedsnummer aus X-WEILERID")
     check_equal(person["birth_date"], "1987-09-11", "Geburtsdatum aus BDAY")
     check_equal(person["gender"], "m", "Geschlecht aus GENDER")
-    check_equal(person["apartment_unit"], "W.202", "Wohnungsnummer aus ADR")
-    check(person["is_resident"], "mit Wohnungsnummer = aktueller Bewohner")
     check_equal(person["member_since"], "2023-03-11", "Mitglied seit = Aufnahmegespräch")
-    check_equal(person["rev"].isoformat(), "2026-01-23T21:08:29", "REV als Zeitstempel")
     # Zeilenfaltung (RFC 6350): die Kategorie steht ueber zwei Zeilen verteilt
-    check("Mailingliste - newsletter" in person["categories"], "gefaltete Zeile zusammengesetzt")
+    categories = next(prop.value for _group, prop in cards[0] if prop.name == "CATEGORIES")
+    check("Mailingliste - newsletter" in categories, "gefaltete Zeile zusammengesetzt")
 
 
-def test_note_extraction():
-    print("NOTE-Auswertung")
+def test_member_since():
+    print("Eintrittsdatum aus Notizfeld und Jahrestag")
     cards = V.parse_vcards(SAMPLE)
-    jannis = V.parse_vcard_person(cards[0])
-
-    check_equal(jannis["partner_names"], ["Svenja Dreyer"], "Partnerin erkannt")
-    check_equal(
-        [(c["first_name"], c["last_name"], c["birth_date"]) for c in jannis["children"]],
-        [("Jakob Finn", "Dreyer", "2021-03-14"), ("Anton Bo", "Dreyer", "2023-10-09")],
-        "zwei Kinder mit Geburtsdatum",
-    )
 
     nina = V.parse_vcard_person(cards[2])
-    check_equal(nina["parent_names"], ["Helga Beispiel"], "Elternteil erkannt")
-    check_equal(nina["children"], [], "'Tochter von X' erzeugt kein Kind")
     check_equal(nina["member_since"], "2018-12-01", "Datum vor dem Stichwort erkannt")
 
     olaf = V.parse_vcard_person(cards[3])
-    check_equal(
-        sorted(c["first_name"] for c in olaf["children"]), ["Emil", "Karl"],
-        "Zwillinge ohne Datum erkannt, '2 Jahre jung' verworfen",
-    )
     check_equal(olaf["member_since"], None, "Label 'Todestag' wird nicht als Beitritt gewertet")
 
 
-def test_household_building():
-    print("Haushaltsbildung")
+def test_one_person_per_card():
+    print("Je Karte eine Person")
     parsed = V.parse_vcf(SAMPLE.encode("utf-8"))
-    check_equal(len(parsed["persons"]), 4, "vier Personen geparst")
-
-    by_unit = {h["apartment_unit"]: h for h in parsed["households"]}
-    dreyer = by_unit.get("W.202")
-    check(dreyer is not None, "Haushalt über Wohnungsnummer gebildet")
-    if dreyer:
-        check_equal(dreyer["name"], "Dreyer", "Haushaltsname aus Nachnamen")
-        check(dreyer["is_resident"], "Haushalt ist Bewohner-Haushalt")
-        check_equal(len(dreyer["persons"]), 4, "2 Mitglieder + 2 Kinder = 4 Personen")
-        check_equal(
-            sorted(p["role"] for p in dreyer["persons"]),
-            ["child", "child", "member", "member"],
-            "Rollen korrekt vergeben",
-        )
-        check_equal(
-            sorted(p["name"] for p in dreyer["persons"] if p["role"] == "child"),
-            ["Anton Bo Dreyer", "Jakob Finn Dreyer"],
-            "von beiden Partnern genannte Kinder nur einmal angelegt",
-        )
-        check_equal(dreyer["rev"].isoformat(), "2026-01-23T21:08:30", "jüngste REV des Haushalts")
-
-    nina = next(h for h in parsed["households"] if h["name"] == "Nina Beispiel")
-    check(not nina["is_resident"], "ohne Wohnungsnummer kein Bewohner")
-    check_equal(len(nina["persons"]), 1, "Elternbeziehung führt zu keiner Zusammenlegung")
+    check_equal(parsed["total_cards"], 4, "vier Karten gezählt")
+    check_equal(
+        sorted(p["name"] for p in parsed["persons"]),
+        sorted(prop.value for card in V.parse_vcards(SAMPLE)
+               for _group, prop in card if prop.name == "FN"),
+        "genau die Personen der Karten, niemand aus den Notizen",
+    )
 
 
 def test_helpers():
     print("Hilfsfunktionen")
-    check_equal(V.split_first_last("Maja Van Daal"), ("Maja", "Van Daal"),
-                "Namenspartikel gehört zum Nachnamen")
     check_equal(V.parse_german_date("30.11. 19"), __import__("datetime").date(2019, 11, 30),
                 "Datum mit Leerzeichen und zweistelligem Jahr")
     check_equal(V.parse_vcf_gender("O"), "d", "GENDER O = divers")
@@ -171,8 +138,8 @@ def test_helpers():
 
 def run_tests():
     print("--- vCard-Import Tests ---")
-    for test in (test_low_level_parsing, test_note_extraction,
-                 test_household_building, test_helpers):
+    for test in (test_low_level_parsing, test_member_since,
+                 test_one_person_per_card, test_helpers):
         test()
     print()
     if FAILURES:

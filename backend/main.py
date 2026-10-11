@@ -155,11 +155,10 @@ def create_person(
     db: Session = Depends(get_db),
     _=Depends(auth.require_auth),
 ):
-    db_person = models.Person(**person.model_dump())
-    db.add(db_person)
-    db.commit()
-    db.refresh(db_person)
-    return db_person
+    try:
+        return services.create_person(db, person)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 @app.delete("/people/unassigned")
 def delete_unassigned_persons(
