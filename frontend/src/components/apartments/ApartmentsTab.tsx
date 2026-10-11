@@ -17,6 +17,8 @@ import ApartmentEditDialog from './ApartmentEditDialog';
 import AssignApartmentDialog from './AssignApartmentDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { zebraGridSx, zebraRowClassName } from '../common/tableStyles';
+import { mobileColumns, mobileGridProps } from '../common/mobileColumns';
+import { useIsMobile } from '../common/useIsMobile';
 
 interface ApartmentsTabProps {
   onShowHousehold: (householdId: number) => void;
@@ -26,6 +28,7 @@ interface ApartmentsTabProps {
 const ALL = '__all__';
 
 export default function ApartmentsTab({ onShowHousehold, onChanged }: ApartmentsTabProps) {
+  const isMobile = useIsMobile();
   const [apartments, setApartments] = useState<Apartment[]>([]);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>(ALL);
@@ -173,6 +176,14 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
       ),
     },
   ], [onShowHousehold]);
+  // Handy: Wohnung, Zimmer und Haushalt passen nebeneinander, die Aktionen schließen an.
+  const gridColumns = isMobile
+    ? mobileColumns(columns, ['unit_number', 'size_rooms', 'household_name', 'actions'], {
+        unit_number: { minWidth: 114 },
+        size_rooms: { width: 76 },
+        household_name: { minWidth: 136 },
+      })
+    : columns;
 
   return (
     <Box>
@@ -223,10 +234,11 @@ export default function ApartmentsTab({ onShowHousehold, onChanged }: Apartments
 
       <DataGrid
         rows={visible}
-        columns={columns}
+        columns={gridColumns}
         autoHeight
         density="compact"
         disableRowSelectionOnClick
+        {...(isMobile ? mobileGridProps : {})}
         initialState={{
           sorting: { sortModel: [{ field: 'unit_number', sort: 'asc' }] },
           pagination: { paginationModel: { pageSize: 100 } },

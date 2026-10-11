@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Paper, Card, CardContent, Table, TableBody, TableCell,
+  Box, Typography, Paper, Card, CardContent, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, ToggleButton, ToggleButtonGroup, Grid, Alert, Button,
 } from '@mui/material';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
@@ -37,50 +37,53 @@ function CategoryCard({ category, mode, onReview }: {
       {hasTargets && category.total > 0 && (
         <TargetDistributionChart category={category} mode={mode} />
       )}
-      <Table size="small" sx={zebraTableSx}>
-        <TableHead>
-          <TableRow>
-            <TableCell>Ausprägung</TableCell>
-            <TableCell align="right">{absolute ? 'Anzahl' : 'Anteil'}</TableCell>
-            {hasTargets && (
-              <>
-                <TableCell align="right">{absolute ? `Ziel (${basisLabel(category)})` : 'Zielwert'}</TableCell>
-                <TableCell align="right">Abweichung</TableCell>
-              </>
-            )}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {category.groups.map(group => (
-            <TableRow key={group.key}>
-              <TableCell>{group.label}</TableCell>
-              <TableCell align="right">{formatValue(group, mode)}</TableCell>
+      {/* Auf schmalen Bildschirmen scrollt die Tabelle seitlich statt die Seite zu verbreitern. */}
+      <TableContainer>
+        <Table size="small" sx={zebraTableSx}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Ausprägung</TableCell>
+              <TableCell align="right">{absolute ? 'Anzahl' : 'Anteil'}</TableCell>
               {hasTargets && (
                 <>
-                  <TableCell align="right" sx={{ color: 'text.secondary' }}>{formatTarget(group, mode)}</TableCell>
-                  <TableCell align="right" sx={{ color: 'text.secondary' }}>{formatDeviation(group, mode)}</TableCell>
+                  <TableCell align="right">{absolute ? `Ziel (${basisLabel(category)})` : 'Zielwert'}</TableCell>
+                  <TableCell align="right">Abweichung</TableCell>
                 </>
               )}
             </TableRow>
-          ))}
-          <TableRow className={NO_ZEBRA_ROW_CLASS}>
-            <TableCell><strong>Summe</strong></TableCell>
-            <TableCell align="right">
-              <strong>
-                {absolute
-                  ? formatCount(category.groups.reduce((sum, g) => sum + g.count, 0))
-                  : formatPercent(category.groups.reduce((sum, g) => sum + g.ratio, 0))}
-              </strong>
-            </TableCell>
-            {hasTargets && (
-              <>
-                <TableCell />
-                <TableCell />
-              </>
-            )}
-          </TableRow>
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {category.groups.map(group => (
+              <TableRow key={group.key}>
+                <TableCell>{group.label}</TableCell>
+                <TableCell align="right">{formatValue(group, mode)}</TableCell>
+                {hasTargets && (
+                  <>
+                    <TableCell align="right" sx={{ color: 'text.secondary' }}>{formatTarget(group, mode)}</TableCell>
+                    <TableCell align="right" sx={{ color: 'text.secondary' }}>{formatDeviation(group, mode)}</TableCell>
+                  </>
+                )}
+              </TableRow>
+            ))}
+            <TableRow className={NO_ZEBRA_ROW_CLASS}>
+              <TableCell><strong>Summe</strong></TableCell>
+              <TableCell align="right">
+                <strong>
+                  {absolute
+                    ? formatCount(category.groups.reduce((sum, g) => sum + g.count, 0))
+                    : formatPercent(category.groups.reduce((sum, g) => sum + g.ratio, 0))}
+                </strong>
+              </TableCell>
+              {hasTargets && (
+                <>
+                  <TableCell />
+                  <TableCell />
+                </>
+              )}
+            </TableRow>
+          </TableBody>
+        </Table>
+      </TableContainer>
       {category.excluded_groups.filter(g => g.count > 0).map(g => (
         <Typography key={g.key} variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
           {formatCount(g.count)} {g.count === 1 ? 'Person' : 'Personen'} {g.label} – nicht berücksichtigt

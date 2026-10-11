@@ -36,6 +36,14 @@ Ohne `APP_ENV` gilt Entwicklung: `housing.db` im Arbeitsverzeichnis, Passwort `g
 - Die Wunschanzeige gibt es zweimal: `backend/wishes.py` und `frontend/src/components/applications/wishes.ts`. Änderungen an beiden vornehmen. `wishes.py` hängt bewusst nur an der Standardbibliothek.
 - Das Frontend ruft das Backend relativ unter `/api` auf; in der Entwicklung leitet der Vite-Proxy weiter und entfernt das Präfix.
 
+### Personendaten
+
+Das Repository ist öffentlich. Echte Angaben zu Mitgliedern, Bewohner\*innen und Bewerber\*innen gehören nicht hinein: nicht in Code, Tests, Kommentare, Dokumentation, Commit-Nachrichten, Issues oder Pull Requests.
+
+- Beispiel- und Testdaten sind frei erfunden: Namen, Geburtsdaten, Mitgliedsnummern, Kontaktdaten, Eintrittsdaten und Freitexte. Nichts aus `imported_data/` oder `housing.db` übernehmen, auch nicht gekürzt oder als Beispiel in einem Kommentar.
+- Erfundene Personen nicht in die Wohnung hängen, in der ihr echtes Vorbild wohnt. Echte Fälle nur als Muster beschreiben („Bewerber zieht um, Nachmieter folgt“), nicht mit ihren Daten nachbauen.
+- Datenbanken, Sicherungen und Import-Dateien werden nicht versioniert. Vor jedem Commit prüfen, dass keine dabei ist; `.gitignore` fängt nur die üblichen Endungen ab.
+
 ### Tests
 
 Alle Tests: `python -m pytest` (aus dem Projekt-Root; Abhängigkeiten aus `backend/requirements-dev.txt`). Einzelne Datei oder einzelner Test: `python -m pytest tests/test_<name>.py -k <test>`. Die Tests laufen ohne Server gegen eine In-Memory-Datenbank; `test_migrations.py` und `test_backup.py` nutzen temporäre Dateien. `test_flow.py` braucht ein laufendes Backend, ist von pytest ausgenommen und läuft nur als Skript.

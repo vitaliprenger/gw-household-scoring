@@ -86,7 +86,7 @@ export default function AssignApartmentDialog({
                     isOptionEqualToValue={(a, b) => a.id === b.id}
                     renderOption={(props, hh) => (
                         <li {...props} key={hh.id}>
-                            {hh.name} ({hh.people.length} Personen)
+                            {hh.name} ({hh.people.filter((p) => !p.archived).length} Personen)
                             {hh.apartment_unit ? ` – bisher ${hh.apartment_unit}` : ''}
                         </li>
                     )}

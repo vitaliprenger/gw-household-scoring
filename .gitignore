@@ -13,6 +13,9 @@ frontend/dist/
 *.db
 *.db-wal
 *.db-shm
+*.db.*
+*.sqlite*
+*.bak
 
 # Environment
 .env
@@ -34,5 +37,7 @@ Thumbs.db
 # Test artifacts
 tests/test_data.xlsx
 
-# Imported data
+# Imported data (Mitgliederliste, Fragebögen)
 imported_data/
+*.vcf
+*.xlsx

@@ -15,6 +15,7 @@ import MatchingDialog, { MatchOption } from './MatchingDialog';
 import { isCertainMatch, isUncertainMatch } from './matching';
 import DataChangeDialog from './DataChangeDialog';
 import BogenPersons, { similarPersonText } from './BogenPersons';
+import { useIsMobile } from '../common/useIsMobile';
 
 interface HHImportWizardProps {
     open: boolean;
@@ -45,6 +46,7 @@ function matchColor(match: MatchResult): 'success' | 'warning' | 'info' | 'defau
 }
 
 export default function HHImportWizard({ open, analysis, onClose, onComplete }: HHImportWizardProps) {
+    const isMobile = useIsMobile();
     const [step, setStep] = useState(0);
     const [decisions, setDecisions] = useState<Record<string, HouseholdDecision>>(() => {
         const init: Record<string, HouseholdDecision> = {};
@@ -134,7 +136,7 @@ export default function HHImportWizard({ open, analysis, onClose, onComplete }: 
         <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
             <DialogTitle>Haushaltsbogen importieren</DialogTitle>
             <DialogContent dividers>
-                <Stepper activeStep={step} sx={{ mb: 3 }}>
+                <Stepper activeStep={step} alternativeLabel={isMobile} sx={{ mb: 3 }}>
                     {STEPS.map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
                 </Stepper>
 

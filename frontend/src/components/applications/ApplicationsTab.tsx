@@ -19,6 +19,8 @@ import ApplicationEditDialog from './ApplicationEditDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { wishLabel, formatDate } from './wishes';
 import { zebraGridSx, zebraRowClassName } from '../common/tableStyles';
+import { mobileColumns, mobileGridProps } from '../common/mobileColumns';
+import { useIsMobile } from '../common/useIsMobile';
 
 interface ApplicationsTabProps {
     onShowHousehold: (householdId: number) => void;
@@ -49,6 +51,7 @@ function SpecialCaseMark({ note }: { note?: string | null }) {
 }
 
 export default function ApplicationsTab({ onShowHousehold, onChanged }: ApplicationsTabProps) {
+    const isMobile = useIsMobile();
     const [applications, setApplications] = useState<Application[]>([]);
     const [households, setHouseholds] = useState<Household[]>([]);
     const [joker, setJoker] = useState<JokerWaitEntry[]>([]);
@@ -187,6 +190,12 @@ export default function ApplicationsTab({ onShowHousehold, onChanged }: Applicat
             ),
         },
     ];
+    // Handy: Haushalt und Status passen nebeneinander, die Aktionen schließen an.
+    const gridColumns = isMobile
+        ? mobileColumns(columns, ['household_name', 'status', 'actions'], {
+            household_name: { minWidth: 150 },
+        })
+        : columns;
 
     async function handleDelete() {
         if (!deleteTarget) return;
@@ -251,10 +260,11 @@ export default function ApplicationsTab({ onShowHousehold, onChanged }: Applicat
 
             <DataGrid
                 rows={visible}
-                columns={columns}
+                columns={gridColumns}
                 autoHeight
                 density="compact"
                 disableRowSelectionOnClick
+                {...(isMobile ? mobileGridProps : {})}
                 initialState={{
                     sorting: { sortModel: [{ field: 'requested_at', sort: 'asc' }] },
                     pagination: { paginationModel: { pageSize: 100 } },
